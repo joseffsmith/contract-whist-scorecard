@@ -5,7 +5,8 @@
 // mix order of suits
 // tell you who's turn it is to deal (over multiple games)
 
-import { action, makeAutoObservable, observable, observe, toJS } from "mobx"
+import localforage from "localforage"
+import { action, makeAutoObservable, reaction, toJS } from "mobx"
 
 // starting a game
 /// adding players, name
@@ -16,85 +17,98 @@ import { action, makeAutoObservable, observable, observe, toJS } from "mobx"
 /// made it -> 10 points + bid, don't make it -> 0
 /// total can't add up to the number of cards
 
-type Suit = 'H' | 'C' | 'D' | 'S' | 'NT'
+// type Suit = 'H' | 'C' | 'D' | 'S' | 'NT'
 type Player = {
-  name: string
+  id: number
+  name: string | null
 }
 
 export class DB {
-
-  // stretch, mix up suts
-  turns = [
-    { num_cards: 7, suit: 'H', },
-    { num_cards: 6, suit: 'C', },
-    { num_cards: 5, suit: 'D', },
-    { num_cards: 4, suit: 'S', },
-    { num_cards: 3, suit: 'NT', },
-    { num_cards: 2, suit: 'H', },
-    { num_cards: 1, suit: 'C', },
-    { num_cards: 2, suit: 'D', },
-    { num_cards: 3, suit: 'S', },
-    { num_cards: 4, suit: 'NT', },
-    { num_cards: 5, suit: 'H', },
-    { num_cards: 6, suit: 'C', },
-    { num_cards: 7, suit: 'D', },
-  ]
-
+  turns = new Map([
+    [1, { id: 1, num_cards: 7, suit_colour: 'text-red-500', suit: '♥', }],
+    [2, { id: 2, num_cards: 6, suit_colour: 'text-black', suit: '♣', }],
+    [3, { id: 3, num_cards: 5, suit_colour: 'text-red-500', suit: '♦', }],
+    [4, { id: 4, num_cards: 4, suit_colour: 'text-black', suit: '♠', }],
+    [5, { id: 5, num_cards: 3, suit_colour: 'text-green-500', suit: '🚫', }],
+    [6, { id: 6, num_cards: 2, suit_colour: 'text-red-500', suit: '♥', }],
+    [7, { id: 7, num_cards: 1, suit_colour: 'text-black', suit: '♣', }],
+    [8, { id: 8, num_cards: 2, suit_colour: 'text-red-500', suit: '♦', }],
+    [9, { id: 9, num_cards: 3, suit_colour: 'text-black', suit: '♠', }],
+    [10, { id: 10, num_cards: 4, suit_colour: 'text-green-500', suit: '🚫', }],
+    [11, { id: 11, num_cards: 5, suit_colour: 'text-red-500', suit: '♥', }],
+    [12, { id: 12, num_cards: 6, suit_colour: 'text-black', suit: '♣', }],
+    [13, { id: 13, num_cards: 7, suit_colour: 'text-red-500', suit: '♦', }],
+  ])
   data_keys = ['players']
+  default_players = new Map([
+    [1, { id: 1, name: null }],
+    [2, { id: 2, name: null }],
+    [3, { id: 3, name: null }],
+    [4, { id: 4, name: null }],
+  ])
+  players = this.default_players
+  game: any[] = [{ dealer_player_id: 1, turn_id: 1, player1_bid: 1, player2_bid: 1, player3_bid: 1, player4_bid: 1, player1_tricks: 2, player2_tricks: 3, player3_tricks: 3, player4_tricks: 4, }]
+  current_round_id = 1
 
-  players: Player[] = []
-
-
-  constructor() {
-
-
-    makeAutoObservable(this)
-
-    this.players = this.localGet('players') ?? []
-    console.log('starting db')
-
-    observe(this, (change) => {
-      console.log(this, change.name)
-      this.localSet('players', toJS(this.players))
-    })
-    observe(this.players, (change) => {
-      console.log(change)
-      this.localSet('players', toJS(this.players))
-    })
-  }
-
-  // get players(): Player[] {
-  //   return this.localGet('players') ?? []
-  // }
-  //  set players(players: Player[]) {
-  //   this.localSet('players', players)
-  // }
-
-  @action addPlayer = (name: string) => {
-    const players = this.players
-    if (players.find(p => p.name === name)) {
+  newGame = (players: Player[]) => {
+    if (players.length < 2) {
+      alert('Cannot play with less than 2 players')
       return
     }
-    players.push({ name })
-    this.players = players
-  }
-
-  @action removePlayer = (name: string) => {
-    const players = this.players.filter(p => p.name !== name)
-    this.players = players
-  }
-
-  private encodeKey = (key: string) => {
-    return 'scorebard_app-' + key
-  }
-  private localGet = (key: string) => {
-    const info = window.localStorage.getItem(this.encodeKey(key))
-    if (info) {
-      return JSON.parse(info)
+    if (players.length > 4) {
+      alert('More than 4 players not supported currently')
+      return
     }
-    return null
+    // TODO random dealer
+    const dealer = players[0]
+
+    this.current_round_id = 1
+    this.players = this.default_players
+
+    // TODO set players to the ones from the previous game
+
+    this.playRound(this.current_round_id)
+  }
+
+  playRound = (round_id: number) => {
+    const { num_cards } = this.turns.get(round_id)!
+
+  }
+
+  constructor() {
+    makeAutoObservable(this)
+
+    localforage.setDriver([localforage.INDEXEDDB, localforage.WEBSQL, localforage.LOCALSTORAGE])
+
+    console.log('starting db')
+    this.loadData()
+  }
+
+  @action changePlayer = (id: number, name: string) => {
+    const player = this.players.get(id)
+    player.name = name
+  }
+
+  loadData = () => {
+    console.log('Loading data')
+    Promise.all([
+      this.localGet('players').then(action((resp: any) => {
+        console.log(resp)
+        this.players = resp ?? this.default_players
+      }
+      )),
+    ]).then(() => {
+      reaction(
+        () => Array.from(this.players.values()).map(todo => [todo.id, todo.name]),
+        () => this.localSet('players', this.players)
+      )
+    })
+  }
+
+  private localGet = (key: string) => {
+    return localforage.getItem(key)
   }
   private localSet = (key: string, vals: any) => {
-    window.localStorage.setItem(this.encodeKey(key), JSON.stringify(vals))
+    return localforage.setItem(key, toJS(vals))
   }
 }

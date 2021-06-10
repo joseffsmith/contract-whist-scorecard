@@ -1377,6 +1377,11 @@
   "resolved" "https://registry.npmjs.org/ignore/-/ignore-5.1.8.tgz"
   "version" "5.1.8"
 
+"immediate@~3.0.5":
+  "integrity" "sha1-nbHb0Pr43m++D13V5Wu2BigN5ps="
+  "resolved" "https://registry.npmjs.org/immediate/-/immediate-3.0.6.tgz"
+  "version" "3.0.6"
+
 "import-fresh@^3.0.0", "import-fresh@^3.2.1":
   "integrity" "sha512-veYYhQa+D1QBKznvhUHxb8faxlrwUnxseDAbAp457E0wLNio2bOSKnjYDhMj+YiAq61xrMGhQk9iXVk5FzgQMw=="
   "resolved" "https://registry.npmjs.org/import-fresh/-/import-fresh-3.3.0.tgz"
@@ -1613,6 +1618,13 @@
     "prelude-ls" "^1.2.1"
     "type-check" "~0.4.0"
 
+"lie@3.1.1":
+  "integrity" "sha1-mkNrLMd0bKWd56QfpGmz77dr2H4="
+  "resolved" "https://registry.npmjs.org/lie/-/lie-3.1.1.tgz"
+  "version" "3.1.1"
+  dependencies:
+    "immediate" "~3.0.5"
+
 "load-json-file@^4.0.0":
   "integrity" "sha1-L19Fq5HjMhYjT9U62rZo607AmTs="
   "resolved" "https://registry.npmjs.org/load-json-file/-/load-json-file-4.0.0.tgz"
@@ -1622,6 +1634,13 @@
     "parse-json" "^4.0.0"
     "pify" "^3.0.0"
     "strip-bom" "^3.0.0"
+
+"localforage@^1.9.0":
+  "integrity" "sha512-rR1oyNrKulpe+VM9cYmcFn6tsHuokyVHFaCM3+osEmxaHTbEk8oQu6eGDfS6DQLWi/N67XRmB8ECG37OES368g=="
+  "resolved" "https://registry.npmjs.org/localforage/-/localforage-1.9.0.tgz"
+  "version" "1.9.0"
+  dependencies:
+    "lie" "3.1.1"
 
 "locate-path@^2.0.0":
   "integrity" "sha1-K1aLJl7slExtnA3pw9u7ygNUzY4="
