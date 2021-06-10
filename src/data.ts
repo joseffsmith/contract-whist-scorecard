@@ -65,34 +65,41 @@ export class DB {
       this.localGet('players').then(action((resp: any) => {
         this.players = resp ?? this.default_players
       })),
+      this.localGet('scoresheet').then(action((resp: any) => {
+        this.scoresheet = resp ?? this.getEmptyScoreSheet()
+      })),
+      this.localGet('current_player').then(action((resp: any) => {
+        this.current_player = resp ?? 1
+      })),
+      this.localGet('current_round').then(action((resp: any) => {
+        this.current_round = resp ?? 1
+      })),
+      this.localGet('stage').then(action((resp: any) => {
+        this.stage = resp ?? 'bid'
+      })),
     ])
       .then(() => {
         reaction(
           () => Array.from(this.players.values()).map(todo => [todo.id, todo.name]),
           () => this.localSet('players', this.players)
         )
+        reaction(
+          () => Array.from(this.scoresheet.values()).map(players => Object.values(players).map(p => [p.bid, p.score])),
+          () => this.localSet('scoresheet', this.scoresheet)
+        )
+        reaction(
+          () => this.current_player,
+          () => this.localSet('current_player', this.current_player)
+        )
+        reaction(
+          () => this.current_round,
+          () => this.localSet('current_round', this.current_round)
+        )
+        reaction(
+          () => this.stage,
+          () => this.localSet('stage', this.stage)
+        )
       })
-      .then(action(() => {
-        // TODO load score from storage
-        this.scoresheet = this.getEmptyScoreSheet()
-      }))
-  }
-
-  next_round = () => {
-    const previous_dealer_id = this.current_dealer
-    let next_dealer_id = previous_dealer_id + 1
-    if (next_dealer_id > this.players.size) {
-      next_dealer_id = 1
-    }
-    let round = {
-      dealer_id: next_dealer_id,
-      all_bid: false
-    }
-    this.players.forEach(p => {
-      round[`player${p.id}_bid`] = null
-      round[`player${p.id}_tricks`] = null
-    })
-    this.current_dealer = next_dealer_id
   }
 
   getEmptyScoreSheet = () => {
@@ -155,25 +162,6 @@ export class DB {
       return
     }
     this.current_player += 1
-  }
-
-  newGame = (players: Player[]) => {
-    if (players.length < 2) {
-      alert('Cannot play with less than 2 players')
-      return
-    }
-    if (players.length > 4) {
-      alert('More than 4 players not supported currently')
-      return
-    }
-    // TODO random dealer
-    const dealer = players[0]
-
-    this.current_round = 1
-    this.players = this.default_players
-    this.scoresheet = this.getEmptyScoreSheet()
-
-    // TODO set players to the ones from the previous game
   }
 
   @action changePlayer = (id: number, name: string) => {
