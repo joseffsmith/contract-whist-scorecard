@@ -13,6 +13,7 @@ const App: FunctionComponent<{ db: DB }> = observer(({ db }) => {
   const players = db.players
 
   const round_id = db.current_round
+  console.log(db.current_round)
   return (
     <div className="bg-gray-100">
       <h1 className="text-lg font-semibold font-serif text-center my-4">Contract whist</h1>
@@ -25,7 +26,15 @@ const App: FunctionComponent<{ db: DB }> = observer(({ db }) => {
         {Array.from(db.turns.values()).map(t => (
           <>
             <div key={`${t.id}-0`}><div className="inline-block pl-1 w-2 text-center font-semibold">{t.num_cards}</div>&nbsp;<div className={`${t.suit_colour} w-5 inline-block text-center`}>{t.suit}</div></div>
-            {Array.from(players.values()).map(p => <div key={`${t.id}-${p.id}`} className="border-b border-r last:border-r-0 text-right">{db.scoresheet.get(t.id)[p.id].bid} | {db.scoresheet.get(t.id)[p.id].score}</div>)}
+            {Array.from(players.values()).map(p => {
+              console.log(p.id, t.id, db.current_round, db.current_player, db.stage)
+              return (
+                <div key={`${t.id}-${p.id}`} className="border-b border-r last:border-r-0 text-right flex relative justify-between">
+                  <div className={`${db.current_player == p.id && db.current_round == t.id && db.stage === 'bid' ? 'bg-green-300' : ''} flex-grow w-7 border-r`}>{db.scoresheet.get(t.id)[p.id].bid}</div>
+                  <div className={`${db.current_player == p.id && db.current_round == t.id && db.stage === 'score' ? 'bg-green-300' : ''}  flex-grow w-7 `}>{db.scoresheet.get(t.id)[p.id].score}</div>
+                </div>
+              )
+            })}
           </>
         ))}
       </div>
@@ -46,6 +55,7 @@ const BidStage: FunctionComponent<{ db: DB }> = ({ db }) => {
 
   const handleConfirm = () => {
     db.setBidForPlayer(db.current_player, curr_bid)
+    setCurrBid(null)
   }
   const handleClick = (opt: number) => {
     setCurrBid(opt)
@@ -61,7 +71,28 @@ const BidStage: FunctionComponent<{ db: DB }> = ({ db }) => {
   </>)
 }
 
-const ScoreStage = ({ db }) => null
+const ScoreStage = ({ db }) => {
+  const [made_it, setMadeIt] = useState(null)
+
+  const handleConfirm = () => {
+    db.setScoreForPlayer(db.current_player, made_it)
+    setMadeIt(null)
+  }
+
+  return (<>
+    <div>
+      Made it?
+    </div>
+    <div className="flex">
+      <button className={`flex-grow border ${made_it === false ? 'bg-green-300' : ''} `} onClick={() => setMadeIt(false)}>No</button>
+      <button className={`flex-grow border ${made_it === true ? 'bg-green-300' : ''}`} onClick={() => setMadeIt(true)}>Yes</button>
+    </div>
+    <div className="flex">
+      <button className="flex-grow border" onClick={() => setMadeIt(null)}>Cancel</button>
+      <button className="flex-grow border" onClick={handleConfirm}>Confirm</button>
+    </div>
+  </>)
+}
 
 const Player: FunctionComponent<{ db: DB, id: number }> = ({ db, id }) => {
   const name = db.players?.get(id)?.name ?? null

@@ -48,6 +48,7 @@ export class DB {
   current_round = 1
   current_player = 1
   current_dealer = 1
+  stage: 'bid' | 'score' = 'bid'
   players = this.default_players
   scoresheet: Map<number, { [k: string]: any }> = new Map()
 
@@ -100,10 +101,6 @@ export class DB {
     return bids
   }
 
-  @computed get stage(): 'score' | 'bid' {
-    const players = this.scoresheet.get(this.current_round)
-    return Object.entries(players).every(([p_id, p]) => p.bid !== null) ? 'score' : 'bid'
-  }
 
   @computed get bid_options(): number[] {
     const all_options = [0, 1, 2, 3, 4, 5, 6, 7]
@@ -129,9 +126,28 @@ export class DB {
   setBidForPlayer = (player_id, bid) => {
     const round = this.scoresheet.get(this.current_round)
     round[player_id].bid = bid
-    console.log(this.current_player)
+    if (this.current_player === this.players.size) {
+      this.current_player = 1
+      this.stage = 'score'
+      return
+    }
     this.current_player += 1
-    console.log(this.current_player)
+  }
+
+  setScoreForPlayer = (player_id, made_it) => {
+    const round = this.scoresheet.get(this.current_round)
+    if (!made_it) {
+      round[player_id].score = 0
+    } else {
+      round[player_id].score = round[player_id].bid + 10
+    }
+    if (this.current_player === this.players.size) {
+      this.current_player = 1
+      this.current_round += 1
+      this.stage = 'bid'
+      return
+    }
+    this.current_player += 1
   }
 
   newGame = (players: Player[]) => {
@@ -153,13 +169,10 @@ export class DB {
     // TODO set players to the ones from the previous game
   }
 
-
-
   @action changePlayer = (id: number, name: string) => {
     const player = this.players.get(id)
     player.name = name
   }
-
 
   private localGet = (key: string) => {
     return localforage.getItem(key)
@@ -167,6 +180,4 @@ export class DB {
   private localSet = (key: string, vals: any) => {
     return localforage.setItem(key, toJS(vals))
   }
-
-
 }
