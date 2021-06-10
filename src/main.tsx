@@ -1,14 +1,17 @@
+import { StrictMode } from 'react'
 import ReactDOM from 'react-dom'
+
 import './index.css'
+
+import { DB } from './data'
 import App from './App'
 
 
-import { DB } from './data'
-
 const db = new DB()
+
 ReactDOM.render(
-  <React.StrictMode>
+  <StrictMode>
     <App db={db} />
-  </React.StrictMode>,
+  </StrictMode>,
   document.getElementById('root')
 )

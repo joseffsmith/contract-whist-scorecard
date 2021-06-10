@@ -57,8 +57,8 @@ export class DB {
     localforage.setDriver([localforage.INDEXEDDB, localforage.WEBSQL, localforage.LOCALSTORAGE])
     console.log('starting db')
     this.loadData()
-
   }
+
   loadData = () => {
     console.log('Loading data')
     Promise.all([
@@ -72,10 +72,10 @@ export class DB {
           () => this.localSet('players', this.players)
         )
       })
-      .then(() => {
+      .then(action(() => {
         // TODO load score from storage
         this.scoresheet = this.getEmptyScoreSheet()
-      })
+      }))
   }
 
   next_round = () => {
@@ -99,6 +99,13 @@ export class DB {
     const players = Object.fromEntries(new Map(Array.from(this.players.keys()).map(p => ([p, { 'bid': null, 'score': null }]))))
     const bids = new Map(Array.from(this.turns.keys()).map(t => ([t, players])))
     return bids
+  }
+
+  @computed get scores() {
+    const scores = Array.from(this.scoresheet.values()).reduce((acc, curr_value) => {
+      return acc.map((a, idx) => a + (curr_value[idx + 1].score ?? 0))
+    }, Array.from(this.players.values()).map(p => 0))
+    return scores
   }
 
 
