@@ -10,9 +10,18 @@ const App: FunctionComponent<{ db: DB }> = observer(({ db }) => {
     return null
   }
 
+  const handleNewGame = () => {
+    if (confirm('Are ya sure?')) {
+      db.newGame()
+    }
+  }
+
   return (
     <div className="bg-gray-100">
-      <h1 className="text-lg font-semibold font-serif text-center my-4">Contract whist</h1>
+      <header className="flex justify-between p-1">
+        <h1 className="text-lg font-semibold font-serif text-left my-2 inline-block">Contract whist</h1>
+        <button className="border px-2" onClick={handleNewGame}>New game</button>
+      </header>
       <div className="grid grid-cols-5">
         <div></div>
         {Array.from(db.players.values()).map(p => (

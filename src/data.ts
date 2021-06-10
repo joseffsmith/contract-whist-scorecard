@@ -102,6 +102,14 @@ export class DB {
       })
   }
 
+  @action newGame = () => {
+    this.players = this.default_players
+    this.scoresheet = this.getEmptyScoreSheet()
+    this.current_player = 1
+    this.current_round = 1
+    this.stage = 'bid'
+  }
+
   getEmptyScoreSheet = () => {
     const players = Object.fromEntries(new Map(Array.from(this.players.keys()).map(p => ([p, { 'bid': null, 'score': null }]))))
     const bids = new Map(Array.from(this.turns.keys()).map(t => ([t, players])))
