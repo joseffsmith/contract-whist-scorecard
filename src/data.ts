@@ -6,7 +6,7 @@
 // tell you who's turn it is to deal (over multiple games)
 
 import localforage from "localforage"
-import { action, makeAutoObservable, reaction, toJS } from "mobx"
+import { action, computed, makeAutoObservable, reaction, toJS } from "mobx"
 
 // starting a game
 /// adding players, name
@@ -39,16 +39,100 @@ export class DB {
     [12, { id: 12, num_cards: 6, suit_colour: 'text-black', suit: '♣', }],
     [13, { id: 13, num_cards: 7, suit_colour: 'text-red-500', suit: '♦', }],
   ])
-  data_keys = ['players']
   default_players = new Map([
     [1, { id: 1, name: null }],
     [2, { id: 2, name: null }],
     [3, { id: 3, name: null }],
     [4, { id: 4, name: null }],
   ])
+  current_round = 1
+  current_player = 1
+  current_dealer = 1
   players = this.default_players
-  game: any[] = [{ dealer_player_id: 1, turn_id: 1, player1_bid: 1, player2_bid: 1, player3_bid: 1, player4_bid: 1, player1_tricks: 2, player2_tricks: 3, player3_tricks: 3, player4_tricks: 4, }]
-  current_round_id = 1
+  scoresheet: Map<number, { [k: string]: any }> = new Map()
+
+  constructor() {
+    makeAutoObservable(this)
+    localforage.setDriver([localforage.INDEXEDDB, localforage.WEBSQL, localforage.LOCALSTORAGE])
+    console.log('starting db')
+    this.loadData()
+
+  }
+  loadData = () => {
+    console.log('Loading data')
+    Promise.all([
+      this.localGet('players').then(action((resp: any) => {
+        this.players = resp ?? this.default_players
+      })),
+    ])
+      .then(() => {
+        reaction(
+          () => Array.from(this.players.values()).map(todo => [todo.id, todo.name]),
+          () => this.localSet('players', this.players)
+        )
+      })
+      .then(() => {
+        // TODO load score from storage
+        this.scoresheet = this.getEmptyScoreSheet()
+      })
+  }
+
+  next_round = () => {
+    const previous_dealer_id = this.current_dealer
+    let next_dealer_id = previous_dealer_id + 1
+    if (next_dealer_id > this.players.size) {
+      next_dealer_id = 1
+    }
+    let round = {
+      dealer_id: next_dealer_id,
+      all_bid: false
+    }
+    this.players.forEach(p => {
+      round[`player${p.id}_bid`] = null
+      round[`player${p.id}_tricks`] = null
+    })
+    this.current_dealer = next_dealer_id
+  }
+
+  getEmptyScoreSheet = () => {
+    const players = Object.fromEntries(new Map(Array.from(this.players.keys()).map(p => ([p, { 'bid': null, 'score': null }]))))
+    const bids = new Map(Array.from(this.turns.keys()).map(t => ([t, players])))
+    return bids
+  }
+
+  @computed get stage(): 'score' | 'bid' {
+    const players = this.scoresheet.get(this.current_round)
+    return Object.entries(players).every(([p_id, p]) => p.bid !== null) ? 'score' : 'bid'
+  }
+
+  @computed get bid_options(): number[] {
+    const all_options = [0, 1, 2, 3, 4, 5, 6, 7]
+    const turn = this.turns.get(this.current_round)
+    let options = all_options.filter(o => o <= turn.num_cards)
+    if (this.current_player !== this.players.size) {
+      return options
+    }
+
+    const sum_bids = Object.values(this.scoresheet.get(this.current_round))
+      .reduce((acc, player) => {
+        return acc + player.bid
+      }, 0)
+
+    if (turn.num_cards < sum_bids) {
+      return options
+    }
+
+    const cant_say = turn.num_cards - sum_bids
+    return options.filter(o => o !== cant_say)
+  }
+
+  setBidForPlayer = (player_id, bid) => {
+    const round = this.scoresheet.get(this.current_round)
+    round[player_id].bid = bid
+    console.log(this.current_player)
+    this.current_player += 1
+    console.log(this.current_player)
+  }
 
   newGame = (players: Player[]) => {
     if (players.length < 2) {
@@ -62,48 +146,20 @@ export class DB {
     // TODO random dealer
     const dealer = players[0]
 
-    this.current_round_id = 1
+    this.current_round = 1
     this.players = this.default_players
+    this.scoresheet = this.getEmptyScoreSheet()
 
     // TODO set players to the ones from the previous game
-
-    this.playRound(this.current_round_id)
   }
 
-  playRound = (round_id: number) => {
-    const { num_cards } = this.turns.get(round_id)!
 
-  }
-
-  constructor() {
-    makeAutoObservable(this)
-
-    localforage.setDriver([localforage.INDEXEDDB, localforage.WEBSQL, localforage.LOCALSTORAGE])
-
-    console.log('starting db')
-    this.loadData()
-  }
 
   @action changePlayer = (id: number, name: string) => {
     const player = this.players.get(id)
     player.name = name
   }
 
-  loadData = () => {
-    console.log('Loading data')
-    Promise.all([
-      this.localGet('players').then(action((resp: any) => {
-        console.log(resp)
-        this.players = resp ?? this.default_players
-      }
-      )),
-    ]).then(() => {
-      reaction(
-        () => Array.from(this.players.values()).map(todo => [todo.id, todo.name]),
-        () => this.localSet('players', this.players)
-      )
-    })
-  }
 
   private localGet = (key: string) => {
     return localforage.getItem(key)
@@ -111,4 +167,6 @@ export class DB {
   private localSet = (key: string, vals: any) => {
     return localforage.setItem(key, toJS(vals))
   }
+
+
 }
