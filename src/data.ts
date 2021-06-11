@@ -47,7 +47,7 @@ export class DB {
   ])
   current_round = 1
   current_player = 1
-  current_dealer = 1
+  current_dealer = 2
   stage: 'bid' | 'score' = 'bid'
   players = this.default_players
   scoresheet: Map<number, { [k: string]: any }> = new Map()
@@ -114,7 +114,7 @@ export class DB {
     this.scoresheet = this.getEmptyScoreSheet()
     this.current_player = 1
     this.current_round = 1
-    this.current_dealer = 1
+    this.current_dealer = 2
     this.stage = 'bid'
   }
 
