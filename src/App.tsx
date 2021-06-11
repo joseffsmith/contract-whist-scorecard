@@ -135,7 +135,7 @@ const Player: FunctionComponent<{ db: DB, id: number }> = ({ db, id }) => {
   }
 
   return (
-    <div className="text-center">
+    <div className={`${db.current_dealer === id ? 'bg-red-500' : ''} text-center`}>
       {changing_name ?
         <input className="w-full" ref={input} value={temp_name} onChange={e => changeTempName(e.target.value)} onBlur={handleChangePlayer} />
         :

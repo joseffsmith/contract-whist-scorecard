@@ -77,6 +77,9 @@ export class DB {
       this.localGet('stage').then(action((resp: any) => {
         this.stage = resp ?? 'bid'
       })),
+      this.localGet('current_dealer').then(action((resp: any) => {
+        this.current_dealer = resp ?? 1
+      })),
     ])
       .then(() => {
         reaction(
@@ -98,6 +101,10 @@ export class DB {
         reaction(
           () => this.stage,
           () => this.localSet('stage', this.stage)
+        )
+        reaction(
+          () => this.current_dealer,
+          () => this.localSet('current_dealer', this.stage)
         )
       })
   }
@@ -167,6 +174,10 @@ export class DB {
       this.current_player = 1
       this.current_round += 1
       this.stage = 'bid'
+      this.current_dealer += 1
+      if (this.current_dealer > this.players.size) {
+        this.current_dealer = 1
+      }
       return
     }
     this.current_player += 1
