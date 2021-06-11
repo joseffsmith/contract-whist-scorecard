@@ -40,10 +40,10 @@ export class DB {
     [13, { id: 13, num_cards: 7, suit_colour: 'text-red-500', suit: '♦', }],
   ])
   default_players = new Map([
-    [1, { id: 1, name: null }],
-    [2, { id: 2, name: null }],
-    [3, { id: 3, name: null }],
-    [4, { id: 4, name: null }],
+    [1, { id: 1, name: 'Player 1' }],
+    [2, { id: 2, name: 'Player 2' }],
+    [3, { id: 3, name: 'Player 3' }],
+    [4, { id: 4, name: 'Player 4' }],
   ])
   current_round = 1
   current_player = 1
@@ -104,7 +104,7 @@ export class DB {
         )
         reaction(
           () => this.current_dealer,
-          () => this.localSet('current_dealer', this.stage)
+          () => this.localSet('current_dealer', this.current_dealer)
         )
       })
   }
@@ -114,6 +114,7 @@ export class DB {
     this.scoresheet = this.getEmptyScoreSheet()
     this.current_player = 1
     this.current_round = 1
+    this.current_dealer = 1
     this.stage = 'bid'
   }
 

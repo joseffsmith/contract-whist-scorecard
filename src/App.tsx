@@ -30,10 +30,10 @@ const App: FunctionComponent<{ db: DB }> = observer(({ db }) => {
 
         {Array.from(db.turns.values()).map(t => (
           <Fragment key={t.id}>
-            <div><div className="inline-block pl-1 w-2 text-center font-semibold">{t.num_cards}</div>&nbsp;<div className={`${t.suit_colour} w-5 inline-block text-center`}>{t.suit}</div></div>
+            <div className="flex items-baseline"><div className="inline-block pl-1 w-2 text-center font-semibold align-middle">{t.num_cards}</div>&nbsp;<div className={`${t.suit_colour} w-5 h-6 pt-0.5 align-middle inline-block text-center`}>{t.suit}</div></div>
             {Array.from(db.players.values()).map(p => {
               return (
-                <div key={p.id} className="border-b border-r last:border-r-0 text-right flex relative justify-between">
+                <div key={p.id} className="border-b border-r last:border-r-0 text-right flex relative justify-between items-center">
                   <div className={`${db.current_player == p.id && db.current_round == t.id && db.stage === 'bid' ? 'bg-green-300' : ''} flex-grow w-7 border-r`}>{db.scoresheet.get(t.id)[p.id].bid}</div>
                   <div className={`${db.current_player == p.id && db.current_round == t.id && db.stage === 'score' ? 'bg-green-300' : ''}  flex-grow w-7 `}>{db.scoresheet.get(t.id)[p.id].score}</div>
                 </div>
@@ -137,9 +137,9 @@ const Player: FunctionComponent<{ db: DB, id: number }> = ({ db, id }) => {
   return (
     <div className={`${db.current_dealer === id ? 'bg-red-500' : ''} text-center`}>
       {changing_name ?
-        <input className="w-full" ref={input} value={temp_name} onChange={e => changeTempName(e.target.value)} onBlur={handleChangePlayer} />
+        <input className="w-full h-full text-center" ref={input} value={temp_name} onChange={e => changeTempName(e.target.value)} onBlur={handleChangePlayer} />
         :
-        <button className="border p-1" onClick={() => setChangingName(true)}>{name ? name : 'Add player'}</button>
+        <button className="w-full h-full border p-1 truncate" onClick={() => setChangingName(true)}>{name ? name : 'Add player'}</button>
       }
     </div>
   )
