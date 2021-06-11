@@ -15,7 +15,7 @@ const App: FunctionComponent<{ db: DB }> = observer(({ db }) => {
       db.newGame()
     }
   }
-
+  console.log(db.stage, db.current_player)
   return (
     <div className="bg-gray-100">
       <header className="flex justify-between p-1">
@@ -34,8 +34,8 @@ const App: FunctionComponent<{ db: DB }> = observer(({ db }) => {
             {Array.from(db.players.values()).map(p => {
               return (
                 <div key={p.id} className="border-b border-r last:border-r-0 text-right flex relative justify-between items-center">
-                  <div className={`${db.current_player == p.id && db.current_round == t.id && db.stage === 'bid' ? 'bg-green-300' : ''} h-full flex-grow w-7 border-r`}>{db.scoresheet.get(t.id)[p.id].bid}</div>
-                  <div className={`${db.current_player == p.id && db.current_round == t.id && db.stage === 'score' ? 'bg-green-300' : ''}  h-full flex-grow w-7 `}>{db.scoresheet.get(t.id)[p.id].score}</div>
+                  <div className={`${db.current_player == p.id && db.current_turn.id == t.id && db.stage === 'bid' ? 'bg-green-300' : ''} h-full flex-grow w-7 border-r`}>{db.scoresheet.get(t.id)[p.id].bid}</div>
+                  <div className={`${db.current_player == p.id && db.current_turn.id == t.id && db.stage === 'score' ? 'bg-green-300' : ''}  h-full flex-grow w-7 `}>{db.scoresheet.get(t.id)[p.id].score}</div>
                 </div>
               )
             })}
@@ -73,6 +73,7 @@ const BidStage: FunctionComponent<{ db: DB }> = ({ db }) => {
   const handleClick = (opt: number) => {
     setCurrBid(opt)
   }
+  console.log(db.bid_options)
   return (<>
     <div className="text-center">
       Bid

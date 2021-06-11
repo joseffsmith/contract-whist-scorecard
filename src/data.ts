@@ -45,10 +45,7 @@ export class DB {
     [3, { id: 3, name: 'Player 3' }],
     [4, { id: 4, name: 'Player 4' }],
   ])
-  current_round = 1
-  current_player = 1
-  current_dealer = 2
-  stage: 'bid' | 'score' = 'bid'
+  current_dealer = 1
   players = this.default_players
   scoresheet: Map<number, { [k: string]: any }> = new Map()
 
@@ -68,15 +65,6 @@ export class DB {
       this.localGet('scoresheet').then(action((resp: any) => {
         this.scoresheet = resp ?? this.getEmptyScoreSheet()
       })),
-      this.localGet('current_player').then(action((resp: any) => {
-        this.current_player = resp ?? 1
-      })),
-      this.localGet('current_round').then(action((resp: any) => {
-        this.current_round = resp ?? 1
-      })),
-      this.localGet('stage').then(action((resp: any) => {
-        this.stage = resp ?? 'bid'
-      })),
       this.localGet('current_dealer').then(action((resp: any) => {
         this.current_dealer = resp ?? 1
       })),
@@ -91,20 +79,12 @@ export class DB {
           () => this.localSet('scoresheet', this.scoresheet)
         )
         reaction(
-          () => this.current_player,
-          () => this.localSet('current_player', this.current_player)
-        )
-        reaction(
-          () => this.current_round,
-          () => this.localSet('current_round', this.current_round)
-        )
-        reaction(
-          () => this.stage,
-          () => this.localSet('stage', this.stage)
-        )
-        reaction(
           () => this.current_dealer,
           () => this.localSet('current_dealer', this.current_dealer)
+        )
+        reaction(
+          () => this.current_round_id,
+          () => this.current_dealer += 1
         )
       })
   }
@@ -112,10 +92,7 @@ export class DB {
   @action newGame = () => {
     this.players = this.default_players
     this.scoresheet = this.getEmptyScoreSheet()
-    this.current_player = 1
-    this.current_round = 1
-    this.current_dealer = 2
-    this.stage = 'bid'
+    this.current_dealer = 1
   }
 
   getEmptyScoreSheet = () => {
@@ -131,16 +108,47 @@ export class DB {
     return scores
   }
 
+  @computed get current_round_id() {
+    return Array.from(this.scoresheet.values()).findIndex(turn => Object.values(turn).some(p => p.bid === null || p.score === null)) + 1
+  }
+
+  @computed get current_round() {
+    return this.scoresheet.get(this.current_round_id)
+  }
+
+  @computed get stage() {
+    return Object.values(this.current_round).some(p => p.bid === null) ? 'bid' : 'score'
+  }
+
+  @computed get current_player() {
+    return this.stage === 'bid' ? Object.values(this.current_round).findIndex(p => p.bid === null) + 1 : Object.values(this.current_round).findIndex(p => p.score === null) + 1
+  }
+
+  // when round starts first player after dealer
+  // when in middle round it's first null value after dealer
+
+
+  @computed get bids_left() {
+    return Object.values(this.current_round).reduce((acc, curr_val) => {
+      return acc + (curr_val.bid === null ? 1 : 0)
+    }, 0)
+  }
+
+  @computed get current_turn() {
+    return this.turns.get(this.current_round_id)
+  }
+
 
   @computed get bid_options(): number[] {
     const all_options = [0, 1, 2, 3, 4, 5, 6, 7]
-    const turn = this.turns.get(this.current_round)
+    const turn = this.current_turn
+    console.log(toJS(turn))
     let options = all_options.filter(o => o <= turn.num_cards)
-    if (this.current_player !== this.players.size) {
+    if (this.bids_left !== 1) {
       return options
     }
 
-    const sum_bids = Object.values(this.scoresheet.get(this.current_round))
+    const sum_bids = Object.values(this.current_round)
       .reduce((acc, player) => {
         return acc + player.bid
       }, 0)
@@ -154,34 +162,17 @@ export class DB {
   }
 
   setBidForPlayer = (player_id, bid) => {
-    const round = this.scoresheet.get(this.current_round)
+    const round = this.current_round
     round[player_id].bid = bid
-    if (this.current_player === this.players.size) {
-      this.current_player = 1
-      this.stage = 'score'
-      return
-    }
-    this.current_player += 1
   }
 
   setScoreForPlayer = (player_id, made_it) => {
-    const round = this.scoresheet.get(this.current_round)
+    const round = this.current_round
     if (!made_it) {
       round[player_id].score = 0
     } else {
       round[player_id].score = round[player_id].bid + 10
     }
-    if (this.current_player === this.players.size) {
-      this.current_player = 1
-      this.current_round += 1
-      this.stage = 'bid'
-      this.current_dealer += 1
-      if (this.current_dealer > this.players.size) {
-        this.current_dealer = 1
-      }
-      return
-    }
-    this.current_player += 1
   }
 
   @action changePlayer = (id: number, name: string) => {
