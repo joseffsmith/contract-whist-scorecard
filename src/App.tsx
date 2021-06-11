@@ -34,8 +34,8 @@ const App: FunctionComponent<{ db: DB }> = observer(({ db }) => {
             {Array.from(db.players.values()).map(p => {
               return (
                 <div key={p.id} className="border-b border-r last:border-r-0 text-right flex relative justify-between items-center">
-                  <div className={`${db.current_player == p.id && db.current_round == t.id && db.stage === 'bid' ? 'bg-green-300' : ''} flex-grow w-7 border-r`}>{db.scoresheet.get(t.id)[p.id].bid}</div>
-                  <div className={`${db.current_player == p.id && db.current_round == t.id && db.stage === 'score' ? 'bg-green-300' : ''}  flex-grow w-7 `}>{db.scoresheet.get(t.id)[p.id].score}</div>
+                  <div className={`${db.current_player == p.id && db.current_round == t.id && db.stage === 'bid' ? 'bg-green-300' : ''} h-full flex-grow w-7 border-r`}>{db.scoresheet.get(t.id)[p.id].bid}</div>
+                  <div className={`${db.current_player == p.id && db.current_round == t.id && db.stage === 'score' ? 'bg-green-300' : ''}  h-full flex-grow w-7 `}>{db.scoresheet.get(t.id)[p.id].score}</div>
                 </div>
               )
             })}
