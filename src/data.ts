@@ -73,7 +73,7 @@ export class DB {
   @computed get current_round_idx() { return this.current_round ? this.scoresheet.indexOf(this.current_round) : null }
   @computed get current_turn() { return this.current_round && this.current_round_idx !== null ? this.getCurrentTurnFromRound(this.current_round, this.current_round_idx) : null }
   @computed get current_turn_idx() { return this.current_turn && this.current_round ? this.current_round.indexOf(this.current_turn) : null }
-  @computed get dealer_idx() { return this.current_round_idx !== null ? this.current_round_idx % this.players.length : null }
+  @computed get dealer_idx() { return this.current_round_idx !== null ? (this.current_round_idx + this.players.length - 1) % this.players.length : null }
 
 
   @computed get stage(): Stage | null {
@@ -127,6 +127,38 @@ export class DB {
       }
     })
     return options
+  }
+
+  @action
+  undo = () => {
+    let round_to_undo = this.current_round
+    let index = this.current_round_idx!
+    if (round_to_undo?.every(t => t.bid === null && t.score === null)) {
+      index -= 1
+      round_to_undo = this.scoresheet[index]
+    }
+    if (!round_to_undo) {
+      return
+    }
+    let turn = this.getCurrentTurnFromRound(round_to_undo, index)
+    if (!turn) {
+      let last_player_idx = (index % this.players.length)
+      if (last_player_idx < 0) {
+        last_player_idx = this.players.length - 1
+      }
+      turn = round_to_undo[last_player_idx]
+    }
+    let turn_idx = round_to_undo.indexOf(turn)
+    turn_idx -= 1
+    if (turn_idx < 0) {
+      turn_idx = this.players.length - 1
+    }
+    const turn_to_undo = round_to_undo[turn_idx]
+    if (turn_to_undo.score !== null) {
+      turn_to_undo.score = null
+      return
+    }
+    turn_to_undo.bid = null
   }
 
   @action

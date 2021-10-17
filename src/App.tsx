@@ -2,7 +2,6 @@ import { Fragment, FunctionComponent, useEffect, useRef, useState } from 'react'
 import { observer } from "mobx-react"
 
 import { DB } from './data'
-import { toJS } from 'mobx'
 
 
 const App: FunctionComponent<{ db: DB }> = observer(({ db }) => {
@@ -15,7 +14,8 @@ const App: FunctionComponent<{ db: DB }> = observer(({ db }) => {
     stage,
     scoresheet,
     scores,
-    newGame
+    newGame,
+    undo
   } = db
 
   const handleNewGame = () => {
@@ -28,6 +28,7 @@ const App: FunctionComponent<{ db: DB }> = observer(({ db }) => {
     <div className="bg-gray-100">
       <header className="flex justify-between p-1">
         <h1 className="text-lg font-semibold font-serif text-left my-2 inline-block">Contract whist</h1>
+        <button className="border px-2" onClick={undo}>Undo</button>
         <button className="border px-2" onClick={handleNewGame}>New game</button>
       </header>
       <div className="grid grid-cols-5">
