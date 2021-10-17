@@ -1,5 +1,5 @@
 {
-  "name": "vite-react-ts-tailwind-starter",
+  "name": "contract-whist-scorecard",
   "version": "0.0.1",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,6 @@
     "mobx": "^6.3.2",
     "mobx-react": "^7.2.0",
     "react": "^17.0.0",
-    "react-cool-dimensions": "^1.3.2",
     "react-dom": "^17.0.0",
     "react-router-dom": "^5.2.0"
   },
