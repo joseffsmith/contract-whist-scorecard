@@ -39,7 +39,15 @@ const App: FunctionComponent<{ db: DB }> = observer(({ db }) => {
 
         {deals.map((t, t_idx) => (
           <Fragment key={t_idx}>
-            <div className="flex items-baseline"><div className="inline-block pl-1 w-2 text-center font-semibold align-middle">{t.num_cards}</div>&nbsp;<div className={`${t.suit_colour} w-5 h-6 pt-0.5 align-middle inline-block text-center`}>{t.suit}</div></div>
+            <div className="flex items-baseline">
+              <div className="inline-block pl-1 w-2 text-center font-semibold align-middle">
+                {t.num_cards}
+              </div>&nbsp;
+              <div className={`${t.suit_colour} w-5 h-6 pt-0.5 align-middle inline-block text-center`}>
+                {t.suit}
+              </div>
+            </div>
+
             {players.map((p, p_idx) => {
               return (
                 <div key={p.id} className="border-b border-r last:border-r-0 text-right flex relative justify-between items-center">
@@ -76,14 +84,14 @@ const App: FunctionComponent<{ db: DB }> = observer(({ db }) => {
 
 const BidStage: FunctionComponent<{ db: DB }> = ({ db }) => {
   const {
-    current_player,
+    current_turn_idx: current_player,
     setBidForPlayer,
     bid_options
   } = db
 
-  const handleClick = (opt: number) => {
-    if (current_player !== null) {
-      setBidForPlayer(current_player, opt)
+  const handleClick = (opt: { number: number, disabled: boolean }) => {
+    if (!opt.disabled && current_player !== null) {
+      setBidForPlayer(current_player, opt.number)
     }
   }
   return (
@@ -92,7 +100,13 @@ const BidStage: FunctionComponent<{ db: DB }> = ({ db }) => {
         Bid
       </div>
       <div className="flex justify-between w-full">
-        {bid_options.map(opt => <button key={opt.number} onClick={() => !opt.disabled && handleClick(opt.number)} className={`${opt.disabled ? 'opacity-50' : ''} border py-2 flex-grow m-1`}>{opt.number}</button>)}
+        {bid_options.map(opt => {
+          return (
+            <button key={opt.number} onClick={() => handleClick(opt)} className={`${opt.disabled ? 'opacity-50' : ''} border py-2 flex-grow m-1`}>
+              {opt.number}
+            </button>
+          )
+        })}
       </div>
     </>
   )
@@ -101,7 +115,7 @@ const BidStage: FunctionComponent<{ db: DB }> = ({ db }) => {
 const ScoreStage: FunctionComponent<{ db: DB }> = ({ db }) => {
 
   const {
-    current_player,
+    current_turn_idx: current_player,
     setScoreForPlayer,
   } = db
 
