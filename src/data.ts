@@ -60,7 +60,7 @@ export class Manager {
 
   @action
   loadGames = async (): Promise<Game[]> => {
-    return await localGet('games')
+    return await localGet('games') ?? []
   }
 
   @action
