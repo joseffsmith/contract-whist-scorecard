@@ -1,14 +1,13 @@
 import ReactDOM from 'react-dom'
+import { BrowserRouter as Router } from 'react-router-dom'
+
+import { Root } from './App'
 
 import './index.css'
 
-import { DB } from './data'
-import App from './App'
-
-
-const db = new DB()
-
 ReactDOM.render(
-  <App db={db} />,
+  <Router>
+    <Root />
+  </Router>,
   document.getElementById('root')
 )

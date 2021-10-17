@@ -1,10 +1,15 @@
 import localforage from 'localforage'
 import { action, computed, observable, reaction, toJS } from "mobx"
+import { v4 as uuidv4 } from 'uuid'
 
 type Stage = 'bid' | 'score'
 type Turn = { bid: null | number, score: null | number }
 type Round = Turn[]
 type Scoresheet = Round[]
+type Game = {
+  uuid: string,
+  created_at: Date
+}
 
 const DEALS = [
   { id: 0, num_cards: 7, suit_colour: 'text-red-500', suit: '♥', },
@@ -28,41 +33,102 @@ const PLAYERS = [
   { id: 2, name: 'Player 3' },
   { id: 3, name: 'Player 4' },
 ]
-export class DB {
+
+const localGet = (key: string): any => {
+  return localforage.getItem(key)
+}
+const localSet = (key: string, vals: any): any => {
+  return localforage.setItem(key, toJS(vals))
+}
+export class Manager {
+  @observable games: Game[] = []
+  @observable current_game: Game | null = null
+  @observable current_scoreboard: Scoreboard | null = null
+  @observable games_loaded: boolean = false
+
+  constructor() {
+    localforage.setDriver([localforage.INDEXEDDB, localforage.WEBSQL, localforage.LOCALSTORAGE])
+    this.loadGames().then(action(resp => {
+      this.games = resp
+      this.games_loaded = true
+    }))
+    reaction(
+      () => this.games.map(game => [game.uuid, game.created_at]),
+      () => localSet('games', this.games)
+    )
+  }
+
+  @action
+  loadGames = async (): Promise<Game[]> => {
+    return await localGet('games')
+  }
+
+  @action
+  loadScoreboard = async (uuid: string): Promise<Scoresheet> => {
+    return localGet(`${uuid}-scoresheet`).then(resp => resp ?? getEmptyScoreSheet())
+  }
+
+  @action loadMostRecentGame = () => {
+    if (this.games.length === 0) {
+      this.newGame()
+      return
+    }
+    this.loadGame(this.games[0].uuid)
+  }
+
+  @action
+  newGame = () => {
+    this.current_game = {
+      uuid: uuidv4(),
+      created_at: new Date(),
+    }
+    this.games.unshift(this.current_game)
+    this.current_scoreboard = new Scoreboard(this.current_game.uuid)
+  }
+
+  @action
+  loadGame = async (uuid: string) => {
+    const scoresheet = await this.loadScoreboard(uuid)
+    this.current_scoreboard = new Scoreboard(uuid, scoresheet)
+  }
+
+  // Import by navigating to a url, if they keep hitting it, we keep importing
+  // TODO probably don't want to import the same game multiple times, only import when uri changes?
+  @action
+  importGame = (uri: string) => {
+    const scoresheet = JSON.parse(atob(decodeURIComponent(uri)))
+    const uuid = uuidv4()
+    this.current_game = {
+      uuid,
+      created_at: new Date(),
+    }
+    this.games.unshift(this.current_game)
+    this.current_scoreboard = new Scoreboard(uuid, scoresheet)
+  }
+}
+
+export class Scoreboard {
   @observable deals = DEALS
   @observable players = PLAYERS
   @observable scoresheet: Scoresheet
+  @observable uuid: string
 
-  constructor() {
-    this.scoresheet = this.getEmptyScoreSheet()
+  constructor(uuid: string, scoresheet?: Scoresheet) {
+    this.scoresheet = scoresheet ?? getEmptyScoreSheet()
+    this.uuid = uuid
+
     localforage.setDriver([localforage.INDEXEDDB, localforage.WEBSQL, localforage.LOCALSTORAGE])
-    this.loadData()
+
+    reaction(
+      () => this.players.map(todo => [todo.id, todo.name]),
+      () => localSet(`${this.uuid}-players`, this.players)
+    )
+    reaction(
+      () => this.scoresheet.map(turns => turns.map(p => [p.bid, p.score])),
+      () => localSet(`${this.uuid}-scoresheet`, this.scoresheet)
+    )
   }
 
-  loadData = () => {
-    Promise.all([
-      this.localGet('players').then(action((resp: any) => {
-        this.players = resp ?? PLAYERS
-      })),
-      this.localGet('scoresheet').then(action((resp: any) => {
-        this.scoresheet = resp ?? this.getEmptyScoreSheet()
-      })),
-    ])
-      .then(() => {
-        reaction(
-          () => this.players.map(todo => [todo.id, todo.name]),
-          () => this.localSet('players', this.players)
-        )
-        reaction(
-          () => this.scoresheet.map(turns => turns.map(p => [p.bid, p.score])),
-          () => this.localSet('scoresheet', this.scoresheet)
-        )
-      })
-  }
-
-  @action newGame = () => {
-    this.scoresheet = this.getEmptyScoreSheet()
-  }
 
   @computed get scores() {
     return this.scoresheet.reduce((acc, curr_value) => {
@@ -170,16 +236,6 @@ export class DB {
     this.players[idx].name = name
   }
 
-  private localGet = (key: string) => {
-    return localforage.getItem(key)
-  }
-  private localSet = (key: string, vals: any) => {
-    return localforage.setItem(key, toJS(vals))
-  }
-
-  getNewRound = (): Round => this.players.map(p => { return { 'bid': null, 'score': null } })
-  getEmptyScoreSheet = (): Scoresheet => this.deals.map(deal => this.getNewRound())
-
   getCurrentStageFromTurn = (turn: Turn): Stage | null => {
     if (turn.bid === null) {
       return 'bid'
@@ -204,3 +260,6 @@ export class DB {
     return scoresheet.find((round, idx) => this.getCurrentTurnFromRound(round, idx) !== null) ?? null
   }
 }
+
+export const getNewRound = (): Round => PLAYERS.map(p => { return { 'bid': null, 'score': null } })
+export const getEmptyScoreSheet = (): Scoresheet => DEALS.map(deal => getNewRound())

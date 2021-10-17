@@ -1,10 +1,60 @@
 import { Fragment, FunctionComponent, useEffect, useRef, useState } from 'react'
 import { observer } from "mobx-react"
+import { Route, Switch, useParams } from 'react-router-dom'
 
-import { DB } from './data'
+import { Manager, Scoreboard } from './data'
+
+function useInstance<T>(instanceFunc: () => T) {
+  const ref = useRef<T | null>(null)
+  if (ref.current === null) {
+    ref.current = instanceFunc()
+  }
+  return ref.current
+}
+
+export const Root = observer(() => {
+  const manager = useInstance(() => new Manager())
+  return (
+    <Switch>
+      <Route path={["/", "/:uri"]}>
+        <MiddleMan manager={manager} />
+      </Route>
+    </Switch>
+  )
+})
+
+const MiddleMan: FunctionComponent<{ manager: Manager }> = observer(({ manager }) => {
+  const { uri } = useParams<{ uri?: string }>()
+
+  const {
+    importGame,
+    loadMostRecentGame
+  } = manager
+
+  useEffect(() => {
+    if (!manager.games_loaded) {
+      return
+    }
+    if (uri) {
+      importGame(uri)
+      return
+    }
+    return (
+      loadMostRecentGame()
+    )
+
+  }, [uri, manager.games_loaded])
+
+  const scoreboard = manager.current_scoreboard
+  if (!scoreboard || !manager.games_loaded) {
+    return null
+  }
+
+  return <App manager={manager} scoreboard={scoreboard} />
+})
 
 
-const App: FunctionComponent<{ db: DB }> = observer(({ db }) => {
+const App: FunctionComponent<{ manager: Manager, scoreboard: Scoreboard }> = observer(({ manager, scoreboard }) => {
 
   const {
     deals,
@@ -14,27 +64,36 @@ const App: FunctionComponent<{ db: DB }> = observer(({ db }) => {
     stage,
     scoresheet,
     scores,
-    newGame,
     undo
-  } = db
+  } = scoreboard
+
+  const {
+    newGame
+  } = manager
 
   const handleNewGame = () => {
     if (confirm('Are ya sure?')) {
       newGame()
     }
   }
+  const share = () => {
+    const uri = encodeURIComponent(btoa(JSON.stringify(scoresheet)))
+    navigator.share({ url: uri })
+
+  }
 
   return (
     <div className="bg-gray-100">
       <header className="flex justify-between p-1">
         <h1 className="text-lg font-semibold font-serif text-left my-2 inline-block">Contract whist</h1>
+        <button className="border px-2" onClick={share}>Share</button>
         <button className="border px-2" onClick={undo}>Undo</button>
         <button className="border px-2" onClick={handleNewGame}>New game</button>
       </header>
       <div className="grid grid-cols-5">
         <div></div>
         {players.map(p => (
-          <Player id={p.id} key={p.id} db={db} />
+          <Player id={p.id} key={p.id} db={scoreboard} />
         ))}
 
         {deals.map((t, t_idx) => (
@@ -71,18 +130,18 @@ const App: FunctionComponent<{ db: DB }> = observer(({ db }) => {
       </div>
 
       {stage === 'bid' &&
-        <BidStage db={db} />
+        <BidStage db={scoreboard} />
       }
 
       {stage === 'score' &&
-        <ScoreStage db={db} />
+        <ScoreStage db={scoreboard} />
       }
 
     </div>
   )
 })
 
-const BidStage: FunctionComponent<{ db: DB }> = ({ db }) => {
+const BidStage: FunctionComponent<{ db: Scoreboard }> = ({ db }) => {
   const {
     current_turn_idx: current_player,
     setBidForPlayer,
@@ -112,7 +171,7 @@ const BidStage: FunctionComponent<{ db: DB }> = ({ db }) => {
   )
 }
 
-const ScoreStage: FunctionComponent<{ db: DB }> = ({ db }) => {
+const ScoreStage: FunctionComponent<{ db: Scoreboard }> = ({ db }) => {
 
   const {
     current_turn_idx: current_player,
@@ -138,7 +197,7 @@ const ScoreStage: FunctionComponent<{ db: DB }> = ({ db }) => {
   )
 }
 
-const Player: FunctionComponent<{ db: DB, id: number }> = ({ db, id }) => {
+const Player: FunctionComponent<{ db: Scoreboard, id: number }> = ({ db, id }) => {
   const {
     players,
     dealer_idx,
