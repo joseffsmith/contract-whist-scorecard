@@ -9,7 +9,7 @@ const App: FunctionComponent<{ db: DB }> = observer(({ db }) => {
   const {
     deals,
     players,
-    current_player,
+    current_turn_idx: current_player,
     current_round_idx,
     stage,
     scoresheet,

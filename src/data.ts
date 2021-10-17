@@ -3,32 +3,34 @@ import { action, computed, observable, reaction, toJS } from "mobx"
 
 type Stage = 'bid' | 'score'
 type Turn = { bid: null | number, score: null | number }
-type Round = { bid: null | number, score: null | number }[]
+type Round = Turn[]
 type Scoresheet = Round[]
-export class DB {
-  deals = [
-    { id: 0, num_cards: 7, suit_colour: 'text-red-500', suit: '♥', },
-    { id: 1, num_cards: 6, suit_colour: 'text-black', suit: '♣', },
-    { id: 2, num_cards: 5, suit_colour: 'text-red-500', suit: '♦', },
-    { id: 3, num_cards: 4, suit_colour: 'text-black', suit: '♠', },
-    { id: 4, num_cards: 3, suit_colour: 'text-green-500', suit: '🚫', },
-    { id: 5, num_cards: 2, suit_colour: 'text-red-500', suit: '♥', },
-    { id: 6, num_cards: 1, suit_colour: 'text-black', suit: '♣', },
-    { id: 7, num_cards: 2, suit_colour: 'text-red-500', suit: '♦', },
-    { id: 8, num_cards: 3, suit_colour: 'text-black', suit: '♠', },
-    { id: 9, num_cards: 4, suit_colour: 'text-green-500', suit: '🚫', },
-    { id: 10, num_cards: 5, suit_colour: 'text-red-500', suit: '♥', },
-    { id: 11, num_cards: 6, suit_colour: 'text-black', suit: '♣', },
-    { id: 12, num_cards: 7, suit_colour: 'text-red-500', suit: '♦', },
-  ]
-  default_players = [
-    { id: 0, name: 'Player 1' },
-    { id: 1, name: 'Player 2' },
-    { id: 2, name: 'Player 3' },
-    { id: 3, name: 'Player 4' },
-  ]
 
-  @observable players = this.default_players
+const DEALS = [
+  { id: 0, num_cards: 7, suit_colour: 'text-red-500', suit: '♥', },
+  { id: 1, num_cards: 6, suit_colour: 'text-black', suit: '♣', },
+  { id: 2, num_cards: 5, suit_colour: 'text-red-500', suit: '♦', },
+  { id: 3, num_cards: 4, suit_colour: 'text-black', suit: '♠', },
+  { id: 4, num_cards: 3, suit_colour: 'text-green-500', suit: '🚫', },
+  { id: 5, num_cards: 2, suit_colour: 'text-red-500', suit: '♥', },
+  { id: 6, num_cards: 1, suit_colour: 'text-black', suit: '♣', },
+  { id: 7, num_cards: 2, suit_colour: 'text-red-500', suit: '♦', },
+  { id: 8, num_cards: 3, suit_colour: 'text-black', suit: '♠', },
+  { id: 9, num_cards: 4, suit_colour: 'text-green-500', suit: '🚫', },
+  { id: 10, num_cards: 5, suit_colour: 'text-red-500', suit: '♥', },
+  { id: 11, num_cards: 6, suit_colour: 'text-black', suit: '♣', },
+  { id: 12, num_cards: 7, suit_colour: 'text-red-500', suit: '♦', },
+]
+
+const PLAYERS = [
+  { id: 0, name: 'Player 1' },
+  { id: 1, name: 'Player 2' },
+  { id: 2, name: 'Player 3' },
+  { id: 3, name: 'Player 4' },
+]
+export class DB {
+  @observable deals = DEALS
+  @observable players = PLAYERS
   @observable scoresheet: Scoresheet
 
   constructor() {
@@ -40,7 +42,7 @@ export class DB {
   loadData = () => {
     Promise.all([
       this.localGet('players').then(action((resp: any) => {
-        this.players = resp ?? this.default_players
+        this.players = resp ?? PLAYERS
       })),
       this.localGet('scoresheet').then(action((resp: any) => {
         this.scoresheet = resp ?? this.getEmptyScoreSheet()
@@ -68,34 +70,18 @@ export class DB {
     }, Array.from(this.players.values()).map(p => 0))
   }
 
-  @computed get current_round() { return this.getCurrentRoundFromScoresheet(this.scoresheet) }
-  @computed get current_round_idx() { return this.current_round ? this.scoresheet.indexOf(this.current_round) : null }
+  @computed get stage(): Stage | null { return (this.current_round && this.current_turn) ? this.getCurrentStageFromTurn(this.current_turn) : null }
   @computed get current_turn() { return this.current_round && this.current_round_idx !== null ? this.getCurrentTurnFromRound(this.current_round, this.current_round_idx) : null }
   @computed get current_turn_idx() { return this.current_turn && this.current_round ? this.current_round.indexOf(this.current_turn) : null }
+  @computed get current_round() { return this.getCurrentRoundFromScoresheet(this.scoresheet) }
+  @computed get current_round_idx() { return this.current_round ? this.scoresheet.indexOf(this.current_round) : null }
   @computed get dealer_idx() { return this.current_round_idx !== null ? (this.current_round_idx + this.players.length - 1) % this.players.length : null }
-
-
-  @computed get stage(): Stage | null {
-    if (!this.current_round) {
-      return null
-    }
-    if (!this.current_turn) {
-      return null
-    }
-    return this.getCurrentStageFromTurn(this.current_turn)
-  }
+  @computed get current_deal() { return this.current_round_idx !== null ? this.deals[this.current_round_idx] : null }
 
   @computed get bids_left() {
     return (this.current_round && this.current_round.reduce((acc, curr_val) => {
       return acc + (curr_val.bid === null ? 1 : 0)
     }, 0)) ?? 0
-  }
-
-  @computed get current_deal() {
-    return this.current_round_idx !== null ? this.deals[this.current_round_idx] : null
-  }
-  @computed get current_player() {
-    return this.current_turn_idx
   }
 
   @computed get bid_options(): { number: number, disabled: boolean }[] {
