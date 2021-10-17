@@ -59,7 +59,6 @@ export class DB {
   }
 
   @action newGame = () => {
-    this.players = this.default_players
     this.scoresheet = this.getEmptyScoreSheet()
   }
 
