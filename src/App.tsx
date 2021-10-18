@@ -207,12 +207,8 @@ const Player: FunctionComponent<{ db: Scoreboard, id: number }> = ({ db, id }) =
   }, [changing_name])
 
   const handleChangePlayer = e => {
-    if (temp_name.trim()) {
-      changePlayer(id, temp_name)
-      setChangingName(false)
-      return
-    }
-    input.current?.select()
+    changePlayer(id, temp_name)
+    setChangingName(false)
   }
 
   return (
@@ -220,7 +216,7 @@ const Player: FunctionComponent<{ db: Scoreboard, id: number }> = ({ db, id }) =
       {changing_name ?
         <input className="w-full h-full text-center" ref={input} value={temp_name} onChange={e => changeTempName(e.target.value)} onBlur={handleChangePlayer} />
         :
-        <button className="w-full h-full border p-1 truncate" onClick={() => setChangingName(true)}>{name ? name : 'Add player'}</button>
+        <button onFocus={() => setChangingName(true)} className="w-full h-full border p-1 truncate" onClick={() => setChangingName(true)}>{name ? name : 'Add player'}</button>
       }
     </div>
   )
