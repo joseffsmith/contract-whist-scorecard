@@ -83,7 +83,7 @@ const App: FunctionComponent<{ manager: Manager, scoreboard: Scoreboard }> = obs
   }
 
   return (
-    <div className="bg-gray-100 h-screen flex flex-col">
+    <div className="bg-gray-100 h-[95vh] flex flex-col">
       <header className="flex justify-between p-1">
         <h1 className="text-lg font-semibold font-serif text-left my-2 inline-block">Contract whist</h1>
         {/* <button className="border px-2" onClick={share}>Share</button> */}
