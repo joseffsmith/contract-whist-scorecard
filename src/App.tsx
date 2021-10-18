@@ -83,7 +83,7 @@ const App: FunctionComponent<{ manager: Manager, scoreboard: Scoreboard }> = obs
   }
 
   return (
-    <div className="bg-gray-100 h-[95vh] flex flex-col">
+    <div className="bg-gray-100 h-[95vh] flex flex-col overscroll-y-none">
       <header className="flex justify-between p-1">
         <h1 className="text-lg font-semibold font-serif text-left my-2 inline-block">Contract whist</h1>
         {/* <button className="border px-2" onClick={share}>Share</button> */}
@@ -98,7 +98,7 @@ const App: FunctionComponent<{ manager: Manager, scoreboard: Scoreboard }> = obs
 
         {deals.map((t, t_idx) => (
           <Fragment key={t_idx}>
-            <div className="flex items-center pl-2 ">
+            <div className="flex items-center pl-2">
               <div className="font-semibold text-lg w-3 text-center">
                 {t.num_cards}
               </div>
