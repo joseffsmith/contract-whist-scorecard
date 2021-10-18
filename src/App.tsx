@@ -1,95 +1,127 @@
 import { Fragment, FunctionComponent, useEffect, useRef, useState } from 'react'
 import { observer } from "mobx-react"
-import { Route, Switch, useParams } from 'react-router-dom'
+import { Link, Redirect, Route, Switch, useParams } from 'react-router-dom'
 
-import { Manager, Scoreboard } from './data'
+import { loadPlayers, loadScoresheet, Manager, Scoreboard, Scoresheet } from './data'
 
-function useInstance<T>(instanceFunc: () => T) {
-  const ref = useRef<T | null>(null)
-  if (ref.current === null) {
-    ref.current = instanceFunc()
-  }
-  return ref.current
-}
 
-export const Root = observer(() => {
+const Root = observer(() => {
   const manager = useInstance(() => new Manager())
-  return (
-    <Switch>
-      <Route path={["/", "/:uri"]}>
-        <MiddleMan manager={manager} />
-      </Route>
-    </Switch>
-  )
-})
-
-const MiddleMan: FunctionComponent<{ manager: Manager }> = observer(({ manager }) => {
-  const { uri } = useParams<{ uri?: string }>()
 
   const {
-    importGame,
-    loadMostRecentGame
+    newGame,
+    getMostRecentGame,
   } = manager
 
-  useEffect(() => {
-    if (!manager.games_loaded) {
-      return
-    }
-    if (uri) {
-      importGame(uri)
-      return
-    }
-    return (
-      loadMostRecentGame()
-    )
-
-  }, [uri, manager.games_loaded])
-
-  const scoreboard = manager.current_scoreboard
-  if (!scoreboard || !manager.games_loaded) {
+  if (!manager.games_loaded) {
     return null
   }
 
-  return <App manager={manager} scoreboard={scoreboard} />
+  const most_recent_game = getMostRecentGame()
+
+  return (
+    <>
+      <header className="flex justify-between">
+        <h1 className="font-serif font-bold">Contract whist</h1>
+        <span className="space-x-2">
+          <Link to={"/games"}><button className="border px-2">All games</button></Link>
+          <Link to={"/new_game"}><button className="border px-2">New game</button></Link>
+        </span>
+      </header>
+      <Switch>
+
+        <Route path={"/import/:uri"}>
+          {/* TODO */}
+        </Route>
+
+        <Route path="/new_game" children={() => {
+          const game = newGame()
+          return <Redirect to={`/games/${game.uuid}`} />
+        }} />
+
+        <Route path="/games/:uuid">
+          <Game />
+        </Route>
+
+        <Route path={"/games"}>
+          <ManageGames manager={manager} />
+        </Route>
+
+        <Route path="/">
+          <Redirect to={`/games/${most_recent_game.uuid}`} />
+        </Route>
+      </Switch>
+    </>
+  )
 })
 
+const ManageGames: FunctionComponent<{ manager: Manager }> = observer(({ manager }) => {
+  return (
+    <div className="text-sm overflow-scroll">
+      {manager.games.map(g => {
+        return (
+          <div key={g.uuid} className="p-1 flex justify-between">
+            <span>{g.created_at.toLocaleString()}</span>
+            <Link to={`/games/${g.uuid}`}><button className="border px-2">Load game</button></Link>
+          </div>
+        )
+      })}
+    </div>
+  )
+})
 
-const App: FunctionComponent<{ manager: Manager, scoreboard: Scoreboard }> = observer(({ manager, scoreboard }) => {
+const Game = observer(() => {
+  const { uuid } = useParams<{ uuid: string }>()
+
+  const [scoreboard, setScoreboard] = useState<Scoreboard | null>(null)
+
+  useEffect(() => {
+    if (!uuid) {
+      return
+    }
+    loadScoresheet(uuid)
+      .then(scoresheet => {
+        loadPlayers(uuid)
+          .then(players => {
+            const scoreboard = new Scoreboard(uuid, scoresheet, players)
+            setScoreboard(scoreboard)
+          })
+      })
+  }, [uuid])
+
+  const shareGame = (scoresheet: Scoresheet) => {
+    const uri = location.host + '/import/' + encodeURIComponent(btoa(JSON.stringify(scoresheet)))
+    try {
+      navigator.share({ url: uri })
+    } catch (err) {
+      const type = "text/plain"
+      const blob = new Blob([uri], { type })
+      const data = [new ClipboardItem({ [type]: blob })]
+      navigator.clipboard.write(data)
+    }
+  }
+
+  if (!scoreboard) {
+    return null
+  }
 
   const {
     deals,
     players,
     current_turn_idx: current_player,
     current_round_idx,
-    stage,
     scoresheet,
+    stage,
     scores,
     undo
   } = scoreboard
 
-  const {
-    newGame
-  } = manager
-
-  const handleNewGame = () => {
-    if (confirm('Are ya sure?')) {
-      newGame()
-    }
-  }
-  const share = () => {
-    const uri = encodeURIComponent(btoa(JSON.stringify(scoresheet)))
-    navigator.share({ url: uri })
-
-  }
-
   return (
     <>
-      <header className="flex justify-between p-1">
-        <h1 className="text-lg font-semibold font-serif text-left my-2 inline-block">Contract whist</h1>
-        {/* <button className="border px-2" onClick={share}>Share</button> */}
+      <div className="flex justify-end space-x-2 px-1 my-1">
+        <button className="border px-2" onClick={() => shareGame(scoresheet)}>Share</button>
         <button className="border px-2" onClick={undo}>Undo</button>
-        <button className="border px-2" onClick={handleNewGame}>New game</button>
-      </header>
+      </div>
       <div className="grid grid-cols-5 flex-grow">
         <div></div>
         {players.map(p => (
@@ -167,7 +199,6 @@ const BidStage: FunctionComponent<{ db: Scoreboard }> = ({ db }) => {
 }
 
 const ScoreStage: FunctionComponent<{ db: Scoreboard }> = ({ db }) => {
-
   const {
     current_turn_idx: current_player,
     setScoreForPlayer,
@@ -194,7 +225,6 @@ const Player: FunctionComponent<{ db: Scoreboard, id: number }> = ({ db, id }) =
     changePlayer,
   } = db
   const name = players[id].name
-
 
   const [temp_name, changeTempName] = useState('')
   const [changing_name, setChangingName] = useState(false)
@@ -223,4 +253,12 @@ const Player: FunctionComponent<{ db: Scoreboard, id: number }> = ({ db, id }) =
 }
 
 
-export default App
+function useInstance<T>(instanceFunc: () => T) {
+  const ref = useRef<T | null>(null)
+  if (ref.current === null) {
+    ref.current = instanceFunc()
+  }
+  return ref.current
+}
+
+export default Root

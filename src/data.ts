@@ -5,7 +5,8 @@ import { v4 as uuidv4 } from 'uuid'
 type Stage = 'bid' | 'score'
 type Turn = { bid: null | number, score: null | number }
 type Round = Turn[]
-type Scoresheet = Round[]
+export type Scoresheet = Round[]
+export type Player = { id: number, name: string }
 type Game = {
   uuid: string,
   created_at: Date
@@ -27,23 +28,21 @@ const DEALS = [
   { id: 12, num_cards: 7, suit_colour: 'text-red-500', suit: '♦', },
 ]
 
-const PLAYERS = [
+const PLAYERS: Player[] = [
   { id: 0, name: 'Player 1' },
   { id: 1, name: 'Player 2' },
   { id: 2, name: 'Player 3' },
   { id: 3, name: 'Player 4' },
 ]
 
-const localGet = (key: string): any => {
+const localGet = (key: string): Promise<any> => {
   return localforage.getItem(key)
 }
-const localSet = (key: string, vals: any): any => {
+const localSet = (key: string, vals: any): Promise<any> => {
   return localforage.setItem(key, toJS(vals))
 }
 export class Manager {
   @observable games: Game[] = []
-  @observable current_game: Game | null = null
-  @observable current_scoreboard: Scoreboard | null = null
   @observable games_loaded: boolean = false
 
   constructor() {
@@ -64,58 +63,70 @@ export class Manager {
   }
 
   @action
-  loadScoreboard = async (uuid: string): Promise<Scoresheet> => {
-    return localGet(`${uuid}-scoresheet`).then(resp => resp ?? getEmptyScoreSheet())
-  }
-
-  @action loadMostRecentGame = () => {
+  getMostRecentGame = (): Game => {
     if (this.games.length === 0) {
-      this.newGame()
-      return
+      const game = {
+        uuid: uuidv4(),
+        created_at: new Date(),
+      }
+      this.games.unshift(game)
     }
-    this.loadGame(this.games[0].uuid)
+    return this.games[0]
   }
 
   @action
-  newGame = () => {
-    this.current_game = {
+  newGame = (): Game => {
+    // save previous players (if any) as next players
+    const previous_game = this.getMostRecentGame()
+    const game = {
       uuid: uuidv4(),
       created_at: new Date(),
     }
-    this.games.unshift(this.current_game)
-    this.current_scoreboard = new Scoreboard(this.current_game.uuid)
+
+    loadPlayers(previous_game.uuid)
+      .then(players => {
+        localSet(`${game.uuid}-players`, players)
+      })
+
+    this.games.unshift(game)
+    return game
   }
 
-  @action
-  loadGame = async (uuid: string) => {
-    const scoresheet = await this.loadScoreboard(uuid)
-    this.current_scoreboard = new Scoreboard(uuid, scoresheet)
-  }
+  // @action
+  // loadGame = async (uuid: string) => {
+  //   const scoresheet = await this.loadScoreboard(uuid)
+  //   this.current_scoreboard = new Scoreboard(uuid, scoresheet)
+  // }
 
   // Import by navigating to a url, if they keep hitting it, we keep importing
   // TODO probably don't want to import the same game multiple times, only import when uri changes?
   @action
-  importGame = (uri: string) => {
+  importGame = (uri: string): Game => {
     const scoresheet = JSON.parse(atob(decodeURIComponent(uri)))
     const uuid = uuidv4()
-    this.current_game = {
+    const game = {
       uuid,
       created_at: new Date(),
     }
-    this.games.unshift(this.current_game)
-    this.current_scoreboard = new Scoreboard(uuid, scoresheet)
+    this.games.unshift(game)
+    localSet(`${uuid}-scoresheet`, scoresheet)
+    // this.current_scoreboard = new Scoreboard(uuid, scoresheet)
+    return game
   }
+
 }
 
 export class Scoreboard {
-  @observable deals = DEALS
-  @observable players = PLAYERS
-  @observable scoresheet: Scoresheet
   @observable uuid: string
+  @observable scoresheet: Scoresheet
+  @observable players: Player[]
 
-  constructor(uuid: string, scoresheet?: Scoresheet) {
-    this.scoresheet = scoresheet ?? getEmptyScoreSheet()
+  @observable deals = DEALS
+
+  constructor(uuid: string, scoresheet: Scoresheet, players: Player[]) {
     this.uuid = uuid
+    this.scoresheet = scoresheet
+    this.players = players
 
     localforage.setDriver([localforage.INDEXEDDB, localforage.WEBSQL, localforage.LOCALSTORAGE])
 
@@ -128,7 +139,6 @@ export class Scoreboard {
       () => localSet(`${this.uuid}-scoresheet`, this.scoresheet)
     )
   }
-
 
   @computed get scores() {
     return this.scoresheet.reduce((acc, curr_value) => {
@@ -261,5 +271,26 @@ export class Scoreboard {
   }
 }
 
+export const loadPlayers = (uuid: string): Promise<Player[]> => {
+  return localGet(`${uuid}-players`)
+    .then(players => {
+      if (!players) {
+        players = PLAYERS
+      }
+      return players
+    })
+}
+
+export const loadScoresheet = (uuid: string): Promise<Scoresheet> => {
+  return localGet(`${uuid}-scoresheet`)
+    .then(scoresheet => {
+      if (!scoresheet) {
+        scoresheet = getEmptyScoreSheet()
+      }
+      return scoresheet
+    })
+}
+
 export const getNewRound = (): Round => PLAYERS.map(p => { return { 'bid': null, 'score': null } })
+
 export const getEmptyScoreSheet = (): Scoresheet => DEALS.map(deal => getNewRound())
