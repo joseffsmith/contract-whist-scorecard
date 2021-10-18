@@ -110,10 +110,10 @@ const App: FunctionComponent<{ manager: Manager, scoreboard: Scoreboard }> = obs
             {players.map((p, p_idx) => {
               return (
                 <div key={p.id} className={`text-xl border-b ${p_idx % 4 === 3 ? '' : 'border-r'} border-gray-400 flex justify-center items-center text-center`}>
-                  <div className={`${current_player === p_idx && current_round_idx === t_idx && stage === 'bid' ? 'bg-green-300' : ''} h-full flex items-center justify-center flex-grow w-7 border-r`}>
+                  <div className={`${current_player === p_idx && current_round_idx === t_idx && stage === 'bid' ? 'bg-green-300' : ''} h-full flex items-center justify-center flex-grow w-full border-r`}>
                     {scoresheet[t_idx][p_idx].bid}
                   </div>
-                  <div className={`${current_player === p_idx && current_round_idx === t_idx && stage === 'score' ? 'bg-green-300' : ''} h-full flex items-center justify-center flex-grow w-7 `}>
+                  <div className={`${current_player === p_idx && current_round_idx === t_idx && stage === 'score' ? 'bg-green-300' : ''} h-full flex items-center justify-center flex-grow w-full `}>
                     {scoresheet[t_idx][p_idx].score}
                   </div>
                 </div>
