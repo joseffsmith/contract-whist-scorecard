@@ -83,14 +83,14 @@ const App: FunctionComponent<{ manager: Manager, scoreboard: Scoreboard }> = obs
   }
 
   return (
-    <div className="bg-gray-100">
+    <div className="bg-gray-100 h-screen flex flex-col">
       <header className="flex justify-between p-1">
         <h1 className="text-lg font-semibold font-serif text-left my-2 inline-block">Contract whist</h1>
-        <button className="border px-2" onClick={share}>Share</button>
+        {/* <button className="border px-2" onClick={share}>Share</button> */}
         <button className="border px-2" onClick={undo}>Undo</button>
         <button className="border px-2" onClick={handleNewGame}>New game</button>
       </header>
-      <div className="grid grid-cols-5">
+      <div className="grid grid-cols-5 flex-grow">
         <div></div>
         {players.map(p => (
           <Player id={p.id} key={p.id} db={scoreboard} />
@@ -98,22 +98,22 @@ const App: FunctionComponent<{ manager: Manager, scoreboard: Scoreboard }> = obs
 
         {deals.map((t, t_idx) => (
           <Fragment key={t_idx}>
-            <div className="flex items-baseline">
-              <div className="inline-block pl-1 w-2 text-center font-semibold align-middle">
+            <div className="flex items-center">
+              <div className="inline-block pl-1 w-2 text-center font-semibold align-middle text-lg">
                 {t.num_cards}
-              </div>&nbsp;
-              <div className={`${t.suit_colour} w-5 h-6 pt-0.5 align-middle inline-block text-center`}>
+              </div>&nbsp;&nbsp;
+              <span className={`${t.suit_colour}`}>
                 {t.suit}
-              </div>
+              </span>
             </div>
 
             {players.map((p, p_idx) => {
               return (
-                <div key={p.id} className="border-b border-r last:border-r-0 text-right flex relative justify-between items-center">
-                  <div className={`${current_player === p_idx && current_round_idx === t_idx && stage === 'bid' ? 'bg-green-300' : ''} text-center h-full flex-grow w-7 border-r`}>
+                <div key={p.id} className={`text-xl border-b ${p_idx % 4 === 3 ? '' : 'border-r'} border-gray-400 flex justify-center items-center text-center`}>
+                  <div className={`${current_player === p_idx && current_round_idx === t_idx && stage === 'bid' ? 'bg-green-300' : ''} h-full flex items-center justify-center flex-grow w-7 border-r`}>
                     {scoresheet[t_idx][p_idx].bid}
                   </div>
-                  <div className={`${current_player === p_idx && current_round_idx === t_idx && stage === 'score' ? 'bg-green-300' : ''} text-center h-full flex-grow w-7 `}>
+                  <div className={`${current_player === p_idx && current_round_idx === t_idx && stage === 'score' ? 'bg-green-300' : ''} h-full flex items-center justify-center flex-grow w-7 `}>
                     {scoresheet[t_idx][p_idx].score}
                   </div>
                 </div>
@@ -124,7 +124,7 @@ const App: FunctionComponent<{ manager: Manager, scoreboard: Scoreboard }> = obs
 
         <div>Totals</div>
         {scores.map((s, idx) => {
-          return <div key={idx} className="text-center">{s}</div>
+          return <div key={idx} className="text-xl text-center border-r border-gray-400 last:border-r-0 ">{s}</div>
         })}
 
       </div>
@@ -154,20 +154,15 @@ const BidStage: FunctionComponent<{ db: Scoreboard }> = ({ db }) => {
     }
   }
   return (
-    <>
-      <div className="text-center">
-        Bid
-      </div>
-      <div className="flex justify-between w-full">
-        {bid_options.map(opt => {
-          return (
-            <button key={opt.number} onClick={() => handleClick(opt)} className={`${opt.disabled ? 'opacity-50' : ''} border py-2 flex-grow m-1`}>
-              {opt.number}
-            </button>
-          )
-        })}
-      </div>
-    </>
+    <div className="flex justify-between w-full">
+      {bid_options.map(opt => {
+        return (
+          <button key={opt.number} onClick={() => handleClick(opt)} className={`${opt.disabled ? 'opacity-50' : ''} border border-gray-900 py-2 flex-grow m-1`}>
+            {opt.number}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 
@@ -185,15 +180,10 @@ const ScoreStage: FunctionComponent<{ db: Scoreboard }> = ({ db }) => {
   }
 
   return (
-    <>
-      <div className="text-center">
-        Made it?
-      </div>
-      <div className="flex">
-        <button className="flex-grow border py-2 m-1" onClick={() => setMadeIt(false)}>No</button>
-        <button className="flex-grow border py-2 m-1" onClick={() => setMadeIt(true)}>Yes</button>
-      </div>
-    </>
+    <div className="flex">
+      <button className="flex-grow border border-gray-900 py-2 m-1" onClick={() => setMadeIt(false)}>Failed</button>
+      <button className="flex-grow border border-gray-900 py-2 m-1" onClick={() => setMadeIt(true)}>Made it</button>
+    </div>
   )
 }
 
@@ -226,7 +216,7 @@ const Player: FunctionComponent<{ db: Scoreboard, id: number }> = ({ db, id }) =
   }
 
   return (
-    <div className={`${dealer_idx === id ? 'bg-red-500' : ''} text-center`}>
+    <div className={`${dealer_idx === id ? 'bg-red-500' : ''} text-center text-sm`}>
       {changing_name ?
         <input className="w-full h-full text-center" ref={input} value={temp_name} onChange={e => changeTempName(e.target.value)} onBlur={handleChangePlayer} />
         :
