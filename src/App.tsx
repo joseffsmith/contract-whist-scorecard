@@ -98,11 +98,11 @@ const App: FunctionComponent<{ manager: Manager, scoreboard: Scoreboard }> = obs
 
         {deals.map((t, t_idx) => (
           <Fragment key={t_idx}>
-            <div className="flex items-center">
-              <div className="inline-block pl-1 w-2 text-center font-semibold align-middle text-lg">
+            <div className="flex items-center pl-2 ">
+              <div className="font-semibold text-lg w-3 text-center">
                 {t.num_cards}
-              </div>&nbsp;&nbsp;
-              <span className={`${t.suit_colour}`}>
+              </div>
+              <span className={`${t.suit_colour} text-xl w-6 text-center`}>
                 {t.suit}
               </span>
             </div>
@@ -122,7 +122,7 @@ const App: FunctionComponent<{ manager: Manager, scoreboard: Scoreboard }> = obs
           </Fragment>
         ))}
 
-        <div>Totals</div>
+        <div className="text-center">Totals</div>
         {scores.map((s, idx) => {
           return <div key={idx} className="text-xl text-center border-r border-gray-400 last:border-r-0 ">{s}</div>
         })}
