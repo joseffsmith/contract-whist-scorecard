@@ -56,16 +56,30 @@ const Root = observer(() => {
 })
 
 const ManageGames: FunctionComponent<{ manager: Manager }> = observer(({ manager }) => {
+
+  // bit of a hack to make sure the scores stay up to date on this page
+  useEffect(() => {
+    manager.updateHighlightScores()
+  }, [manager.highlight_scores])
+
   return (
     <div className="text-sm overflow-scroll">
-      {manager.games.map(g => {
-        return (
-          <div key={g.uuid} className="p-1 flex justify-between">
-            <span>{g.created_at.toLocaleString()}</span>
-            <Link to={`/games/${g.uuid}`}><button className="border px-2">Load game</button></Link>
-          </div>
-        )
-      })}
+      {Array.from(manager.highlight_scores.entries())
+        .sort(([a_uuid, a_data], [b_uuid, b_data]) => b_data.created_at.getTime() - a_data.created_at.getTime())
+        .map(([uuid, data]) => {
+          return (
+            <div key={uuid} className="p-1">
+              <div className="flex justify-between">
+                <span>{data.created_at.toLocaleString()}</span>
+                <Link to={`/games/${uuid}`}><button className="border px-2">Load game</button></Link>
+              </div>
+              <div className="grid grid-cols-4">
+                {data.players.map((p, idx) => <div key={idx}>{p.name}</div>)}
+                {data.scores.map((s, idx) => <div key={idx} className={`${Math.max(...data.scores) === s && s > 0 ? 'bg-green-500' : ''}`}>{s}</div>)}
+              </div>
+            </div>
+          )
+        })}
     </div>
   )
 })

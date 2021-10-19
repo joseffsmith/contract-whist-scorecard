@@ -3,10 +3,16 @@ import { action, computed, observable, reaction, toJS } from "mobx"
 import { v4 as uuidv4 } from 'uuid'
 
 type Stage = 'bid' | 'score'
-type Turn = { bid: null | number, score: null | number }
+type Turn = {
+  bid: null | number,
+  score: null | number
+}
 type Round = Turn[]
 export type Scoresheet = Round[]
-export type Player = { id: number, name: string }
+export type Player = {
+  id: number,
+  name: string
+}
 type Game = {
   uuid: string,
   created_at: Date
@@ -44,6 +50,7 @@ const localSet = (key: string, vals: any): Promise<any> => {
 export class Manager {
   @observable games: Game[] = []
   @observable games_loaded: boolean = false
+  @observable highlight_scores: Map<string, { players: Player[], scores: number[], created_at: Date }> = new Map()
 
   constructor() {
     localforage.setDriver([localforage.INDEXEDDB, localforage.WEBSQL, localforage.LOCALSTORAGE])
@@ -114,6 +121,23 @@ export class Manager {
     return game
   }
 
+  @action updateHighlightScores() {
+    this.games.forEach(g => {
+      localGet(`${g.uuid}-scoresheet`)
+        .then(scoresheet => {
+          localGet(`${g.uuid}-players`)
+            .then(players => {
+              console.log(scoresheet, players)
+              const scoreboard = new Scoreboard(g.uuid, scoresheet, players)
+              this.highlight_scores.set(g.uuid, {
+                players,
+                scores: scoreboard.scores,
+                created_at: g.created_at,
+              })
+            })
+        })
+    })
+  }
 }
 
 export class Scoreboard {
@@ -130,6 +154,8 @@ export class Scoreboard {
 
     localforage.setDriver([localforage.INDEXEDDB, localforage.WEBSQL, localforage.LOCALSTORAGE])
 
+    localSet(`${this.uuid}-players`, this.players)
+    localSet(`${this.uuid}-scoresheet`, this.scoresheet)
     reaction(
       () => this.players.map(todo => [todo.id, todo.name]),
       () => localSet(`${this.uuid}-players`, this.players)
