@@ -99,14 +99,6 @@ export class Manager {
     return game
   }
 
-  // @action
-  // loadGame = async (uuid: string) => {
-  //   const scoresheet = await this.loadScoreboard(uuid)
-  //   this.current_scoreboard = new Scoreboard(uuid, scoresheet)
-  // }
-
-  // Import by navigating to a url, if they keep hitting it, we keep importing
-  // TODO probably don't want to import the same game multiple times, only import when uri changes?
   @action
   importGame = (uri: string): Game => {
     const { players, scoresheet } = JSON.parse(atob(decodeURIComponent(uri)))

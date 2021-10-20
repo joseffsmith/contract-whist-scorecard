@@ -21,11 +21,11 @@ const Root = observer(() => {
 
   return (
     <>
-      <header className="flex justify-between">
-        <h1 className="font-serif font-bold">Contract whist</h1>
+      <header className="flex items-baseline justify-between mt-px">
+        <h1 className="font-mono text-sm">Contract whist</h1>
         <span className="space-x-2">
-          <Link to={"/games"}><button className="border px-2">All games</button></Link>
-          <Link to={"/new_game"}><button className="border px-2">New game</button></Link>
+          <Link to={"/games"}><button className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900">All games</button></Link>
+          <Link to={"/new_game"}><button className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900">New game</button></Link>
         </span>
       </header>
       <Switch>
@@ -77,7 +77,7 @@ const ManageGames: FunctionComponent<{ manager: Manager }> = observer(({ manager
             <div key={uuid} className="p-1">
               <div className="flex justify-between">
                 <span>{data.created_at.toLocaleString()}</span>
-                <Link to={`/games/${uuid}`}><button className="border px-2">Load game</button></Link>
+                <Link to={`/games/${uuid}`}><button className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900">Load game</button></Link>
               </div>
               <div className="grid grid-cols-4">
                 {data.players.map((p, idx) => <div key={idx}>{p.name}</div>)}
@@ -146,8 +146,8 @@ const Game = observer(() => {
   return (
     <>
       <div className="flex justify-end space-x-2 px-1 my-1">
-        <button className="border px-2" onClick={shareGame}>Share</button>
-        <button className="border px-2" onClick={undo}>Undo</button>
+        <button className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900" onClick={shareGame}>Share</button>
+        <button className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900" onClick={undo}>Undo</button>
       </div>
       <div className="grid grid-cols-5 flex-grow">
         <div></div>
@@ -157,7 +157,7 @@ const Game = observer(() => {
 
         {deals.map((t, t_idx) => (
           <Fragment key={t_idx}>
-            <div className="flex items-center pl-2">
+            <div className={`${t_idx % 2 === 1 ? 'bg-pink-100' : ''} flex items-center pl-2`}>
               <div className="font-semibold text-lg w-3 text-center">
                 {t.num_cards}
               </div>
@@ -168,7 +168,7 @@ const Game = observer(() => {
 
             {players.map((p, p_idx) => {
               return (
-                <div key={p.id} className={`text-xl border-b ${p_idx % 4 === 3 ? '' : 'border-r'} border-gray-400 flex justify-center items-center text-center`}>
+                <div key={p.id} className={`${t_idx % 2 === 1 ? 'bg-pink-100' : ''} text-xl border-b ${p_idx % 4 === 3 ? '' : 'border-r'} border-gray-400 flex justify-center items-center text-center`}>
                   <div className={`${current_player === p_idx && current_round_idx === t_idx && stage === 'bid' ? 'bg-green-300' : ''} h-full flex items-center justify-center flex-grow w-full border-r`}>
                     {scoresheet[t_idx][p_idx].bid}
                   </div>
@@ -216,7 +216,10 @@ const BidStage: FunctionComponent<{ db: Scoreboard }> = ({ db }) => {
     <div className="flex justify-between w-full">
       {bid_options.map(opt => {
         return (
-          <button key={opt.number} onClick={() => handleClick(opt)} className={`${opt.disabled ? 'opacity-50' : ''} border border-gray-900 py-2 flex-grow m-1`}>
+          <button
+            key={opt.number}
+            onClick={() => handleClick(opt)}
+            className={`${opt.disabled ? 'border-purple-50 bg-white opacity-50' : 'border-gray-900 bg-indigo-100'} border rounded-sm  py-2 flex-1 m-0.5`}>
             {opt.number}
           </button>
         )
@@ -269,11 +272,11 @@ const Player: FunctionComponent<{ db: Scoreboard, id: number }> = ({ db, id }) =
   }
 
   return (
-    <div className={`${dealer_idx === id ? 'bg-red-500' : ''} text-center text-sm`}>
+    <div className={`${dealer_idx === id ? 'bg-red-500' : ''} text-center text-xs`}>
       {changing_name ?
         <input className="w-full h-full text-center" ref={input} value={temp_name} onChange={e => changeTempName(e.target.value)} onBlur={handleChangePlayer} />
         :
-        <button onFocus={() => setChangingName(true)} className="w-full h-full border p-1 truncate" onClick={() => setChangingName(true)}>{name ? name : 'Add player'}</button>
+        <button onFocus={() => setChangingName(true)} className="w-full h-full p-1 truncate" onClick={() => setChangingName(true)}>{name ? name : 'Add player'}</button>
       }
     </div>
   )
