@@ -132,6 +132,9 @@ export class Manager {
         .then(scoresheet => {
           localGet(`${g.uuid}-players`)
             .then(players => {
+              if (!scoresheet || !players) {
+                return
+              }
               const scoreboard = new Scoreboard(g.uuid, scoresheet, players)
               this.highlight_scores.set(g.uuid, {
                 players,
