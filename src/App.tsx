@@ -30,9 +30,15 @@ const Root = observer(() => {
       </header>
       <Switch>
 
-        <Route path={"/import/:uri"}>
-          {/* TODO */}
-        </Route>
+        <Route path={"/import/:uri"} children={({ match }) => {
+          const uri = match?.params.uri
+          if (!uri) {
+            return
+          }
+          const game = manager.importGame(uri)
+          return <Redirect to={`/games/${game.uuid}`} />
+        }}
+        />
 
         <Route path="/new_game" children={() => {
           const game = newGame()
@@ -60,7 +66,7 @@ const ManageGames: FunctionComponent<{ manager: Manager }> = observer(({ manager
   // bit of a hack to make sure the scores stay up to date on this page
   useEffect(() => {
     manager.updateHighlightScores()
-  }, [manager.highlight_scores])
+  }, [])
 
   return (
     <div className="text-sm overflow-scroll">
@@ -103,8 +109,15 @@ const Game = observer(() => {
       })
   }, [uuid])
 
-  const shareGame = (scoresheet: Scoresheet) => {
-    const uri = location.host + '/import/' + encodeURIComponent(btoa(JSON.stringify(scoresheet)))
+  const shareGame = () => {
+    if (!scoreboard) {
+      return
+    }
+    const data = {
+      players: scoreboard.players,
+      scoresheet: scoreboard.scoresheet
+    }
+    const uri = location.host + '/import/' + encodeURIComponent(btoa(JSON.stringify(data)))
     try {
       navigator.share({ url: uri })
     } catch (err) {
@@ -133,7 +146,7 @@ const Game = observer(() => {
   return (
     <>
       <div className="flex justify-end space-x-2 px-1 my-1">
-        <button className="border px-2" onClick={() => shareGame(scoresheet)}>Share</button>
+        <button className="border px-2" onClick={shareGame}>Share</button>
         <button className="border px-2" onClick={undo}>Undo</button>
       </div>
       <div className="grid grid-cols-5 flex-grow">

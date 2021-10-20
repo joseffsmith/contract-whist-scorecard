@@ -109,7 +109,10 @@ export class Manager {
   // TODO probably don't want to import the same game multiple times, only import when uri changes?
   @action
   importGame = (uri: string): Game => {
-    const scoresheet = JSON.parse(atob(decodeURIComponent(uri)))
+    const { players, scoresheet } = JSON.parse(atob(decodeURIComponent(uri)))
+    this.checkScoresheet(scoresheet)
+    //TODO check players
+
     const uuid = uuidv4()
     const game = {
       uuid,
@@ -117,6 +120,8 @@ export class Manager {
     }
     this.games.unshift(game)
     localSet(`${uuid}-scoresheet`, scoresheet)
+    // TODO import players too
+    localSet(`${uuid}-players`, players)
     // this.current_scoreboard = new Scoreboard(uuid, scoresheet)
     return game
   }
@@ -136,6 +141,35 @@ export class Manager {
             })
         })
     })
+  }
+
+  private checkScoresheet = (possible_scoresheet: unknown): boolean => {
+    if (!(possible_scoresheet instanceof Array)) {
+      throw Error("Scoresheet is not array")
+    }
+    const empty_scoresheet = getEmptyScoreSheet()
+    if (possible_scoresheet.length !== empty_scoresheet.length) {
+      throw Error("Not enough rounds in scoresheet")
+    }
+    const empty_round = getNewRound()
+    possible_scoresheet.forEach((possible_round, idx) => {
+      if (!(possible_round instanceof Array)) {
+        throw Error(`Round idx: ${idx} is not array`)
+      }
+      // TODO handle various player sizes
+      if (possible_round.length !== empty_round.length) {
+        throw Error(`Round idx: ${idx} does not have 4 players`)
+      }
+      possible_round.forEach(player => {
+        if (!player.hasOwnProperty('bid')) {
+          throw Error('No bid property')
+        }
+        if (!player.hasOwnProperty('score')) {
+          throw Error('No score property')
+        }
+      })
+    })
+    return true
   }
 }
 
