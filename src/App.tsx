@@ -117,12 +117,12 @@ const Game = observer(() => {
       players: scoreboard.players,
       scoresheet: scoreboard.scoresheet
     }
-    const uri = location.host + '/import/' + encodeURIComponent(btoa(JSON.stringify(data)))
+    const uri = '/import/' + encodeURIComponent(btoa(JSON.stringify(data)))
     try {
       navigator.share({ url: uri })
     } catch (err) {
       const type = "text/plain"
-      const blob = new Blob([uri], { type })
+      const blob = new Blob([location.host + uri], { type })
       const data = [new ClipboardItem({ [type]: blob })]
       navigator.clipboard.write(data)
     }
