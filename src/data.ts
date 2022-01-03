@@ -284,15 +284,16 @@ export class Scoreboard {
   }
 
   @action
-  setScoreForPlayer = (player_idx: number, made_it: boolean) => {
+  setScoreForPlayer = (player_idx: number, tricks: number) => {
     if (this.current_round_idx === null) {
       return
     }
-    if (!made_it) {
-      this.scoresheet[this.current_round_idx][player_idx].score = 0
-      return
+    let score = tricks
+    const bid = this.scoresheet[this.current_round_idx][player_idx].bid
+    if (bid === tricks) {
+      score += 10
     }
-    this.scoresheet[this.current_round_idx][player_idx].score = this.scoresheet[this.current_round_idx][player_idx].bid! + 10
+    this.scoresheet[this.current_round_idx][player_idx].score = score
   }
 
   @action

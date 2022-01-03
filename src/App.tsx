@@ -2,7 +2,7 @@ import { Fragment, FunctionComponent, useEffect, useRef, useState } from 'react'
 import { observer } from "mobx-react"
 import { Link, Redirect, Route, Switch, useParams } from 'react-router-dom'
 
-import { loadPlayers, loadScoresheet, Manager, Scoreboard, Scoresheet } from './data'
+import { loadPlayers, loadScoresheet, Manager, Scoreboard } from './data'
 
 
 const Root = observer(() => {
@@ -30,7 +30,7 @@ const Root = observer(() => {
       </header>
       <Switch>
 
-        <Route path={"/import/:uri"} children={({ match }) => {
+        <Route path="/import/:uri" children={({ match }) => {
           const uri = match?.params.uri
           if (!uri) {
             return
@@ -157,7 +157,7 @@ const Game = observer(() => {
 
         {deals.map((t, t_idx) => (
           <Fragment key={t_idx}>
-            <div className={`${t_idx % 2 === 1 ? 'bg-pink-100' : ''} flex items-center pl-2`}>
+            <div className={`flex items-center pl-2`}>
               <div className="font-semibold text-lg w-3 text-center">
                 {t.num_cards}
               </div>
@@ -168,7 +168,7 @@ const Game = observer(() => {
 
             {players.map((p, p_idx) => {
               return (
-                <div key={p.id} className={`${t_idx % 2 === 1 ? 'bg-pink-100' : ''} text-xl border-b ${p_idx % 4 === 3 ? '' : 'border-r'} border-gray-400 flex justify-center items-center text-center`}>
+                <div key={p.id} className={`text-xl border-b ${p_idx % 4 === 3 ? '' : 'border-r'} border-gray-400 flex justify-center items-center text-center`}>
                   <div className={`${current_player === p_idx && current_round_idx === t_idx && stage === 'bid' ? 'bg-green-300' : ''} h-full flex items-center justify-center flex-grow w-full border-r`}>
                     {scoresheet[t_idx][p_idx].bid}
                   </div>
@@ -232,18 +232,27 @@ const ScoreStage: FunctionComponent<{ db: Scoreboard }> = ({ db }) => {
   const {
     current_turn_idx: current_player,
     setScoreForPlayer,
+    bid_options
   } = db
 
-  const setMadeIt = (made_it: boolean) => {
+  const setTricksMade = (tricks: number) => {
     if (current_player !== null) {
-      setScoreForPlayer(current_player, made_it)
+      setScoreForPlayer(current_player, tricks)
     }
   }
 
   return (
-    <div className="flex">
-      <button className="flex-grow border border-gray-900 py-2 m-1" onClick={() => setMadeIt(false)}>Failed</button>
-      <button className="flex-grow border border-gray-900 py-2 m-1" onClick={() => setMadeIt(true)}>Made it</button>
+    <div className="flex justify-between w-full">
+      {bid_options.map(opt => {
+        return (
+          <button
+            key={opt.number}
+            onClick={() => setTricksMade(opt.number)}
+            className='border-gray-900 bg-indigo-100 border rounded-sm py-2 flex-1 m-0.5'>
+            {opt.number}
+          </button>
+        )
+      })}
     </div>
   )
 }
