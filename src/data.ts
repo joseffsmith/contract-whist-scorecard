@@ -1,6 +1,8 @@
 import localforage from 'localforage'
 import { action, computed, observable, reaction, toJS } from "mobx"
 import { v4 as uuidv4 } from 'uuid'
+import { initializeApp } from "firebase/app"
+import { Database, getDatabase, ref, serverTimestamp, set } from "firebase/database"
 
 type Stage = 'bid' | 'score'
 type Turn = {
@@ -47,6 +49,36 @@ const localGet = (key: string): Promise<any> => {
 const localSet = (key: string, vals: any): Promise<any> => {
   return localforage.setItem(key, toJS(vals))
 }
+
+export class Store {
+  database: Database
+
+  constructor() {
+    const firebaseConfig = {
+      apiKey: "AIzaSyDYjS79qQbyCaQ7nw-bxzkcj_b5K-HQoBQ",
+      authDomain: "contract-whist-scorecard.firebaseapp.com",
+      projectId: "contract-whist-scorecard",
+      storageBucket: "contract-whist-scorecard.appspot.com",
+      messagingSenderId: "807883681111",
+      appId: "1:807883681111:web:cbdf4fcd677c0984376212",
+      databaseURL: "https://contract-whist-scorecard-default-rtdb.europe-west1.firebasedatabase.app/",
+    }
+
+    const app = initializeApp(firebaseConfig)
+    const database = getDatabase(app)
+    this.database = database
+  }
+
+  createGame = (game_id: string) => {
+    const db = this.database
+    set(ref(db, 'games/' + game_id), {
+      id: game_id,
+      created_at: serverTimestamp(),
+      updated_at: serverTimestamp(),
+    })
+  }
+}
+
 export class Manager {
   @observable games: Game[] = []
   @observable games_loaded: boolean = false
