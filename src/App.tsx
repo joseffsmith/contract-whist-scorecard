@@ -10,14 +10,11 @@ const Root = observer(() => {
 
   const {
     newGame,
-    getMostRecentGame,
   } = manager
 
   if (!manager.games_loaded) {
     return null
   }
-
-  const most_recent_game = getMostRecentGame()
 
   return (
     <>
@@ -54,7 +51,7 @@ const Root = observer(() => {
         </Route>
 
         <Route path="/">
-          <Redirect to={`/games/${most_recent_game.uuid}`} />
+          <Redirect to="/games" />
         </Route>
       </Switch>
     </>
@@ -79,7 +76,7 @@ const ManageGames: FunctionComponent<{ manager: Manager }> = observer(({ manager
                 <span>{data.created_at.toLocaleString()}</span>
                 <Link to={`/games/${uuid}`}><button className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900">Load game</button></Link>
               </div>
-              <div className="grid grid-cols-4">
+              <div className={`grid grid-cols-${data.players.length}`} style={{ gridTemplateColumns: `repeat(${data.players.length}, minmax(0, 1fr))` }}>
                 {data.players.map((p, idx) => <div key={idx}>{p.name}</div>)}
                 {data.scores.map((s, idx) => <div key={idx} className={`${Math.max(...data.scores) === s && s > 0 ? 'bg-green-500' : ''}`}>{s}</div>)}
               </div>
@@ -97,12 +94,13 @@ const Game = observer(() => {
 
   useEffect(() => {
     if (!uuid) {
+      // should always be a uuid in here
       return
     }
-    loadScoresheet(uuid)
-      .then(scoresheet => {
-        loadPlayers(uuid)
-          .then(players => {
+    loadPlayers(uuid)
+      .then(players => {
+        loadScoresheet(uuid, players)
+          .then(scoresheet => {
             const scoreboard = new Scoreboard(uuid, scoresheet, players)
             setScoreboard(scoreboard)
           })
@@ -140,16 +138,20 @@ const Game = observer(() => {
     scoresheet,
     stage,
     scores,
-    undo
+    undo,
+    addPlayer,
+    removePlayer
   } = scoreboard
 
   return (
     <>
       <div className="flex justify-end space-x-2 px-1 my-1">
+        <button className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900" onClick={addPlayer}>Add player</button>
+        <button className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900" onClick={removePlayer}>Remove player</button>
         <button className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900" onClick={shareGame}>Share</button>
         <button className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900" onClick={undo}>Undo</button>
       </div>
-      <div className="grid grid-cols-5 flex-grow">
+      <div className={`grid grid-cols-${players.length + 1} flex-grow`} style={{ gridTemplateColumns: `repeat(${players.length + 1}, minmax(0, 1fr))` }}>
         <div></div>
         {players.map(p => (
           <Player id={p.id} key={p.id} db={scoreboard} />
@@ -168,7 +170,7 @@ const Game = observer(() => {
 
             {players.map((p, p_idx) => {
               return (
-                <div key={p.id} className={`text-xl border-b ${p_idx % 4 === 3 ? '' : 'border-r'} border-gray-400 flex justify-center items-center text-center`}>
+                <div key={p.id} className={`text-xl border-b ${p_idx % scoreboard.players.length === scoreboard.players.length - 1 ? '' : 'border-r'} border-gray-400 flex justify-center items-center text-center`}>
                   <div className={`${current_player === p_idx && current_round_idx === t_idx && stage === 'bid' ? 'bg-green-300' : ''} h-full flex items-center justify-center flex-grow w-full border-r`}>
                     {scoresheet[t_idx][p_idx].bid}
                   </div>

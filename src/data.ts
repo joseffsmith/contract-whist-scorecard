@@ -142,18 +142,14 @@ export class Manager {
     if (!(possible_scoresheet instanceof Array)) {
       throw Error("Scoresheet is not array")
     }
-    const empty_scoresheet = getEmptyScoreSheet()
+    const empty_scoresheet = getEmptyScoreSheet(PLAYERS)
     if (possible_scoresheet.length !== empty_scoresheet.length) {
       throw Error("Not enough rounds in scoresheet")
     }
-    const empty_round = getNewRound()
+    const empty_round = getNewRound(PLAYERS)
     possible_scoresheet.forEach((possible_round, idx) => {
       if (!(possible_round instanceof Array)) {
         throw Error(`Round idx: ${idx} is not array`)
-      }
-      // TODO handle various player sizes
-      if (possible_round.length !== empty_round.length) {
-        throw Error(`Round idx: ${idx} does not have 4 players`)
       }
       possible_round.forEach(player => {
         if (!player.hasOwnProperty('bid')) {
@@ -192,6 +188,27 @@ export class Scoreboard {
       () => this.scoresheet.map(turns => turns.map(p => [p.bid, p.score])),
       () => localSet(`${this.uuid}-scoresheet`, this.scoresheet)
     )
+  }
+
+  @action addPlayer = () => {
+    if (this.players.length === 7) {
+      // max cards in deck 52
+      return
+    }
+    const max_id = Math.max(...this.players.map(p => p.id))
+    this.players.push({ id: max_id + 1, name: `Player ${max_id + 2}` })
+    this.scoresheet = getEmptyScoreSheet(this.players)
+  }
+
+  @action removePlayer = () => {
+    if (this.players.length === 2) {
+      // min players is 2
+      return
+    }
+    const new_p = [...this.players]
+    new_p.pop()
+    this.players = new_p
+    this.scoresheet = getEmptyScoreSheet(this.players)
   }
 
   @computed get scores() {
@@ -336,16 +353,16 @@ export const loadPlayers = (uuid: string): Promise<Player[]> => {
     })
 }
 
-export const loadScoresheet = (uuid: string): Promise<Scoresheet> => {
+export const loadScoresheet = (uuid: string, players: Player[]): Promise<Scoresheet> => {
   return localGet(`${uuid}-scoresheet`)
     .then(scoresheet => {
       if (!scoresheet) {
-        scoresheet = getEmptyScoreSheet()
+        scoresheet = getEmptyScoreSheet(players)
       }
       return scoresheet
     })
 }
 
-export const getNewRound = (): Round => PLAYERS.map(p => { return { 'bid': null, 'score': null } })
+export const getNewRound = (players: Player[]): Round => players.map(p => { return { 'bid': null, 'score': null } })
 
-export const getEmptyScoreSheet = (): Scoresheet => DEALS.map(deal => getNewRound())
+export const getEmptyScoreSheet = (players: Player[]): Scoresheet => DEALS.map(deal => getNewRound(players))
