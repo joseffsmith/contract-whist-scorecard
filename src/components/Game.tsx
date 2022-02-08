@@ -1,93 +1,12 @@
 import { Fragment, FunctionComponent, useEffect, useRef, useState } from 'react'
 import { observer } from "mobx-react"
-import { Link, Redirect, Route, Switch, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 
-import { loadPlayers, loadScoresheet, Manager, Scoreboard } from './data'
+import { Scoreboard } from '../data/Scoreboard'
+import { loadPlayers, loadScoresheet } from '../data/helpers'
 
 
-const Root = observer(() => {
-  const manager = useInstance(() => new Manager())
-
-  const {
-    newGame,
-  } = manager
-
-  if (!manager.games_loaded) {
-    return null
-  }
-
-  return (
-    <>
-      <header className="flex items-baseline justify-between mt-px">
-        <h1 className="font-mono text-sm">Contract whist</h1>
-        <span className="space-x-2">
-          <Link to={"/games"}><button className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900">All games</button></Link>
-          <Link to={"/new_game"}><button className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900">New game</button></Link>
-        </span>
-      </header>
-      <Switch>
-
-        <Route path="/import/:uri" children={({ match }) => {
-          const uri = match?.params.uri
-          if (!uri) {
-            return
-          }
-          const game = manager.importGame(uri)
-          return <Redirect to={`/games/${game.uuid}`} />
-        }}
-        />
-
-        <Route path="/new_game" children={() => {
-          const game = newGame()
-          return <Redirect to={`/games/${game.uuid}`} />
-        }} />
-
-        <Route path="/games/:uuid">
-          <Game />
-        </Route>
-
-        <Route path={"/games"}>
-          <ManageGames manager={manager} />
-        </Route>
-
-        <Route path="/">
-          <Redirect to="/games" />
-        </Route>
-      </Switch>
-    </>
-  )
-})
-
-const ManageGames: FunctionComponent<{ manager: Manager }> = observer(({ manager }) => {
-
-  // bit of a hack to make sure the scores stay up to date on this page
-  useEffect(() => {
-    manager.updateHighlightScores()
-  }, [])
-
-  return (
-    <div className="text-sm overflow-scroll">
-      {Array.from(manager.highlight_scores.entries())
-        .sort(([a_uuid, a_data], [b_uuid, b_data]) => b_data.created_at.getTime() - a_data.created_at.getTime())
-        .map(([uuid, data]) => {
-          return (
-            <div key={uuid} className="p-1">
-              <div className="flex justify-between">
-                <span>{data.created_at.toLocaleString()}</span>
-                <Link to={`/games/${uuid}`}><button className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900">Load game</button></Link>
-              </div>
-              <div className={`grid grid-cols-${data.players.length}`} style={{ gridTemplateColumns: `repeat(${data.players.length}, minmax(0, 1fr))` }}>
-                {data.players.map((p, idx) => <div key={idx}>{p.name}</div>)}
-                {data.scores.map((s, idx) => <div key={idx} className={`${Math.max(...data.scores) === s && s > 0 ? 'bg-green-500' : ''}`}>{s}</div>)}
-              </div>
-            </div>
-          )
-        })}
-    </div>
-  )
-})
-
-const Game = observer(() => {
+export const Game = observer(() => {
   const { uuid } = useParams<{ uuid: string }>()
 
   const [scoreboard, setScoreboard] = useState<Scoreboard | null>(null)
@@ -106,25 +25,6 @@ const Game = observer(() => {
           })
       })
   }, [uuid])
-
-  const shareGame = () => {
-    if (!scoreboard) {
-      return
-    }
-    const data = {
-      players: scoreboard.players,
-      scoresheet: scoreboard.scoresheet
-    }
-    const uri = '/import/' + encodeURIComponent(btoa(JSON.stringify(data)))
-    try {
-      navigator.share({ url: uri })
-    } catch (err) {
-      const type = "text/plain"
-      const blob = new Blob([location.host + uri], { type })
-      const data = [new ClipboardItem({ [type]: blob })]
-      navigator.clipboard.write(data)
-    }
-  }
 
   if (!scoreboard) {
     return null
@@ -148,10 +48,10 @@ const Game = observer(() => {
       <div className="flex justify-end space-x-2 px-1 my-1">
         <button className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900" onClick={addPlayer}>Add player</button>
         <button className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900" onClick={removePlayer}>Remove player</button>
-        <button className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900" onClick={shareGame}>Share</button>
         <button className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900" onClick={undo}>Undo</button>
       </div>
       <div className={`grid grid-cols-${players.length + 1} flex-grow`} style={{ gridTemplateColumns: `repeat(${players.length + 1}, minmax(0, 1fr))` }}>
+
         <div></div>
         {players.map(p => (
           <Player id={p.id} key={p.id} db={scoreboard} />
@@ -293,13 +193,3 @@ const Player: FunctionComponent<{ db: Scoreboard, id: number }> = ({ db, id }) =
   )
 }
 
-
-function useInstance<T>(instanceFunc: () => T) {
-  const ref = useRef<T | null>(null)
-  if (ref.current === null) {
-    ref.current = instanceFunc()
-  }
-  return ref.current
-}
-
-export default Root
