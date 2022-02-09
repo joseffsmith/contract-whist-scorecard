@@ -127,29 +127,42 @@ export class Scoreboard {
 
   @action
   undo = () => {
+    // TODO flip this around
+    // start with the simplest case, same round and stage
+    // if we need to wrap around, it's still the same round if the stage is score
+    // if it's not score then we need to flip to bid and jump back a round
+
+    // work out the round to undo first
     let round_to_undo = this.current_round
-    let index = this.current_round_idx!
+    let round_idx = this.current_round_idx!
     if (round_to_undo?.every(t => t.bid === null && t.score === null)) {
-      index -= 1
-      round_to_undo = this.scoresheet[index]
+      round_idx -= 1
+      round_to_undo = this.scoresheet[round_idx]
     }
+
+    // back to the start
     if (!round_to_undo) {
       return
     }
-    let turn = this.getCurrentTurnFromRound(round_to_undo, index)
+
+    // work out who's turn it is, 0th player changes each round
+    let turn = this.getCurrentTurnFromRound(round_to_undo, round_idx)
     if (!turn) {
-      let last_player_idx = (index % this.players.length)
-      if (last_player_idx < 0) {
-        last_player_idx = this.players.length - 1
-      }
+      const last_player_idx = round_idx % this.players.length
       turn = round_to_undo[last_player_idx]
     }
+
+    // get the previous turn idx
     let turn_idx = round_to_undo.indexOf(turn)
     turn_idx -= 1
     if (turn_idx < 0) {
       turn_idx = this.players.length - 1
     }
+
+    // and the previous turn
     const turn_to_undo = round_to_undo[turn_idx]
+
+    // work out which stage we're on
     if (turn_to_undo.score !== null) {
       turn_to_undo.score = null
       return
