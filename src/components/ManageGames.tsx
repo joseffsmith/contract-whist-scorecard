@@ -1,8 +1,9 @@
-import { observer } from 'mobx-react'
 import { FunctionComponent, useEffect } from 'react'
+import { observer } from 'mobx-react'
 import { Link } from 'react-router-dom'
 
 import { useManager } from './App'
+
 
 export const ManageGames: FunctionComponent = observer(() => {
 

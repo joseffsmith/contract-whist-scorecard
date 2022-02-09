@@ -9,10 +9,6 @@ import { ManageGames } from './ManageGames'
 export const Root = observer(() => {
   const manager = useManager()
 
-  const {
-    newGame,
-  } = manager
-
   if (!manager.games_loaded) {
     return null
   }
@@ -29,7 +25,7 @@ export const Root = observer(() => {
       <Switch>
 
         <Route path="/new_game" children={() => {
-          const game = newGame()
+          const game = manager.newGame()
           return <Redirect to={`/games/${game.uuid}`} />
         }} />
 

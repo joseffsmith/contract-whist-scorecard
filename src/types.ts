@@ -18,3 +18,10 @@ export type Game = {
   uuid: string,
   created_at: Date
 }
+
+export type Deal = {
+  id: number;
+  num_cards: number;
+  suit_colour: string;
+  suit: string;
+}

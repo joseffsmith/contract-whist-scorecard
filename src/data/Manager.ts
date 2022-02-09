@@ -60,23 +60,21 @@ export class Manager {
     return game
   }
 
-  @action updateHighlightScores() {
-    this.games.forEach(g => {
-      localGet(`${g.uuid}-scoresheet`)
-        .then(scoresheet => {
-          localGet(`${g.uuid}-players`)
-            .then(players => {
-              if (!scoresheet || !players) {
-                return
-              }
-              const scoreboard = new Scoreboard(g.uuid, scoresheet, players)
-              this.highlight_scores.set(g.uuid, {
-                players,
-                scores: scoreboard.scores,
-                created_at: g.created_at,
-              })
-            })
-        })
+  @action updateHighlightScores = () => {
+    this.games.forEach(async g => {
+
+      const scoresheet = await localGet(`${g.uuid}-scoresheet`)
+      const players = await localGet(`${g.uuid}-players`)
+
+      if (!scoresheet || !players) {
+        return
+      }
+      const scoreboard = new Scoreboard(g.uuid, scoresheet, players)
+      this.highlight_scores.set(g.uuid, {
+        players,
+        scores: scoreboard.scores,
+        created_at: g.created_at,
+      })
     })
   }
 }

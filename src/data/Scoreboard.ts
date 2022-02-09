@@ -2,7 +2,7 @@ import localforage from 'localforage'
 import { action, computed, observable, reaction } from "mobx"
 
 import { DEALS } from '../constants'
-import { Player, Round, Scoresheet, Stage, Turn } from '../types'
+import { Deal, Player, Round, Scoresheet, Stage, Turn } from '../types'
 
 import { getEmptyScoreSheet, localSet } from './helpers'
 
@@ -33,48 +33,47 @@ export class Scoreboard {
     )
   }
 
-  @action addPlayer = () => {
-    if (this.players.length === 7) {
-      // max cards in deck 52
-      return
-    }
-    const max_id = Math.max(...this.players.map(p => p.id))
-    this.players.push({ id: max_id + 1, name: `Player ${max_id + 2}` })
-    this.scoresheet = getEmptyScoreSheet(this.players)
-  }
-
-  @action removePlayer = () => {
-    if (this.players.length === 2) {
-      // min players is 2
-      return
-    }
-    const new_p = [...this.players]
-    new_p.pop()
-    this.players = new_p
-    this.scoresheet = getEmptyScoreSheet(this.players)
-  }
-
-  @computed get scores() {
+  get scores(): number[] {
     return this.scoresheet.reduce((acc, curr_value) => {
       return acc.map((a, idx) => a + (curr_value[idx].score ?? 0))
     }, Array.from(this.players.values()).map(p => 0))
   }
 
-  @computed get stage(): Stage | null { return (this.current_round && this.current_turn) ? this.getCurrentStageFromTurn(this.current_turn) : null }
-  @computed get current_turn() { return this.current_round && this.current_round_idx !== null ? this.getCurrentTurnFromRound(this.current_round, this.current_round_idx) : null }
-  @computed get current_turn_idx() { return this.current_turn && this.current_round ? this.current_round.indexOf(this.current_turn) : null }
-  @computed get current_round() { return this.getCurrentRoundFromScoresheet(this.scoresheet) }
-  @computed get current_round_idx() { return this.current_round ? this.scoresheet.indexOf(this.current_round) : null }
-  @computed get dealer_idx() { return this.current_round_idx !== null ? (this.current_round_idx + this.players.length - 1) % this.players.length : null }
-  @computed get current_deal() { return this.current_round_idx !== null ? this.deals[this.current_round_idx] : null }
+  get stage(): Stage | null {
+    return this.current_turn ? this.getCurrentStageFromTurn(this.current_turn) : null
+  }
 
-  @computed get bids_left() {
+  get current_turn(): Turn | null {
+    return (this.current_round && this.current_round_idx !== null) ? this.getCurrentTurnFromRound(this.current_round, this.current_round_idx) : null
+  }
+
+  get current_turn_idx(): number | null {
+    return this.current_turn && this.current_round ? this.current_round.indexOf(this.current_turn) : null
+  }
+
+  get current_round(): Round | null {
+    return this.scoresheet.find((round, idx) => this.getCurrentTurnFromRound(round, idx) !== null) ?? null
+  }
+
+  get current_round_idx(): number | null {
+    return this.current_round ? this.scoresheet.indexOf(this.current_round) : null
+  }
+
+  get dealer_idx(): number | null {
+    return this.current_round_idx !== null ? (this.current_round_idx + this.players.length - 1) % this.players.length : null
+  }
+
+  get current_deal(): Deal | null {
+    return this.current_round_idx !== null ? this.deals[this.current_round_idx] : null
+  }
+
+  get bids_left(): number {
     return (this.current_round && this.current_round.reduce((acc, curr_val) => {
       return acc + (curr_val.bid === null ? 1 : 0)
     }, 0)) ?? 0
   }
 
-  @computed get bid_options(): { number: number, disabled: boolean }[] {
+  get bid_options(): { number: number, disabled: boolean }[] {
     const all_options = [{ number: 0, disabled: false }, { number: 1, disabled: false }, { number: 2, disabled: false }, { number: 3, disabled: false }, { number: 4, disabled: false }, { number: 5, disabled: false }, { number: 6, disabled: false }, { number: 7, disabled: false }]
     const turn = this.current_deal
     if (!turn || this.current_round === null) {
@@ -102,6 +101,28 @@ export class Scoreboard {
       }
     })
     return options
+  }
+
+  @action addPlayer = () => {
+    if (this.players.length === 7) {
+      // max cards in deck 52
+      return
+    }
+    const max_id = Math.max(...this.players.map(p => p.id))
+    this.players.push({ id: max_id + 1, name: `Player ${max_id + 2}` })
+    this.scoresheet = getEmptyScoreSheet(this.players)
+  }
+
+  // TODO remove specific player
+  @action removePlayer = () => {
+    if (this.players.length === 2) {
+      // min players is 2
+      return
+    }
+    const new_p = [...this.players]
+    new_p.pop()
+    this.players = new_p
+    this.scoresheet = getEmptyScoreSheet(this.players)
   }
 
   @action
@@ -179,10 +200,6 @@ export class Scoreboard {
       r.find(t => this.getCurrentStageFromTurn(t) === 'score') ??
       null
     )
-  }
-
-  getCurrentRoundFromScoresheet = (scoresheet: Scoresheet): Round | null => {
-    return scoresheet.find((round, idx) => this.getCurrentTurnFromRound(round, idx) !== null) ?? null
   }
 }
 

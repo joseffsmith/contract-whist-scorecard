@@ -1,4 +1,7 @@
-export const DEALS = [
+import { Deal, Player } from './types'
+
+
+export const DEALS: Deal[] = [
   { id: 0, num_cards: 7, suit_colour: 'text-red-500', suit: '♥', },
   { id: 1, num_cards: 6, suit_colour: 'text-black', suit: '♣', },
   { id: 2, num_cards: 5, suit_colour: 'text-red-500', suit: '♦', },
@@ -14,7 +17,7 @@ export const DEALS = [
   { id: 12, num_cards: 7, suit_colour: 'text-red-500', suit: '♦', },
 ]
 
-export const DEFAULT_PLAYERS = [
+export const DEFAULT_PLAYERS: Player[] = [
   { id: 0, name: 'Player 1' },
   { id: 1, name: 'Player 2' },
   { id: 2, name: 'Player 3' },
