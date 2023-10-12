@@ -32,6 +32,6 @@ module.exports = {
         "@typescript-eslint/no-unused-vars": "off",
         "no-fallthrough": "off",
         "no-prototype-builtins": "off",
-        "semi": ["error", "never", { "beforeStatementContinuationChars": "always" }]
+        // "semi": ["error", "never", { "beforeStatementContinuationChars": "always" }]
     }
 }
