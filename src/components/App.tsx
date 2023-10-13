@@ -23,8 +23,6 @@ export const Root = () => {
     const playerRef = ref(db, "players/" + newGameRef.key);
     await push(playerRef, { name: "Player 1" });
     await push(playerRef, { name: "Player 2" });
-    await push(playerRef, { name: "Player 3" });
-    await push(playerRef, { name: "Player 4" });
 
     nav("/games/" + newGameRef.key);
   }
