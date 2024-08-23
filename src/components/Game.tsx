@@ -2,73 +2,117 @@ import { Fragment, useEffect, useRef, useState } from "react";
 
 import { useParams } from "react-router-dom";
 
-import { push, ref, remove, set } from "firebase/database";
 import {
-  useList,
-  useListKeys,
-  useObjectVal,
-} from "react-firebase-hooks/database";
-import { db } from "..";
+  Autocomplete,
+  Button,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Dropdown,
+  FormControl,
+  FormLabel,
+  Input,
+  Modal,
+  ModalDialog,
+  Radio,
+  RadioGroup,
+  Switch,
+} from "@mui/joy";
+
 import { DEALS } from "../constants";
-import { Deal, Game, Player, Round, Turn } from "../types";
+import { id, lookup, tx } from "@instantdb/react";
+import { enqueueSnackbar } from "notistack";
+import { db } from "..";
+import { Deal, Player, Round, Turn } from "../types";
 
 export const GameComp = () => {
   const { gameId } = useParams<{ gameId: string }>();
+  const [addPlayerDialogOpen, setAddPlayerDialogOpen] = useState(false);
 
   const [isClosed, setIsClosed] = useState(false);
 
-  const [game, l1, error] = useObjectVal<Game>(ref(db, "games/" + gameId));
-  const [players, l2, r] = useListKeys(ref(db, "players/" + gameId));
-  const [rs, l3, er] = useList(ref(db, "rounds/" + gameId));
-
-  if (l1 || l2 || l3) {
-    return null;
+  if (!gameId) {
+    throw Error("No game id");
   }
-  if (!game || !players || !players.length) {
-    return null;
-  }
-
-  if ((rs?.length ?? 0) > DEALS.length) {
-    return <div>finished</div>;
-  }
-
-  const addPlayer = () => {
-    const pRef = ref(db, "players/" + gameId);
-    push(pRef, true);
+  const query = {
+    games: {
+      playersOrders: {
+        player: {},
+      },
+      rounds: {
+        turns: {
+          player: {},
+        },
+      },
+      $: {
+        where: {
+          id: gameId,
+        },
+      },
+    },
   };
 
-  const removePlayer = (playerId: string) => {
-    remove(ref(db, "players/" + gameId + "/" + playerId));
-  };
+  const { isLoading, error, data } = db.useQuery(query);
+  console.log({ isLoading, error, data, gameId });
 
-  const currentRoundIdx = rs?.length
-    ? Object.values(rs[rs.length - 1].val()).every(
-        (t) => (t as Turn).score !== undefined
-      )
-      ? rs.length
-      : rs.length - 1
-    : 0;
+  if (!gameId) {
+    console.error("No gameId");
+    enqueueSnackbar("No gameId", { variant: "error" });
+    return null;
+  }
+
+  const removePlayer = async (playerId: string) => {
+    const res = await db.transact([tx.playersOrders[id()].delete()]);
+    if (res.status === "enqueued") {
+      enqueueSnackbar("Player removed", { variant: "success" });
+    }
+  };
+  if (!data) {
+    return <div>Loading...</div>;
+  }
+
+  const game = data.games[0];
+  console.log({ game });
+  const rs = game.rounds.sort((a, b) => a.roundNumber - b.roundNumber);
+  console.log({ rs });
+
+  const numPlayers = Object.values(game?.playersOrders ?? {}).length;
+  const lastRound =
+    rs.find(
+      (r) =>
+        r.turns.length !== numPlayers ||
+        r.turns.some((t) => t.score === undefined)
+    ) ?? rs[0];
+  const currentRoundIdx = lastRound.roundNumber;
 
   const currentRound = (
-    rs?.length ? rs[currentRoundIdx]?.val() ?? null : null
+    rs?.length ? rs[currentRoundIdx] ?? null : null
   ) as Round | null;
+  console.log({ currentRound });
 
-  const dealerIdx = getDealerIdx(currentRoundIdx, players);
+  const dealerIdx = getDealerIdx(currentRoundIdx, numPlayers);
+  console.log({ dealerIdx });
 
+  const players: Player[] = Object.values(game.playersOrders)
+    .sort((apo, bpo) => apo.orderNumber - bpo.orderNumber)
+    .flatMap((p) => p.player as Player);
+  console.log({ players });
   const currentPlayerId = getCurrentPlayerIdFromRound(
     currentRound,
     dealerIdx,
     players
   );
+  console.log({ currentPlayerId });
 
-  const numTurns = currentRound ? Object.keys(currentRound).length : 0;
-
+  const numTurns = currentRound ? currentRound.turns.length : 0;
+  console.log({ numTurns });
   const stage: "bid" | "score" = numTurns === players.length ? "score" : "bid";
+  console.log({ stage });
 
   const getScoreForPlayer = (playerId: string) => {
     return rs?.length
       ? rs.reduce((prev, curr) => {
-          const turn = curr.val()[playerId];
+          const turn = curr.turns.find((t) => t.player[0].id === playerId);
           if (!turn) {
             return prev;
           }
@@ -77,36 +121,30 @@ export const GameComp = () => {
       : 0;
   };
 
-  const handleClick = async (opt: { number: number; disabled: boolean }) => {
+  const handleBid = async (opt: { number: number; disabled: boolean }) => {
     if (!opt.disabled && currentPlayerId !== null) {
-      const r =
-        rs?.[currentRoundIdx] !== undefined
-          ? rs[currentRoundIdx].key
-          : (await push(ref(db, "rounds/" + gameId))).key;
-
-      set(ref(db, "rounds/" + gameId + "/" + r + "/" + currentPlayerId), {
-        bid: opt.number,
-      });
+      const res = await db.transact([
+        tx.turns[id()]
+          .update({
+            bid: opt.number,
+          })
+          .link({ player: currentPlayerId, round: currentRound!.id }),
+      ]);
     }
   };
 
   const setTricksMade = async (tricks: number) => {
     if (currentPlayerId !== null) {
-      const r =
-        rs?.[currentRoundIdx] !== undefined
-          ? rs[currentRoundIdx].key
-          : (await push(ref(db, "rounds/" + gameId))).key;
-
-      const score =
-        currentRound?.[currentPlayerId].bid === tricks ? tricks + 10 : tricks;
-
-      set(
-        ref(
-          db,
-          "rounds/" + gameId + "/" + r + "/" + currentPlayerId + "/score"
-        ),
-        score
+      const turn = currentRound?.turns.find(
+        (t) => t.player[0].id === currentPlayerId
       );
+      const score = turn?.bid === tricks ? tricks + 10 : tricks;
+
+      const res = await db.transact([
+        tx.turns[turn!.id].merge({
+          score,
+        }),
+      ]);
     }
   };
 
@@ -121,12 +159,12 @@ export const GameComp = () => {
     let round_idx = currentRoundIdx;
     if (
       !round_to_undo ||
-      Object.values(round_to_undo).every(
+      round_to_undo.turns.every(
         (t) => t.bid === undefined && t.score === undefined
       )
     ) {
       round_idx -= 1;
-      round_to_undo = rs?.[round_idx].val();
+      round_to_undo = rs?.[round_idx];
     }
 
     // back to the start
@@ -135,16 +173,16 @@ export const GameComp = () => {
     }
 
     // work out who's turn it is, 0th player changes each round
-    const dealerIdx = getDealerIdx(round_idx, players);
+    const dealerIdx = getDealerIdx(round_idx, players.length);
     let player = getCurrentPlayerIdFromRound(round_to_undo, dealerIdx, players);
     if (!player) {
       const last_player_idx = round_idx % players.length;
-      player = players[last_player_idx];
+      player = players[last_player_idx].id;
     }
 
     // get the previous turn idx
 
-    let player_idx = players.indexOf(player);
+    let player_idx = players.findIndex((p) => p.id === player);
     player_idx -= 1;
     if (player_idx < 0) {
       player_idx = players.length - 1;
@@ -155,38 +193,31 @@ export const GameComp = () => {
 
     // work out which stage we're on
     if (
-      (round_to_undo[playerToUndo] as Turn | undefined)?.score !== undefined
+      round_to_undo.turns.find((p) => p.id === playerToUndo.id)?.score !==
+      undefined
     ) {
-      round_to_undo[playerToUndo].score = undefined;
+      // round_to_undo.turns.find((p) => p.id === playerToUndo.id)!.score =
+      //   undefined;
 
-      await remove(
-        ref(
-          db,
-          "rounds/" +
-            gameId +
-            "/" +
-            rs?.[round_idx].key +
-            "/" +
-            playerToUndo +
-            "/score"
-        )
-      );
+      const res = await db.transact([
+        tx.turns[
+          round_to_undo.turns.find((p) => p.id === playerToUndo.id)!.id
+        ].merge({
+          score: undefined,
+        }),
+      ]);
+
       return;
     }
 
-    await remove(
-      ref(
-        db,
-        "rounds/" +
-          gameId +
-          "/" +
-          rs?.[round_idx].key +
-          "/" +
-          playerToUndo +
-          "/bid"
-      )
-    );
-    round_to_undo[playerToUndo].bid = undefined;
+    const res = await db.transact([
+      tx.turns[
+        round_to_undo.turns.find((p) => p.id === playerToUndo.id)!.id
+      ].merge({
+        bid: undefined,
+      }),
+    ]);
+    // round_to_undo[playerToUndo].bid = undefined;
   };
 
   const bidOptions = getBidOptions(
@@ -195,12 +226,16 @@ export const GameComp = () => {
     players,
     stage
   );
-  const scores = players.map((p) => getScoreForPlayer(p));
+  const scores = players.map((p) => getScoreForPlayer(p.id));
   const winningScore = scores.findIndex((s) => s === Math.max(...scores));
   const winningPlayer = null;
+
   return (
     <>
-      {/* {currentRoundIdx === null && !isClosed && (
+      {(numPlayers < 2 || addPlayerDialogOpen) && (
+        <AddPlayerDialog onClose={() => setAddPlayerDialogOpen(false)} />
+      )}
+      {currentRoundIdx === null && !isClosed && (
         <>
           <div
             style={{
@@ -222,7 +257,6 @@ export const GameComp = () => {
             <button
               className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900"
               onClick={(e) => {
-
                 e.preventDefault();
                 setIsClosed(true);
               }}
@@ -230,13 +264,13 @@ export const GameComp = () => {
               Close
             </button>
           </div>
-          <Confetti />
+          {/* <Confetti /> */}
         </>
-      )} */}
+      )}
       <div className="flex justify-end space-x-2 px-1 my-1">
         <button
           className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900"
-          onClick={addPlayer}
+          onClick={() => setAddPlayerDialogOpen(true)}
         >
           Add player
         </button>
@@ -261,7 +295,7 @@ export const GameComp = () => {
       >
         <div></div>
         {players.map((p, idx) => (
-          <PlayerComp id={p} key={p} isDealer={idx === dealerIdx} />
+          <PlayerComp player={p} key={p.id} isDealer={idx === dealerIdx} />
         ))}
 
         {DEALS.map((t, t_idx) => (
@@ -278,32 +312,38 @@ export const GameComp = () => {
             {players.map((p, p_idx) => {
               return (
                 <div
-                  key={p}
+                  key={p.id}
                   className={`text-xl border-b ${
                     p_idx === players.length ? "" : "border-r"
                   } border-gray-400 flex justify-center items-center text-center`}
                 >
                   <div
                     className={`${
-                      currentPlayerId === p &&
+                      currentPlayerId === p.id &&
                       currentRoundIdx === t_idx &&
                       stage === "bid"
                         ? "bg-green-300"
                         : ""
                     } h-full flex items-center justify-center flex-grow w-full border-r`}
                   >
-                    {rs?.[t_idx]?.val()[p]?.bid}
+                    {
+                      rs?.[t_idx].turns.find((t) => t.player[0].id === p.id)
+                        ?.bid
+                    }
                   </div>
                   <div
                     className={`${
-                      currentPlayerId === p &&
+                      currentPlayerId === p.id &&
                       currentRoundIdx === t_idx &&
                       stage === "score"
                         ? "bg-green-300"
                         : ""
                     } h-full flex items-center justify-center flex-grow w-full `}
                   >
-                    {rs?.[t_idx]?.val()[p]?.score}
+                    {
+                      rs?.[t_idx].turns.find((t) => t.player[0].id === p.id)
+                        ?.score
+                    }
                   </div>
                 </div>
               );
@@ -318,7 +358,7 @@ export const GameComp = () => {
               key={idx}
               className="text-xl text-center border-r border-gray-400 last:border-r-0 "
             >
-              {getScoreForPlayer(p)}
+              {getScoreForPlayer(p.id)}
             </div>
           );
         })}
@@ -330,7 +370,7 @@ export const GameComp = () => {
             return (
               <button
                 key={opt.number}
-                onClick={() => handleClick(opt)}
+                onClick={() => handleBid(opt)}
                 className={`${
                   opt.disabled
                     ? "border-purple-50 bg-white opacity-50"
@@ -363,47 +403,196 @@ export const GameComp = () => {
   );
 };
 
-const getDealerIdx = (roundIdx: number | null, players: string[]) => {
-  return roundIdx !== null
-    ? (roundIdx + players.length - 1) % players.length
-    : null;
+const AddPlayerDialog = ({ onClose }: { onClose: () => void }) => {
+  const { gameId } = useParams();
+  const [type, settype] = useState<"existing" | "new">("existing");
+  const [playerName, setPlayerName] = useState("");
+  const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
+  const {
+    data: allPlayers,
+    isLoading,
+    error,
+  } = db.useQuery({
+    players: {},
+  });
+  const {
+    data: playersInGame,
+    isLoading: isLoading2,
+    error: error2,
+  } = db.useQuery({
+    players: {
+      $: {
+        where: {
+          "playersOrders.game.id": gameId!,
+        },
+      },
+    },
+  });
+  console.log({ allPlayers });
+  console.log({ playersInGame });
+  const psInGame = playersInGame?.players.map((p) => p.id);
+  console.log("playerids in game", psInGame);
+
+  const addExistingPlayerToGame = async (
+    playerId: string,
+    orderNumber: number
+  ) => {
+    const res = await db.transact([
+      tx.playersOrders[id()]
+        .update({ orderNumber })
+        .link({ player: playerId, game: gameId! }),
+    ]);
+    if (res.status === "enqueued") {
+      enqueueSnackbar("Player enqueued (linked)", { variant: "success" });
+    }
+  };
+
+  const addNewPlayerToGame = async (name: string, orderNumber: number) => {
+    const playerId = id();
+    const res = await db.transact([
+      tx.players[playerId].update({ name }),
+      tx.playersOrders[id()]
+        .update({ orderNumber })
+        .link({ player: playerId, game: gameId! }),
+    ]);
+    if (res.status === "enqueued") {
+      enqueueSnackbar("Player enqueued", { variant: "success" });
+    }
+  };
+
+  const handleAddPlayer = () => {
+    if (type === "new") {
+      console.log("Add new player", playerName);
+      if (!playerName.length) {
+        enqueueSnackbar("Name is required", { variant: "error" });
+        return;
+      }
+
+      const res = addNewPlayerToGame(playerName, psInGame?.length ?? 0);
+      setPlayerName("");
+      return;
+    }
+    if (!selectedPlayer) {
+      enqueueSnackbar("Player is required", { variant: "error" });
+      return;
+    }
+    const res = addExistingPlayerToGame(
+      selectedPlayer.id,
+      psInGame?.length ?? 0
+    );
+    setSelectedPlayer(null);
+  };
+  return (
+    <Modal component={"div"} open onClose={onClose}>
+      <ModalDialog>
+        <DialogTitle>Add player</DialogTitle>
+        <DialogContent>
+          <RadioGroup
+            value={type}
+            onChange={(e) => settype(e.target.value as any)}
+          >
+            <Radio id={"false"} value={"existing"} label="Existing Player" />
+            <Radio id={"true"} value={"new"} label="New Player" />
+          </RadioGroup>
+
+          {type === "new" ? (
+            <Input
+              value={playerName}
+              onChange={(e) => setPlayerName(e.target.value)}
+            />
+          ) : (
+            <Autocomplete<Player>
+              value={selectedPlayer}
+              onChange={(e, val) => setSelectedPlayer(val)}
+              isOptionEqualToValue={(o, v) => o.id === v?.id}
+              options={
+                allPlayers?.players
+                  .filter((p) => !psInGame?.includes(p.id))
+                  .map(
+                    (p) =>
+                      ({
+                        id: p.id,
+                        name: p.name as any,
+                      } as Player)
+                  ) ?? []
+              }
+              getOptionLabel={(o) => o.name}
+            />
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleAddPlayer}>Add player</Button>
+        </DialogActions>
+      </ModalDialog>
+    </Modal>
+  );
 };
 
-const PlayerComp = ({ id, isDealer }: { id: string; isDealer: boolean }) => {
+const getDealerIdx = (roundIdx: number | null, numPlayers: number) => {
+  return roundIdx !== null ? (roundIdx + numPlayers - 1) % numPlayers : null;
+};
+
+const PlayerComp = ({
+  player,
+  isDealer,
+}: {
+  player: Player;
+  isDealer: boolean;
+}) => {
+  const id = player.id;
   const { gameId } = useParams();
   const [temp_name, changeTempName] = useState("");
   const [changing_name, setChangingName] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
-  const [player, loading, error] = useObjectVal<Player>(
-    ref(db, "/players/" + gameId + "/" + id)
-  );
-
   useEffect(() => {
-    if (input.current) {
-      input.current.select();
+    if (player) {
+      changeTempName(player.name);
     }
-  }, [changing_name]);
+  }, [player, setChangingName]);
 
-  const handleChangePlayer = async (e) => {
-    await set(ref(db, "/players/" + gameId + "/" + id), { name: temp_name });
-
-    setChangingName(false);
+  const handleSave = () => {
+    console.log("Impl");
   };
+  // const handleChangePlayer = async (e) => {
+  //   await set(ref(db, "/players/" + gameId + "/" + id), { name: temp_name });
+
+  //   setChangingName(false);
+  // };
 
   return (
     <div className={`${isDealer ? "bg-red-500" : ""} text-center text-xs`}>
       {changing_name ? (
-        <input
-          className="w-full h-full text-center"
-          ref={input}
-          value={temp_name}
-          onChange={(e) => changeTempName(e.target.value)}
-          onBlur={handleChangePlayer}
-        />
+        <Modal open onClose={() => setChangingName(false)}>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSave();
+            }}
+          >
+            <ModalDialog>
+              <DialogTitle>Player settings</DialogTitle>
+              <FormControl>
+                <FormLabel>Name</FormLabel>
+                <Input
+                  required
+                  value={temp_name}
+                  onChange={(e) => changeTempName(e.target.value)}
+                />
+              </FormControl>
+              <Button variant="soft" onClick={() => setChangingName(false)}>
+                Cancel
+              </Button>
+              <Button color="danger" variant="soft">
+                Delete player
+              </Button>
+              <Button type="submit">Save</Button>
+            </ModalDialog>
+          </form>
+        </Modal>
       ) : (
         <button
-          onFocus={() => setChangingName(true)}
+          // onFocus={() => setChangingName(true)}
           className="w-full h-full p-1 truncate"
           onClick={() => setChangingName(true)}
         >
@@ -417,7 +606,7 @@ const PlayerComp = ({ id, isDealer }: { id: string; isDealer: boolean }) => {
 const getBidOptions = (
   currentRound: Round | null,
   currentRoundIdx: number,
-  players: string[],
+  players: Player[],
   stage: "score" | "bid"
 ): { number: number; disabled: boolean }[] => {
   const all_options = [
@@ -436,9 +625,11 @@ const getBidOptions = (
     return [];
   }
 
+  console.log(players);
   const bids_left = currentRound
-    ? players.length - Object.values(currentRound).length
+    ? players.length - currentRound.turns.length
     : players.length;
+  console.log({ bids_left });
 
   const options = all_options.filter((o) => o.number <= turn.num_cards);
   if (stage === "score") {
@@ -447,9 +638,10 @@ const getBidOptions = (
   if (bids_left !== 1) {
     return options;
   }
+  console.log({ options });
 
   const sum_bids = currentRound
-    ? Object.values(currentRound).reduce((acc, turn) => {
+    ? currentRound.turns.reduce((acc, turn) => {
         return acc + (turn.bid ?? 0);
       }, 0)
     : 0;
@@ -470,31 +662,35 @@ const getBidOptions = (
 const getCurrentPlayerIdFromRound = (
   round: Round | null,
   dealerIdx: number | null,
-  players: string[]
+  ps: Player[]
 ): string | null => {
   if (dealerIdx === null) {
-    return players[0];
+    return ps[0].id;
   }
-  const startingPlayerIdx = (dealerIdx + 1) % players.length;
+  const startingPlayerIdx = (dealerIdx + 1) % ps.length;
 
   const orderedPlayers = [
-    ...players.slice(startingPlayerIdx),
-    ...players.slice(0, startingPlayerIdx),
+    ...ps.slice(startingPlayerIdx),
+    ...ps.slice(0, startingPlayerIdx),
   ];
 
   if (!round) {
-    return orderedPlayers[0];
+    return orderedPlayers[0].id;
   }
 
   const playerId =
     orderedPlayers.find(
-      (p) => (round[p] as Turn | undefined)?.bid === undefined
+      (p) =>
+        (round.turns.find((t) => t.player[0].id === p.id) as Turn | undefined)
+          ?.bid === undefined
     ) ??
     orderedPlayers.find(
-      (p) => (round[p] as Turn | undefined)?.score === undefined
+      (p) =>
+        (round.turns.find((t) => t.player[0].id === p.id) as Turn | undefined)
+          ?.score === undefined
     ) ??
     null ??
     null;
 
-  return playerId;
+  return playerId?.id ?? null;
 };

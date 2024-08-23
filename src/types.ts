@@ -1,29 +1,43 @@
 export type Stage = "bid" | "score";
-
-export type Turn = {
-  bid?: number;
-  score?: number;
+export type Schema = {
+  games: Game; //[];
+  players: Player; //[];
+  turns: Turn; //[];
+  rounds: Round; //[];
+  playersOrders: PlayersOrders; //[];
 };
-
-export type Round = { [playerId: string]: Turn };
-
-export type Scoresheet = Round[];
-
-export type Player = {
-  id: number;
-  name: string;
-};
-
 export type Game = {
   created_at: string;
-  players: { [order: string]: { playerId: string } };
-  rounds: {
-    [order: string]: {
-      // roundId: string;
-      dealId: string;
-      turns: { [order: string]: Turn };
-    };
-  };
+  id: string;
+  rounds: Round; //[];
+  playersOrders: PlayersOrders; //[];
+};
+
+export type Turn = {
+  id: string;
+  bid?: number;
+  score?: number;
+  round: Round;
+  player: Player[];
+};
+export type Round = {
+  id: string;
+  roundNumber: number;
+  game: Game;
+  turns: Turn[]; //[];
+};
+// export type Scoresheet = Round//[];
+export type Player = {
+  id: string;
+  name: string;
+  playersOrders: PlayersOrders[]; //[];
+};
+
+export type PlayersOrders = {
+  id: string;
+  orderNumber: number;
+  player: Player;
+  game: Game;
 };
 
 export type Deal = {

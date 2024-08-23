@@ -1,26 +1,19 @@
 import "./index.css";
 
-import { FirebaseOptions, initializeApp } from "firebase/app";
-import { getDatabase } from "firebase/database";
 import { createRoot } from "react-dom/client";
 import { RouterProvider, createBrowserRouter } from "react-router-dom";
+import { App } from "./components/App";
 import { GameComp } from "./components/Game";
 import { ManageGames } from "./components/ManageGames";
-import { Root } from "./components/App";
 
-const firebaseConfig: FirebaseOptions = {
-  apiKey: import.meta.env.VITE_FB_API_KEY,
-  authDomain: "contract-whist-7aee2.firebaseapp.com",
-  projectId: "contract-whist-7aee2",
-  storageBucket: "contract-whist-7aee2.appspot.com",
-  messagingSenderId: import.meta.env.VITE_FB_SENDER_ID,
-  appId: import.meta.env.VITE_FB_APP_ID,
-  databaseURL:
-    "https://contract-whist-7aee2-default-rtdb.europe-west1.firebasedatabase.app",
-};
+import { init, tx, id } from "@instantdb/react";
+import { SnackbarProvider } from "notistack";
+import { Schema } from "./types";
 
-const app = initializeApp(firebaseConfig);
-export const db = getDatabase(app);
+// ID for app: contract-whist-scoreboard
+const APP_ID = "33fdf866-9fcb-4721-a84d-ca1dba1f0ab0";
+
+export const db = init<Schema>({ appId: APP_ID });
 
 const container = document.getElementById("root");
 const root = createRoot(container!);
@@ -28,18 +21,23 @@ const root = createRoot(container!);
 const router = createBrowserRouter([
   {
     path: "/",
-    element: <Root />,
+    element: <App />,
     children: [
       {
         path: "/games/:gameId",
         element: <GameComp />,
       },
-      {
-        path: "/",
-        element: <ManageGames />,
-      },
+      // {
+      //   path: "/",
+      //   element: <ManageGames />,
+      // },
     ],
   },
 ]);
 
-root.render(<RouterProvider router={router} />);
+root.render(
+  <>
+    <SnackbarProvider />
+    <RouterProvider router={router} />
+  </>
+);
