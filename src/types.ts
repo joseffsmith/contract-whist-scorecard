@@ -36,7 +36,7 @@ export type Player = {
 export type PlayersOrders = {
   id: string;
   orderNumber: number;
-  player: Player;
+  player: Player[];
   game: Game;
 };
 
