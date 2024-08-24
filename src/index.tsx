@@ -20,15 +20,15 @@ const root = createRoot(container!);
 
 const router = createBrowserRouter([
   {
-    path: "/",
+    path: "/contract-whist",
     element: <App />,
     children: [
       {
-        path: "/games/:gameId",
+        path: "games/:gameId",
         element: <GameComp />,
       },
       {
-        path: "/",
+        path: "",
         element: <ManageGames />,
       },
     ],

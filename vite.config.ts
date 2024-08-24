@@ -7,4 +7,5 @@ export default defineConfig({
   esbuild: {
     jsxInject: `import * as React from "react"`,
   },
+  base: "/contract-whist",
 });
