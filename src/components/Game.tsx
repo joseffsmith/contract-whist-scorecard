@@ -192,16 +192,21 @@ export const GameComp = () => {
     const playerToUndo = players[player_idx];
 
     // work out which stage we're on
+    console.log({ playerToUndo });
+    console.log(
+      round_to_undo.turns.find((p) => p.player[0].id === playerToUndo.id)?.id
+    );
     if (
-      round_to_undo.turns.find((p) => p.id === playerToUndo.id)?.score !==
-      undefined
+      round_to_undo.turns.find((p) => p.player[0].id === playerToUndo.id)
+        ?.score !== undefined
     ) {
       // round_to_undo.turns.find((p) => p.id === playerToUndo.id)!.score =
       //   undefined;
 
       const res = await db.transact([
         tx.turns[
-          round_to_undo.turns.find((p) => p.id === playerToUndo.id)!.id
+          round_to_undo.turns.find((p) => p.player[0].id === playerToUndo.id)!
+            .id
         ].merge({
           score: undefined,
         }),
@@ -212,10 +217,8 @@ export const GameComp = () => {
 
     const res = await db.transact([
       tx.turns[
-        round_to_undo.turns.find((p) => p.id === playerToUndo.id)!.id
-      ].merge({
-        bid: undefined,
-      }),
+        round_to_undo.turns.find((p) => p.player[0].id === playerToUndo.id)!.id
+      ].delete(),
     ]);
     // round_to_undo[playerToUndo].bid = undefined;
   };
