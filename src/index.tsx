@@ -18,22 +18,25 @@ export const db = init<Schema>({ appId: APP_ID });
 const container = document.getElementById("root");
 const root = createRoot(container!);
 
-const router = createBrowserRouter([
-  {
-    path: "/contract-whist",
-    element: <App />,
-    children: [
-      {
-        path: "games/:gameId",
-        element: <GameComp />,
-      },
-      {
-        path: "",
-        element: <ManageGames />,
-      },
-    ],
-  },
-]);
+const router = createBrowserRouter(
+  [
+    {
+      path: "/",
+      element: <App />,
+      children: [
+        {
+          path: "/games/:gameId",
+          element: <GameComp />,
+        },
+        {
+          path: "/",
+          element: <ManageGames />,
+        },
+      ],
+    },
+  ],
+  { basename: "/contract-whist" }
+);
 
 root.render(
   <>
