@@ -9,14 +9,14 @@ export type Schema = {
 export type Game = {
   created_at: string;
   id: string;
-  rounds: Round; //[];
-  playersOrders: PlayersOrders; //[];
+  rounds: Round[]; //[];
+  playersOrders: PlayersOrders[]; //[];
 };
 
 export type Turn = {
   id: string;
-  bid?: number;
-  score?: number;
+  bid?: number | null;
+  score?: number | null;
   round: Round;
   player: Player[];
 };

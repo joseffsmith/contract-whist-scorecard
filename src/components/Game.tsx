@@ -1,14 +1,11 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-
 import { useParams } from "react-router-dom";
-
 import {
   Autocomplete,
   Button,
   DialogActions,
   DialogContent,
   DialogTitle,
-  Dropdown,
   FormControl,
   FormLabel,
   Input,
@@ -16,7 +13,6 @@ import {
   ModalDialog,
   Radio,
   RadioGroup,
-  Switch,
 } from "@mui/joy";
 
 import { DEALS } from "../constants";
@@ -53,7 +49,6 @@ export const GameComp = () => {
   };
 
   const { isLoading, error, data } = db.useQuery(query);
-  console.log({ isLoading, error, data, gameId });
 
   if (!gameId) {
     console.error("No gameId");
@@ -72,45 +67,41 @@ export const GameComp = () => {
   }
 
   const game = data.games[0];
-  console.log({ game });
-  const rs = game.rounds.sort((a, b) => a.roundNumber - b.roundNumber);
-  console.log({ rs });
 
-  const numPlayers = Object.values(game?.playersOrders ?? {}).length;
+  const rs = game.rounds.sort((a, b) => a.roundNumber - b.roundNumber);
+
+  const numPlayers = Object.values(game.playersOrders).length;
   const lastRound =
-    rs.find(
-      (r) =>
+    rs.find((r) => {
+      return (
         r.turns.length !== numPlayers ||
-        r.turns.some((t) => t.score === undefined)
-    ) ?? rs[0];
+        r.turns.some((t) => t.score === undefined || t.score === null)
+      );
+    }) ?? rs[0];
   const currentRoundIdx = lastRound.roundNumber;
 
   const currentRound = (
-    rs?.length ? rs[currentRoundIdx] ?? null : null
+    rs.length ? rs[currentRoundIdx] ?? null : null
   ) as Round | null;
-  console.log({ currentRound });
 
   const dealerIdx = getDealerIdx(currentRoundIdx, numPlayers);
-  console.log({ dealerIdx });
 
   const players: Player[] = Object.values(game.playersOrders)
     .sort((apo, bpo) => apo.orderNumber - bpo.orderNumber)
     .flatMap((p) => p.player as Player);
-  console.log({ players });
+
   const currentPlayerId = getCurrentPlayerIdFromRound(
     currentRound,
     dealerIdx,
     players
   );
-  console.log({ currentPlayerId });
 
   const numTurns = currentRound ? currentRound.turns.length : 0;
-  console.log({ numTurns });
+
   const stage: "bid" | "score" = numTurns === players.length ? "score" : "bid";
-  console.log({ stage });
 
   const getScoreForPlayer = (playerId: string) => {
-    return rs?.length
+    return rs.length
       ? rs.reduce((prev, curr) => {
           const turn = curr.turns.find((t) => t.player[0].id === playerId);
           if (!turn) {
@@ -160,14 +151,17 @@ export const GameComp = () => {
     if (
       !round_to_undo ||
       round_to_undo.turns.every(
-        (t) => t.bid === undefined && t.score === undefined
+        (t) =>
+          (t.bid === undefined || t.bid === null) &&
+          (t.score === undefined || t.score === null)
       )
     ) {
       round_idx -= 1;
-      round_to_undo = rs?.[round_idx];
+      round_to_undo = rs[round_idx] ?? null;
     }
 
     // back to the start
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (!round_to_undo) {
       return;
     }
@@ -192,22 +186,17 @@ export const GameComp = () => {
     const playerToUndo = players[player_idx];
 
     // work out which stage we're on
-    console.log({ playerToUndo });
-    console.log(
-      round_to_undo.turns.find((p) => p.player[0].id === playerToUndo.id)?.id
+
+    const turnToUndo = round_to_undo.turns.find(
+      (p) => p.player[0].id === playerToUndo.id
     );
-    if (
-      round_to_undo.turns.find((p) => p.player[0].id === playerToUndo.id)
-        ?.score !== undefined
-    ) {
+
+    if (turnToUndo?.score !== undefined && turnToUndo.score !== null) {
       // round_to_undo.turns.find((p) => p.id === playerToUndo.id)!.score =
       //   undefined;
 
       const res = await db.transact([
-        tx.turns[
-          round_to_undo.turns.find((p) => p.player[0].id === playerToUndo.id)!
-            .id
-        ].merge({
+        tx.turns[turnToUndo.id].merge({
           score: undefined,
         }),
       ]);
@@ -329,10 +318,7 @@ export const GameComp = () => {
                         : ""
                     } h-full flex items-center justify-center flex-grow w-full border-r`}
                   >
-                    {
-                      rs?.[t_idx].turns.find((t) => t.player[0].id === p.id)
-                        ?.bid
-                    }
+                    {rs[t_idx].turns.find((t) => t.player[0].id === p.id)?.bid}
                   </div>
                   <div
                     className={`${
@@ -344,7 +330,7 @@ export const GameComp = () => {
                     } h-full flex items-center justify-center flex-grow w-full `}
                   >
                     {
-                      rs?.[t_idx].turns.find((t) => t.player[0].id === p.id)
+                      rs[t_idx].turns.find((t) => t.player[0].id === p.id)
                         ?.score
                     }
                   </div>
@@ -431,10 +417,8 @@ const AddPlayerDialog = ({ onClose }: { onClose: () => void }) => {
       },
     },
   });
-  console.log({ allPlayers });
-  console.log({ playersInGame });
+
   const psInGame = playersInGame?.players.map((p) => p.id);
-  console.log("playerids in game", psInGame);
 
   const addExistingPlayerToGame = async (
     playerId: string,
@@ -465,7 +449,6 @@ const AddPlayerDialog = ({ onClose }: { onClose: () => void }) => {
 
   const handleAddPlayer = () => {
     if (type === "new") {
-      console.log("Add new player", playerName);
       if (!playerName.length) {
         enqueueSnackbar("Name is required", { variant: "error" });
         return;
@@ -507,7 +490,7 @@ const AddPlayerDialog = ({ onClose }: { onClose: () => void }) => {
             <Autocomplete<Player>
               value={selectedPlayer}
               onChange={(e, val) => setSelectedPlayer(val)}
-              isOptionEqualToValue={(o, v) => o.id === v?.id}
+              isOptionEqualToValue={(o, v) => o.id === v.id}
               options={
                 allPlayers?.players
                   .filter((p) => !psInGame?.includes(p.id))
@@ -549,14 +532,10 @@ const PlayerComp = ({
   const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (player) {
-      changeTempName(player.name);
-    }
+    changeTempName(player.name);
   }, [player, setChangingName]);
 
-  const handleSave = () => {
-    console.log("Impl");
-  };
+  const handleSave = () => {};
   // const handleChangePlayer = async (e) => {
   //   await set(ref(db, "/players/" + gameId + "/" + id), { name: temp_name });
 
@@ -599,7 +578,7 @@ const PlayerComp = ({
           className="w-full h-full p-1 truncate"
           onClick={() => setChangingName(true)}
         >
-          {player ? player.name : id}
+          {player.name}
         </button>
       )}
     </div>
@@ -628,11 +607,9 @@ const getBidOptions = (
     return [];
   }
 
-  console.log(players);
   const bids_left = currentRound
     ? players.length - currentRound.turns.length
     : players.length;
-  console.log({ bids_left });
 
   const options = all_options.filter((o) => o.number <= turn.num_cards);
   if (stage === "score") {
@@ -641,7 +618,6 @@ const getBidOptions = (
   if (bids_left !== 1) {
     return options;
   }
-  console.log({ options });
 
   const sum_bids = currentRound
     ? currentRound.turns.reduce((acc, turn) => {
@@ -682,16 +658,19 @@ const getCurrentPlayerIdFromRound = (
   }
 
   const playerId =
-    orderedPlayers.find(
-      (p) =>
-        (round.turns.find((t) => t.player[0].id === p.id) as Turn | undefined)
-          ?.bid === undefined
-    ) ??
-    orderedPlayers.find(
-      (p) =>
-        (round.turns.find((t) => t.player[0].id === p.id) as Turn | undefined)
-          ?.score === undefined
-    ) ??
+    orderedPlayers.find((p) => {
+      const turn = round.turns.find((t) => t.player[0].id === p.id) as
+        | Turn
+        | undefined;
+      return turn?.bid === undefined || turn.bid === null;
+    }) ??
+    orderedPlayers.find((p) => {
+      const turn = round.turns.find((t) => t.player[0].id === p.id) as
+        | Turn
+        | undefined;
+
+      return turn?.score === undefined || turn.score === null;
+    }) ??
     null ??
     null;
 
