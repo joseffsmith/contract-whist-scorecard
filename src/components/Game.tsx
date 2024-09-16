@@ -257,7 +257,7 @@ export const GameComp = () => {
           {/* <Confetti /> */}
         </>
       )}
-      <div className="flex justify-end space-x-2 px-1 my-1">
+      <div className="flex justify-end space-x-1 my-1">
         <button
           className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900"
           onClick={() => setAddPlayerDialogOpen(true)}
