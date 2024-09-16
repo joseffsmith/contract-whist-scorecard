@@ -10,6 +10,20 @@ import { getBidOptions } from "../utils/getBidOptions";
 import { getCurrentPlayerIdFromRound } from "../utils/getCurrentPlayerIdFromRound";
 import { PlayerManager } from "./PlayerManager";
 import { getDealerIdx } from "../utils/getDealerIdx";
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  sortableKeyboardCoordinates,
+  arrayMove,
+  SortableContext,
+  horizontalListSortingStrategy,
+} from "@dnd-kit/sortable";
 
 export const GameComp = () => {
   const { gameId } = useParams<{ gameId: string }>();
@@ -39,7 +53,12 @@ export const GameComp = () => {
   };
 
   const { isLoading, error, data } = db.useQuery(query);
-
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
   if (!gameId) {
     console.error("No gameId");
     enqueueSnackbar("No gameId", { variant: "error" });
@@ -51,7 +70,6 @@ export const GameComp = () => {
   }
 
   const game = data.games[0];
-  console.log(game);
   const initialDealerId = game.initialDealerId;
 
   const initialDealerIdx =
@@ -206,6 +224,38 @@ export const GameComp = () => {
   const winningScore = scores.findIndex((s) => s === Math.max(...scores));
   const winningPlayer = null;
 
+  function handleDragEnd(event) {
+    const { active, over } = event;
+
+    if (active.id !== over.id) {
+      const oldPo = game.playersOrders.find(
+        (po) => po.player[0].id === active.id
+      );
+      const oldIndex = oldPo?.orderNumber;
+      const newPo = game.playersOrders.find(
+        (po) => po.player[0].id === over.id
+      );
+      const newIndex = newPo?.orderNumber;
+      if (
+        !oldPo ||
+        !newPo ||
+        oldIndex === undefined ||
+        newIndex === undefined
+      ) {
+        enqueueSnackbar("Error changing order", { variant: "error" });
+        return;
+      }
+      const res = db.transact([
+        tx.playersOrders[oldPo.id].update({
+          orderNumber: newIndex,
+        }),
+        tx.playersOrders[newPo.id].update({
+          orderNumber: oldIndex,
+        }),
+      ]);
+    }
+  }
+
   return (
     <>
       {(numPlayers < 2 || addPlayerDialogOpen) && (
@@ -264,9 +314,24 @@ export const GameComp = () => {
         }}
       >
         <div></div>
-        {players.map((p, idx) => (
-          <PlayerManager player={p} key={p.id} isDealer={idx === dealerIdx} />
-        ))}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext
+            items={players}
+            strategy={horizontalListSortingStrategy}
+          >
+            {players.map((p, idx) => (
+              <PlayerManager
+                player={p}
+                key={p.id}
+                isDealer={idx === dealerIdx}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
 
         {DEALS.map((t, t_idx) => (
           <Fragment key={t_idx}>

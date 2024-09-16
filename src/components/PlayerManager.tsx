@@ -13,6 +13,8 @@ import { Player } from "../types";
 import { tx } from "@instantdb/react";
 import { db } from "..";
 import { enqueueSnackbar, SnackbarContent, SnackbarProvider } from "notistack";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 export const PlayerManager = ({
   player,
@@ -79,8 +81,21 @@ export const PlayerManager = ({
     ]);
   };
 
+  const { attributes, listeners, setNodeRef, transform, transition } =
+    useSortable({ id: player.id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
   return (
-    <div className={`${isDealer ? "bg-red-500" : ""} text-center text-xs`}>
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className={`${isDealer ? "bg-red-500" : ""} text-center text-xs`}
+    >
       {dialogOpen ? (
         <Modal open onClose={handleClose}>
           <form
