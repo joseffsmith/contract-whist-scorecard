@@ -73,7 +73,7 @@ export const GameComp = () => {
   const initialDealerId = game.initialDealerId;
 
   const initialDealerIdx =
-    game.playersOrders.find((po) => po.player[0].id === initialDealerId)
+    game.playersOrders.find((po) => po.player?.[0]?.id === initialDealerId)
       ?.orderNumber ?? null;
 
   const rs = game.rounds.sort((a, b) => a.roundNumber - b.roundNumber);

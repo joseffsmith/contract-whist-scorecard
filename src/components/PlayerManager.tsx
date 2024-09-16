@@ -6,6 +6,7 @@ import {
   FormLabel,
   Input,
   Button,
+  Typography,
 } from "@mui/joy";
 import { useState, useRef, useEffect } from "react";
 import { useParams } from "react-router-dom";
@@ -90,11 +91,10 @@ export const PlayerManager = ({
 
   return (
     <div
-      ref={setNodeRef}
       style={style}
-      {...attributes}
-      {...listeners}
-      className={`${isDealer ? "bg-red-500" : ""} text-center text-xs`}
+      className={`${
+        isDealer ? "bg-red-500" : ""
+      } text-center text-xs flex items-stretch`}
     >
       {dialogOpen ? (
         <Modal open onClose={handleClose}>
@@ -125,12 +125,26 @@ export const PlayerManager = ({
           </form>
         </Modal>
       ) : (
-        <button
-          className="w-full h-full p-1 truncate"
-          onClick={() => setDialogOpen(true)}
-        >
-          {player.name}
-        </button>
+        <>
+          {canChangeDealer && (
+            <Typography
+              level="body-md"
+              style={{ margin: "auto auto" }}
+              className={"px-4 m-auto"}
+              ref={setNodeRef}
+              {...attributes}
+              {...listeners}
+            >
+              ✥
+            </Typography>
+          )}
+          <button
+            onClick={() => setDialogOpen(true)}
+            className="w-full h-full p-1 truncate"
+          >
+            {player.name}
+          </button>
+        </>
       )}
     </div>
   );
