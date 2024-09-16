@@ -1,29 +1,15 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useState } from "react";
 import { useParams } from "react-router-dom";
-import {
-  Autocomplete,
-  Button,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  FormControl,
-  FormLabel,
-  Input,
-  Modal,
-  ModalDialog,
-  Radio,
-  RadioGroup,
-} from "@mui/joy";
-
 import { DEALS } from "../constants";
-import { id, lookup, tx } from "@instantdb/react";
+import { id, tx } from "@instantdb/react";
 import { enqueueSnackbar } from "notistack";
 import { db } from "..";
-import { Deal, Player, Round, Turn } from "../types";
+import { Player, Round } from "../types";
 import { AddPlayerDialog } from "./AddPlayerDialog";
 import { getBidOptions } from "../utils/getBidOptions";
 import { getCurrentPlayerIdFromRound } from "../utils/getCurrentPlayerIdFromRound";
 import { PlayerManager } from "./PlayerManager";
+import { getDealerIdx } from "../utils/getDealerIdx";
 
 export const GameComp = () => {
   const { gameId } = useParams<{ gameId: string }>();
@@ -60,17 +46,17 @@ export const GameComp = () => {
     return null;
   }
 
-  const removePlayer = async (playerId: string) => {
-    const res = await db.transact([tx.playersOrders[id()].delete()]);
-    if (res.status === "enqueued") {
-      enqueueSnackbar("Player removed", { variant: "success" });
-    }
-  };
   if (!data) {
     return <div>Loading...</div>;
   }
 
   const game = data.games[0];
+  console.log(game);
+  const initialDealerId = game.initialDealerId;
+
+  const initialDealerIdx =
+    game.playersOrders.find((po) => po.player[0].id === initialDealerId)
+      ?.orderNumber ?? null;
 
   const rs = game.rounds.sort((a, b) => a.roundNumber - b.roundNumber);
 
@@ -88,7 +74,7 @@ export const GameComp = () => {
     rs.length ? rs[currentRoundIdx] ?? null : null
   ) as Round | null;
 
-  const dealerIdx = getDealerIdx(currentRoundIdx, numPlayers);
+  const dealerIdx = getDealerIdx(currentRoundIdx, numPlayers, initialDealerIdx);
 
   const players: Player[] = Object.values(game.playersOrders)
     .sort((apo, bpo) => apo.orderNumber - bpo.orderNumber)
@@ -171,7 +157,7 @@ export const GameComp = () => {
     }
 
     // work out who's turn it is, 0th player changes each round
-    const dealerIdx = getDealerIdx(round_idx, players.length);
+    const dealerIdx = getDealerIdx(round_idx, players.length, initialDealerIdx);
     let player = getCurrentPlayerIdFromRound(round_to_undo, dealerIdx, players);
     if (!player) {
       const last_player_idx = round_idx % players.length;
@@ -264,12 +250,6 @@ export const GameComp = () => {
         >
           Add player
         </button>
-        {/* <button
-          className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900"
-          onClick={removePlayer}
-        >
-          Remove player
-        </button> */}
         <button
           className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900"
           onClick={undo}
@@ -388,8 +368,4 @@ export const GameComp = () => {
       )}
     </>
   );
-};
-
-const getDealerIdx = (roundIdx: number | null, numPlayers: number) => {
-  return roundIdx !== null ? (roundIdx + numPlayers - 1) % numPlayers : null;
 };

@@ -24,7 +24,7 @@ export const PlayerManager = ({
   const { gameId } = useParams();
   const [temp_name, setTempName] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
-  const { data } = db.useQuery({
+  const { data: playersOrdersData } = db.useQuery({
     playersOrders: {
       $: {
         where: {
@@ -34,6 +34,17 @@ export const PlayerManager = ({
       },
     },
   });
+
+  const { data: turnsData } = db.useQuery({
+    turns: {
+      $: {
+        where: {
+          "round.game.id": gameId!,
+        },
+      },
+    },
+  });
+  const canChangeDealer = turnsData?.turns.length === 0;
 
   useEffect(() => {
     setTempName(player.name);
@@ -46,15 +57,26 @@ export const PlayerManager = ({
     await db.transact([tx.players[player.id].update({ name: temp_name })]);
     handleClose();
   };
-  const handleMakeDealer = () => {
+  const handleMakeDealer = async () => {
+    if (!canChangeDealer) {
+      enqueueSnackbar("Cannot change dealer if game has started", {
+        variant: "error",
+      });
+      return;
+    }
+    await db.transact([
+      tx.games[gameId!].update({ initialDealerId: player.id }),
+    ]);
     handleClose();
   };
   const handleRemove = async () => {
-    if (!data) {
+    if (!playersOrdersData) {
       enqueueSnackbar("No data", { variant: "error" });
       return;
     }
-    await db.transact([tx.playersOrders[data.playersOrders[0].id].delete()]);
+    await db.transact([
+      tx.playersOrders[playersOrdersData.playersOrders[0].id].delete(),
+    ]);
   };
 
   return (

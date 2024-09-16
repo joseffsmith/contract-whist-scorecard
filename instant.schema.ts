@@ -17,6 +17,7 @@ export default i.graph(
     }),
     games: i.entity({
       created_at: i.string(),
+      initialDealerId: i.string().optional(),
     }),
     playersOrders: i.entity({
       orderNumber: i.number(),

@@ -54,8 +54,6 @@ export const App = () => {
       enqueueSnackbar("Game synced", { variant: "success" });
     }
 
-    console.log("clientid:, ", res.clientId);
-    console.log("gameID:, ", gameId);
     nav("/games/" + gameId);
   }
 
