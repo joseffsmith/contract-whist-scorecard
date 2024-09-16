@@ -1,6 +1,5 @@
 import {
   Button,
-  Container,
   DialogActions,
   DialogContent,
   DialogTitle,
@@ -9,14 +8,11 @@ import {
   Input,
   Modal,
   ModalDialog,
-  Stack,
-  TextField,
   Typography,
 } from "@mui/joy";
-import { SnackbarProvider, enqueueSnackbar } from "notistack";
-
+import { enqueueSnackbar } from "notistack";
 import { useState } from "react";
-import { Link, Outlet, useNavigate, useParams } from "react-router-dom";
+import { Link, Outlet, useNavigate } from "react-router-dom";
 import { db } from "..";
 import { id, tx } from "@instantdb/react";
 import { DEALS } from "../constants";
@@ -24,15 +20,8 @@ import { DEALS } from "../constants";
 export const App = () => {
   const { isLoading, user, error } = db.useAuth();
 
-  // const { gameId } = useParams();
   const nav = useNavigate();
 
-  // const [currentGame, loading, errors] = useObjectVal<Game>(
-  //   ref(db, "games/" + gameId)
-  // );
-  // const [user, loading, error] = useAuthState(auth);
-
-  // TODO: select players from previous game loaded
   async function createNewGame() {
     if (!user) {
       console.error("No user");

@@ -1,15 +1,8 @@
-// import { ref } from "firebase/database";
 import { Link } from "react-router-dom";
 import { db } from "..";
 
 // TODO: add scores
 export const ManageGames = () => {
-  // const manager = useManager()
-  // // bit of a hack to make sure the scores stay up to date on this page
-  // useEffect(() => {
-  //   manager.updateHighlightScores()
-  // }, [])
-
   const { data: gameData } = db.useQuery({
     games: { playersOrders: { player: {} } },
   });

@@ -20,6 +20,10 @@ import { id, lookup, tx } from "@instantdb/react";
 import { enqueueSnackbar } from "notistack";
 import { db } from "..";
 import { Deal, Player, Round, Turn } from "../types";
+import { AddPlayerDialog } from "./AddPlayerDialog";
+import { getBidOptions } from "../utils/getBidOptions";
+import { getCurrentPlayerIdFromRound } from "../utils/getCurrentPlayerIdFromRound";
+import { PlayerManager } from "./PlayerManager";
 
 export const GameComp = () => {
   const { gameId } = useParams<{ gameId: string }>();
@@ -88,7 +92,7 @@ export const GameComp = () => {
 
   const players: Player[] = Object.values(game.playersOrders)
     .sort((apo, bpo) => apo.orderNumber - bpo.orderNumber)
-    .flatMap((p) => p.player as Player);
+    .flatMap((p) => p.player);
 
   const currentPlayerId = getCurrentPlayerIdFromRound(
     currentRound,
@@ -186,21 +190,16 @@ export const GameComp = () => {
     const playerToUndo = players[player_idx];
 
     // work out which stage we're on
-
     const turnToUndo = round_to_undo.turns.find(
       (p) => p.player[0].id === playerToUndo.id
     );
 
     if (turnToUndo?.score !== undefined && turnToUndo.score !== null) {
-      // round_to_undo.turns.find((p) => p.id === playerToUndo.id)!.score =
-      //   undefined;
-
       const res = await db.transact([
         tx.turns[turnToUndo.id].merge({
           score: undefined,
         }),
       ]);
-
       return;
     }
 
@@ -209,7 +208,6 @@ export const GameComp = () => {
         round_to_undo.turns.find((p) => p.player[0].id === playerToUndo.id)!.id
       ].delete(),
     ]);
-    // round_to_undo[playerToUndo].bid = undefined;
   };
 
   const bidOptions = getBidOptions(
@@ -287,7 +285,7 @@ export const GameComp = () => {
       >
         <div></div>
         {players.map((p, idx) => (
-          <PlayerComp player={p} key={p.id} isDealer={idx === dealerIdx} />
+          <PlayerManager player={p} key={p.id} isDealer={idx === dealerIdx} />
         ))}
 
         {DEALS.map((t, t_idx) => (
@@ -392,287 +390,6 @@ export const GameComp = () => {
   );
 };
 
-const AddPlayerDialog = ({ onClose }: { onClose: () => void }) => {
-  const { gameId } = useParams();
-  const [type, settype] = useState<"existing" | "new">("existing");
-  const [playerName, setPlayerName] = useState("");
-  const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
-  const {
-    data: allPlayers,
-    isLoading,
-    error,
-  } = db.useQuery({
-    players: {},
-  });
-  const {
-    data: playersInGame,
-    isLoading: isLoading2,
-    error: error2,
-  } = db.useQuery({
-    players: {
-      $: {
-        where: {
-          "playersOrders.game.id": gameId!,
-        },
-      },
-    },
-  });
-
-  const psInGame = playersInGame?.players.map((p) => p.id);
-
-  const addExistingPlayerToGame = async (
-    playerId: string,
-    orderNumber: number
-  ) => {
-    const res = await db.transact([
-      tx.playersOrders[id()]
-        .update({ orderNumber })
-        .link({ player: playerId, game: gameId! }),
-    ]);
-    if (res.status === "enqueued") {
-      enqueueSnackbar("Player enqueued (linked)", { variant: "success" });
-    }
-  };
-
-  const addNewPlayerToGame = async (name: string, orderNumber: number) => {
-    const playerId = id();
-    const res = await db.transact([
-      tx.players[playerId].update({ name }),
-      tx.playersOrders[id()]
-        .update({ orderNumber })
-        .link({ player: playerId, game: gameId! }),
-    ]);
-    if (res.status === "enqueued") {
-      enqueueSnackbar("Player enqueued", { variant: "success" });
-    }
-  };
-
-  const handleAddPlayer = () => {
-    if (type === "new") {
-      if (!playerName.length) {
-        enqueueSnackbar("Name is required", { variant: "error" });
-        return;
-      }
-
-      const res = addNewPlayerToGame(playerName, psInGame?.length ?? 0);
-      setPlayerName("");
-      return;
-    }
-    if (!selectedPlayer) {
-      enqueueSnackbar("Player is required", { variant: "error" });
-      return;
-    }
-    const res = addExistingPlayerToGame(
-      selectedPlayer.id,
-      psInGame?.length ?? 0
-    );
-    setSelectedPlayer(null);
-  };
-  return (
-    <Modal component={"div"} open onClose={onClose}>
-      <ModalDialog>
-        <DialogTitle>Add player</DialogTitle>
-        <DialogContent>
-          <RadioGroup
-            value={type}
-            onChange={(e) => settype(e.target.value as any)}
-          >
-            <Radio id={"false"} value={"existing"} label="Existing Player" />
-            <Radio id={"true"} value={"new"} label="New Player" />
-          </RadioGroup>
-
-          {type === "new" ? (
-            <Input
-              value={playerName}
-              onChange={(e) => setPlayerName(e.target.value)}
-            />
-          ) : (
-            <Autocomplete<Player>
-              value={selectedPlayer}
-              onChange={(e, val) => setSelectedPlayer(val)}
-              isOptionEqualToValue={(o, v) => o.id === v.id}
-              options={
-                allPlayers?.players
-                  .filter((p) => !psInGame?.includes(p.id))
-                  .map(
-                    (p) =>
-                      ({
-                        id: p.id,
-                        name: p.name as any,
-                      } as Player)
-                  ) ?? []
-              }
-              getOptionLabel={(o) => o.name}
-            />
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleAddPlayer}>Add player</Button>
-        </DialogActions>
-      </ModalDialog>
-    </Modal>
-  );
-};
-
 const getDealerIdx = (roundIdx: number | null, numPlayers: number) => {
   return roundIdx !== null ? (roundIdx + numPlayers - 1) % numPlayers : null;
-};
-
-const PlayerComp = ({
-  player,
-  isDealer,
-}: {
-  player: Player;
-  isDealer: boolean;
-}) => {
-  const id = player.id;
-  const { gameId } = useParams();
-  const [temp_name, changeTempName] = useState("");
-  const [changing_name, setChangingName] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    changeTempName(player.name);
-  }, [player, setChangingName]);
-
-  const handleSave = () => {};
-  // const handleChangePlayer = async (e) => {
-  //   await set(ref(db, "/players/" + gameId + "/" + id), { name: temp_name });
-
-  //   setChangingName(false);
-  // };
-
-  return (
-    <div className={`${isDealer ? "bg-red-500" : ""} text-center text-xs`}>
-      {changing_name ? (
-        <Modal open onClose={() => setChangingName(false)}>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSave();
-            }}
-          >
-            <ModalDialog>
-              <DialogTitle>Player settings</DialogTitle>
-              <FormControl>
-                <FormLabel>Name</FormLabel>
-                <Input
-                  required
-                  value={temp_name}
-                  onChange={(e) => changeTempName(e.target.value)}
-                />
-              </FormControl>
-              <Button variant="soft" onClick={() => setChangingName(false)}>
-                Cancel
-              </Button>
-              <Button color="danger" variant="soft">
-                Delete player
-              </Button>
-              <Button type="submit">Save</Button>
-            </ModalDialog>
-          </form>
-        </Modal>
-      ) : (
-        <button
-          // onFocus={() => setChangingName(true)}
-          className="w-full h-full p-1 truncate"
-          onClick={() => setChangingName(true)}
-        >
-          {player.name}
-        </button>
-      )}
-    </div>
-  );
-};
-
-const getBidOptions = (
-  currentRound: Round | null,
-  currentRoundIdx: number,
-  players: Player[],
-  stage: "score" | "bid"
-): { number: number; disabled: boolean }[] => {
-  const all_options = [
-    { number: 0, disabled: false },
-    { number: 1, disabled: false },
-    { number: 2, disabled: false },
-    { number: 3, disabled: false },
-    { number: 4, disabled: false },
-    { number: 5, disabled: false },
-    { number: 6, disabled: false },
-    { number: 7, disabled: false },
-  ];
-  const turn: Deal | undefined = DEALS[currentRoundIdx];
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  if (!turn) {
-    return [];
-  }
-
-  const bids_left = currentRound
-    ? players.length - currentRound.turns.length
-    : players.length;
-
-  const options = all_options.filter((o) => o.number <= turn.num_cards);
-  if (stage === "score") {
-    return options;
-  }
-  if (bids_left !== 1) {
-    return options;
-  }
-
-  const sum_bids = currentRound
-    ? currentRound.turns.reduce((acc, turn) => {
-        return acc + (turn.bid ?? 0);
-      }, 0)
-    : 0;
-
-  if (turn.num_cards < sum_bids) {
-    return options;
-  }
-
-  const cant_say = turn.num_cards - sum_bids;
-  options.forEach((o) => {
-    if (o.number === cant_say) {
-      o.disabled = true;
-    }
-  });
-  return options;
-};
-
-const getCurrentPlayerIdFromRound = (
-  round: Round | null,
-  dealerIdx: number | null,
-  ps: Player[]
-): string | null => {
-  if (dealerIdx === null) {
-    return ps[0].id;
-  }
-  const startingPlayerIdx = (dealerIdx + 1) % ps.length;
-
-  const orderedPlayers = [
-    ...ps.slice(startingPlayerIdx),
-    ...ps.slice(0, startingPlayerIdx),
-  ];
-
-  if (!round) {
-    return orderedPlayers[0].id;
-  }
-
-  const playerId =
-    orderedPlayers.find((p) => {
-      const turn = round.turns.find((t) => t.player[0].id === p.id) as
-        | Turn
-        | undefined;
-      return turn?.bid === undefined || turn.bid === null;
-    }) ??
-    orderedPlayers.find((p) => {
-      const turn = round.turns.find((t) => t.player[0].id === p.id) as
-        | Turn
-        | undefined;
-
-      return turn?.score === undefined || turn.score === null;
-    }) ??
-    null ??
-    null;
-
-  return playerId?.id ?? null;
 };

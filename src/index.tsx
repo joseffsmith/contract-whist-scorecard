@@ -6,7 +6,7 @@ import { App } from "./components/App";
 import { GameComp } from "./components/Game";
 import { ManageGames } from "./components/ManageGames";
 
-import { init, tx, id } from "@instantdb/react";
+import { init } from "@instantdb/react";
 import { SnackbarProvider } from "notistack";
 import { Schema } from "./types";
 

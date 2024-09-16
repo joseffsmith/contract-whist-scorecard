@@ -1,9 +1,9 @@
 export type Stage = "bid" | "score";
 export type Schema = {
   games: Game; //[];
-  players: Player; //[];
   turns: Turn; //[];
   rounds: Round; //[];
+  initialDealerId: string;
   playersOrders: PlayersOrders; //[];
 };
 export type Game = {
