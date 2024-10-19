@@ -10,6 +10,10 @@ import {
   Autocomplete,
   DialogActions,
   Button,
+  Menu,
+  MenuItem,
+  ListItem,
+  AutocompleteOption,
 } from "@mui/joy";
 import { enqueueSnackbar } from "notistack";
 import { useState } from "react";
@@ -130,6 +134,11 @@ export const AddPlayerDialog = ({ onClose }: { onClose: () => void }) => {
                   ) ?? []
               }
               getOptionLabel={(o) => o.name}
+              renderOption={(props, option) => (
+                <AutocompleteOption {...props} {...option} key={option.id}>
+                  {option.name}
+                </AutocompleteOption>
+              )}
             />
           )}
         </DialogContent>

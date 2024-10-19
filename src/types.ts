@@ -12,6 +12,8 @@ export type Game = {
   rounds: Round[]; //[];
   initialDealerId: string;
   playersOrders: PlayersOrders[]; //[];
+  deletedAt: string | null;
+  createdBy?: string;
 };
 
 export type Turn = {

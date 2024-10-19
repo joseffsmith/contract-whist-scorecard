@@ -37,6 +37,8 @@ export const App = () => {
     const res = await db.transact([
       tx.games[gameId].update({
         created_at: new Date().toISOString(),
+        deletedAt: null,
+        createdBy: user.id,
       }),
       ...rounds.map((round) => {
         return tx.rounds[round.id]
