@@ -80,7 +80,7 @@ export const ManageGames = () => {
           const canDelete = isOwnGame;
           //|| user?.email === "xxx@icloud.com";
           return (
-            <div key={game.id} className="my-2">
+            <div key={game.id} className="py-1 my-1 border-t">
               <div className="flex justify-between">
                 <span>{new Date(game.created_at).toLocaleString()}</span>
                 <div className="flex">

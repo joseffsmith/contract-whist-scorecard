@@ -26,6 +26,7 @@ import {
 } from "@dnd-kit/sortable";
 
 export const GameComp = () => {
+  const { isLoading: isLoadingUser, user, error: errorAuth } = db.useAuth();
   const { gameId } = useParams<{ gameId: string }>();
   const [addPlayerDialogOpen, setAddPlayerDialogOpen] = useState(false);
 
@@ -256,6 +257,10 @@ export const GameComp = () => {
     }
   }
 
+  if (isLoadingUser) {
+    return <div>Loading...</div>;
+  }
+
   return (
     <>
       {(numPlayers < 2 || addPlayerDialogOpen) && (
@@ -293,20 +298,22 @@ export const GameComp = () => {
           {/* <Confetti /> */}
         </>
       )}
-      <div className="flex justify-end space-x-1 my-1">
-        <button
-          className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900"
-          onClick={() => setAddPlayerDialogOpen(true)}
-        >
-          Add player
-        </button>
-        <button
-          className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900"
-          onClick={undo}
-        >
-          Undo
-        </button>
-      </div>
+      {user?.id === game.createdBy && (
+        <div className="flex justify-end space-x-1 my-1">
+          <button
+            className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900"
+            onClick={() => setAddPlayerDialogOpen(true)}
+          >
+            Add player
+          </button>
+          <button
+            className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900"
+            onClick={undo}
+          >
+            Undo
+          </button>
+        </div>
+      )}
       <div
         className={`grid grid-cols-${players.length + 1} flex-grow`}
         style={{

@@ -74,7 +74,7 @@ export const App = () => {
       <header className="flex items-end mt-px justify-between">
         <h1 className="font-mono text-sm flex-shrink">Contract whist</h1>
 
-        <span className="flex space-x-1 flex-nowrap">
+        <span className="flex space-x-1 flex-nowrap my-1">
           <button className="whitespace-nowrap border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900">
             <Link to={"/"}>All games</Link>
           </button>
@@ -85,12 +85,12 @@ export const App = () => {
           >
             New game
           </button>
-          <button
+          {/* <button
             onClick={() => console.error("Impl")}
             className="whitespace-nowrap border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900"
           >
             Join game
-          </button>
+          </button> */}
         </span>
       </header>
       <Outlet />
