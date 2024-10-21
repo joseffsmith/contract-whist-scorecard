@@ -5,7 +5,8 @@
     "dev": "vite",
     "build": "vite build",
     "serve": "vite preview",
-    "test-watch": "tsc --watch"
+    "test-watch": "tsc --watch",
+    "preview": "vite preview"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",
