@@ -1,66 +1,85 @@
-import { i } from "@instantdb/core";
+// contract-whist-scoreboard
+// https://instantdb.com/dash?s=main&t=home&app=33fdf866-9fcb-4721-a84d-ca1dba1f0ab0
 
-const INSTANT_APP_ID = "33fdf866-9fcb-4721-a84d-ca1dba1f0ab0";
+import { i } from "@instantdb/react";
 
-export default i.graph(
-  INSTANT_APP_ID, // your apps UUID
+const graph = i.graph(
+  "33fdf866-9fcb-4721-a84d-ca1dba1f0ab0",
   {
-    turns: i.entity({
-      bid: i.number().optional(),
-      score: i.number().optional(),
-    }),
-    rounds: i.entity({
-      roundNumber: i.number(),
-    }),
-    players: i.entity({
-      name: i.string(),
+    $users: i.entity({
+      email: i.any().unique(),
     }),
     games: i.entity({
-      created_at: i.string(),
-      initialDealerId: i.string().optional(),
+      createdAt: i.any(),
+      createdBy: i.any(),
+      deletedAt: i.any(),
+      initialDealerId: i.any(),
+      initialPlayerId: i.any(),
+    }),
+    players: i.entity({
+      name: i.any(),
     }),
     playersOrders: i.entity({
-      orderNumber: i.number(),
+      orderNumber: i.any(),
+    }),
+    rounds: i.entity({
+      roundNumber: i.any(),
+    }),
+    turns: i.entity({
+      bid: i.any(),
+      score: i.any(),
     }),
   },
   {
-    gameRounds: {
-      forward: {
-        on: "games",
-        has: "many",
-        label: "rounds",
-      },
-      reverse: {
-        on: "rounds",
-        has: "one",
-        label: "game",
-      },
-    },
-    gamePlayersOrders: {
-      forward: {
-        on: "games",
-        has: "many",
-        label: "playersOrders",
-      },
-      reverse: {
-        on: "playersOrders",
-        has: "one",
-        label: "game",
-      },
-    },
-    playersPlayersOrders: {
+    playersTurns: {
       forward: {
         on: "players",
         has: "many",
-        label: "playersOrders",
+        label: "turns",
       },
       reverse: {
-        on: "playersOrders",
+        on: "turns",
         has: "one",
         label: "player",
       },
     },
-    roundTurns: {
+    playersOrdersGame: {
+      forward: {
+        on: "playersOrders",
+        has: "one",
+        label: "game",
+      },
+      reverse: {
+        on: "games",
+        has: "many",
+        label: "playersOrders",
+      },
+    },
+    playersOrdersPlayer: {
+      forward: {
+        on: "playersOrders",
+        has: "one",
+        label: "player",
+      },
+      reverse: {
+        on: "players",
+        has: "many",
+        label: "playersOrders",
+      },
+    },
+    roundsGame: {
+      forward: {
+        on: "rounds",
+        has: "one",
+        label: "game",
+      },
+      reverse: {
+        on: "games",
+        has: "many",
+        label: "rounds",
+      },
+    },
+    roundsTurns: {
       forward: {
         on: "rounds",
         has: "many",
@@ -72,17 +91,7 @@ export default i.graph(
         label: "round",
       },
     },
-    playerTurns: {
-      forward: {
-        on: "players",
-        has: "many",
-        label: "turns",
-      },
-      reverse: {
-        on: "turns",
-        has: "one",
-        label: "player",
-      },
-    },
   }
 );
+
+export default graph;

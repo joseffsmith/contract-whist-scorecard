@@ -73,7 +73,7 @@ export const ManageGames = () => {
         </Modal>
       )}
       {gameData.games
-        .sort((a, b) => b.created_at.localeCompare(a.created_at))
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .filter((g) => !g.deletedAt)
         .map((game) => {
           const isOwnGame = game.createdBy === user?.id;
@@ -82,7 +82,7 @@ export const ManageGames = () => {
           return (
             <div key={game.id} className="py-1 my-1 border-t">
               <div className="flex justify-between">
-                <span>{new Date(game.created_at).toLocaleString()}</span>
+                <span>{new Date(game.createdAt).toLocaleString()}</span>
                 <div className="flex">
                   {canDelete && (
                     <button

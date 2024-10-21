@@ -7,7 +7,7 @@ export type Schema = {
   playersOrders: PlayersOrders; //[];
 };
 export type Game = {
-  created_at: string;
+  createdAt: string;
   id: string;
   rounds: Round[]; //[];
   initialDealerId: string;

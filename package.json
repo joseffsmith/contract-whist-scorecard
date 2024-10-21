@@ -35,6 +35,7 @@
     "eslint-plugin-node": "^11.1.0",
     "eslint-plugin-promise": "^6.0.0",
     "eslint-plugin-react": "^7.35.0",
+    "instant-cli": "^0.14.19",
     "postcss": "8.4.31",
     "prettier": "^2.2.1",
     "tailwindcss": "2.1.1",
