@@ -255,7 +255,11 @@ const PlayerRow = ({
         </>
       }
     >
-      <ListItemDecorator {...listeners} {...attributes}>
+      <ListItemDecorator
+        {...listeners}
+        {...attributes}
+        sx={{ touchAction: "none" }}
+      >
         <DragHandle />
       </ListItemDecorator>
       <ListItemContent>{player.name}</ListItemContent>
