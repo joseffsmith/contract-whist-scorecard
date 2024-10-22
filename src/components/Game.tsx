@@ -8,6 +8,7 @@ import { Player, PlayersOrders, Round } from "../types";
 import { getBidOptions } from "../utils/getBidOptions";
 import { getCurrentPlayerIdFromRound } from "../utils/getCurrentPlayerIdFromRound";
 import { getDealerIdx } from "../utils/getDealerIdx";
+import Confetti from "react-confetti";
 
 export const GameComp = () => {
   const { gameId } = useParams<{ gameId: string }>();
@@ -51,13 +52,22 @@ export const GameComp = () => {
   const rs = game.rounds.sort((a, b) => a.roundNumber - b.roundNumber);
 
   const numPlayers = Object.values(game.playersOrders).length;
-  const lastRound =
-    rs.find((r) => {
-      return (
-        r.turns.length !== numPlayers ||
-        r.turns.some((t) => t.score === undefined || t.score === null)
-      );
-    }) ?? rs[0];
+
+  const isGameFinished = rs.every((r) => {
+    return (
+      r.turns.length === numPlayers &&
+      r.turns.every((t) => t.score !== undefined && t.score !== null)
+    );
+  });
+
+  const lastRound = isGameFinished
+    ? rs[rs.length - 1]
+    : rs.find((r) => {
+        return (
+          r.turns.length !== numPlayers ||
+          r.turns.some((t) => t.score === undefined || t.score === null)
+        );
+      }) ?? rs[0];
   const currentRoundIdx = lastRound.roundNumber;
 
   const currentRound = (
@@ -195,12 +205,12 @@ export const GameComp = () => {
     stage
   );
   const scores = players.map((p) => getScoreForPlayer(p.id));
-  const winningScore = scores.findIndex((s) => s === Math.max(...scores));
-  const winningPlayer = null;
+  const winningScorerIdx = scores.findIndex((s) => s === Math.max(...scores));
+  const winningPlayer = players[winningScorerIdx].name;
 
   return (
     <>
-      {currentRoundIdx === null && !isConfettiClosed && (
+      {isGameFinished && !isConfettiClosed && (
         <>
           <div
             style={{
@@ -214,6 +224,7 @@ export const GameComp = () => {
               flexDirection: "column",
               justifyContent: "center",
               alignItems: "center",
+              gap: 8,
             }}
           >
             <h2 style={{ fontSize: "2em", fontWeight: "bold" }}>
@@ -228,8 +239,17 @@ export const GameComp = () => {
             >
               Close
             </button>
+            <button
+              className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900"
+              onClick={(e) => {
+                e.preventDefault();
+                undo();
+              }}
+            >
+              Undo
+            </button>
           </div>
-          {/* <Confetti /> */}
+          <Confetti />
         </>
       )}
       {user?.id === game.createdBy && (

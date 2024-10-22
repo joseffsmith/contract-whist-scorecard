@@ -1,7 +1,7 @@
 import { id, tx } from "@instantdb/react";
+import AddIcon from "@mui/icons-material/Add";
 import FormatListNumberedIcon from "@mui/icons-material/FormatListNumbered";
 import UpdateIcon from "@mui/icons-material/Update";
-import AddIcon from "@mui/icons-material/Add";
 import {
   Avatar,
   Button,
@@ -12,7 +12,6 @@ import {
   FormLabel,
   Input,
   List,
-  ListDivider,
   ListItem,
   ListItemButton,
   ListItemDecorator,
@@ -25,10 +24,9 @@ import { useState } from "react";
 import { Link, Outlet, useNavigate } from "react-router-dom";
 import { db } from "..";
 import { DEALS } from "../constants";
+import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
 import img from "/android-chrome-192x192.png";
-import { Add, PlusOne } from "@mui/icons-material";
-import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
 
 export const App = () => {
   const { isLoading, user, error } = db.useAuth();
