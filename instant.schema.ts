@@ -4,93 +4,104 @@
 import { i } from "@instantdb/react";
 
 const graph = i.graph(
-  "33fdf866-9fcb-4721-a84d-ca1dba1f0ab0",
   {
-    $users: i.entity({
-      email: i.any().unique(),
+    "$users": i.entity({
+      "email": i.any().unique(),
     }),
-    games: i.entity({
-      createdAt: i.any(),
-      createdBy: i.any(),
-      deletedAt: i.any(),
-      initialDealerId: i.any(),
-      initialPlayerId: i.any(),
+    "games": i.entity({
+      "createdAt": i.any(),
+      "createdBy": i.any(),
+      "deletedAt": i.any(),
+      "initialDealerId": i.any(),
+      "initialPlayerId": i.any(),
     }),
-    players: i.entity({
-      name: i.any(),
+    "players": i.entity({
+      "name": i.any(),
     }),
-    playersOrders: i.entity({
-      orderNumber: i.any(),
+    "playersOrders": i.entity({
+      "orderNumber": i.any(),
     }),
-    rounds: i.entity({
-      roundNumber: i.any(),
+    "rounds": i.entity({
+      "roundNumber": i.any(),
     }),
-    turns: i.entity({
-      bid: i.any(),
-      score: i.any(),
+    "turns": i.entity({
+      "bid": i.any(),
+      "score": i.any(),
     }),
   },
   {
-    playersTurns: {
-      forward: {
-        on: "players",
-        has: "many",
-        label: "turns",
+    "players$user": {
+      "forward": {
+        "on": "players",
+        "has": "one",
+        "label": "$user"
       },
-      reverse: {
-        on: "turns",
-        has: "one",
-        label: "player",
-      },
+      "reverse": {
+        "on": "$users",
+        "has": "one",
+        "label": "player"
+      }
     },
-    playersOrdersGame: {
-      forward: {
-        on: "playersOrders",
-        has: "one",
-        label: "game",
+    "playersTurns": {
+      "forward": {
+        "on": "players",
+        "has": "many",
+        "label": "turns"
       },
-      reverse: {
-        on: "games",
-        has: "many",
-        label: "playersOrders",
-      },
+      "reverse": {
+        "on": "turns",
+        "has": "one",
+        "label": "player"
+      }
     },
-    playersOrdersPlayer: {
-      forward: {
-        on: "playersOrders",
-        has: "one",
-        label: "player",
+    "playersOrdersGame": {
+      "forward": {
+        "on": "playersOrders",
+        "has": "one",
+        "label": "game"
       },
-      reverse: {
-        on: "players",
-        has: "many",
-        label: "playersOrders",
-      },
+      "reverse": {
+        "on": "games",
+        "has": "many",
+        "label": "playersOrders"
+      }
     },
-    roundsGame: {
-      forward: {
-        on: "rounds",
-        has: "one",
-        label: "game",
+    "playersOrdersPlayer": {
+      "forward": {
+        "on": "playersOrders",
+        "has": "one",
+        "label": "player"
       },
-      reverse: {
-        on: "games",
-        has: "many",
-        label: "rounds",
-      },
+      "reverse": {
+        "on": "players",
+        "has": "many",
+        "label": "playersOrders"
+      }
     },
-    roundsTurns: {
-      forward: {
-        on: "rounds",
-        has: "many",
-        label: "turns",
+    "roundsGame": {
+      "forward": {
+        "on": "rounds",
+        "has": "one",
+        "label": "game"
       },
-      reverse: {
-        on: "turns",
-        has: "one",
-        label: "round",
-      },
+      "reverse": {
+        "on": "games",
+        "has": "many",
+        "label": "rounds"
+      }
     },
+    "roundsTurns": {
+      "forward": {
+        "on": "rounds",
+        "has": "many",
+        "label": "turns"
+      },
+      "reverse": {
+        "on": "turns",
+        "has": "one",
+        "label": "round"
+      }
+    }
   }
 );
 
