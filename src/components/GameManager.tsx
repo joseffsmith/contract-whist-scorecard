@@ -34,6 +34,7 @@ import { db } from "..";
 import { Player, PlayersOrders } from "../types";
 import { getDealerIdx } from "../utils/getDealerIdx";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
+import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
 
 export const GameManager = () => {
   const { gameId } = useParams<{ gameId: string }>();
@@ -264,17 +265,6 @@ const AddPlayerInput = ({
 }) => {
   const { gameId } = useParams<{ gameId: string }>();
 
-  const addExistingPlayerToGame = async (playerId: string) => {
-    const res = await db.transact([
-      tx.playersOrders[id()]
-        .update({ orderNumber: playerOrdersInGame?.length ?? 0 })
-        .link({ player: playerId, game: gameId! }),
-    ]);
-    if (res.status === "enqueued") {
-      enqueueSnackbar("Player added", { variant: "success" });
-    }
-  };
-
   const addNewPlayerToGame = async (name: string) => {
     const playerId = id();
     const res = await db.transact([
@@ -291,7 +281,9 @@ const AddPlayerInput = ({
   return (
     <ChoosePlayerOrCreate
       createPlayer={addNewPlayerToGame}
-      choosePlayer={addExistingPlayerToGame}
+      choosePlayer={(playerId) =>
+        addExistingPlayerToGame(gameId!, playerId, playerOrdersInGame.length)
+      }
       excludedPlayerIds={playerOrdersInGame.map((p) => p.id)}
     />
   );

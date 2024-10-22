@@ -28,6 +28,7 @@ import { DEALS } from "../constants";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
 import img from "/android-chrome-192x192.png";
 import { Add, PlusOne } from "@mui/icons-material";
+import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
 
 export const App = () => {
   const { isLoading, user, error } = db.useAuth();
@@ -45,7 +46,7 @@ export const App = () => {
   });
 
   async function createNewGame() {
-    if (!user) {
+    if (!user || !playerUser?.players.length) {
       console.error("No user");
       enqueueSnackbar("No user", { variant: "error" });
       return;
@@ -62,6 +63,7 @@ export const App = () => {
         deletedAt: "",
         createdBy: user.id,
       }),
+
       ...rounds.map((round) => {
         return tx.rounds[round.id]
           .update({
@@ -70,6 +72,8 @@ export const App = () => {
           .link({ game: gameId });
       }),
     ]);
+
+    await addExistingPlayerToGame(gameId, playerUser.players[0].id, 0);
 
     nav("/games/" + gameId + "/manage");
   }
