@@ -49,13 +49,6 @@ export const App = () => {
       }),
     ]);
 
-    if (res.status === "enqueued") {
-      enqueueSnackbar("Game enqueued", { variant: "success" });
-    }
-    if (res.status === "synced") {
-      enqueueSnackbar("Game synced", { variant: "success" });
-    }
-
     nav("/games/" + gameId + "/manage");
   }
 
