@@ -69,8 +69,6 @@ export const GameManager = () => {
     Object.values(data?.games[0]?.playersOrders ?? {}) as PlayersOrders[]
   ).sort((apo, bpo) => apo.orderNumber - bpo.orderNumber);
 
-  console.table(playerOrdersInGame);
-
   if (isLoading || !data) {
     return <div>Loading...</div>;
   }
@@ -120,7 +118,6 @@ export const GameManager = () => {
   return (
     <Box
       sx={{
-        overflowY: "auto",
         display: "flex",
         flexDirection: "column",
         height: "100%",
@@ -135,8 +132,7 @@ export const GameManager = () => {
           playerOrdersInGame={playerOrdersInGame.flatMap((p) => p.player)}
         />
       </Box>
-      {/* <Typography level="title-sm">Players: </Typography> */}
-      <List size="lg" sx={{ flexGrow: 0 }}>
+      <List size="lg" sx={{ flexGrow: 0, overflow: "auto", maxHeight: "60vh" }}>
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
@@ -165,7 +161,6 @@ export const GameManager = () => {
         </DndContext>
       </List>
 
-      <Box flexGrow={1} />
       <Button
         size="lg"
         component={Link}
@@ -363,12 +358,12 @@ const AddPlayerInput = ({
 
   return (
     <FormControl sx={{ flexGrow: 1 }}>
-      <Typography>Type to create or choose existing</Typography>
       <Autocomplete<Player, false, true, true>
         size="lg"
         freeSolo
         disableClearable
         handleHomeEndKeys
+        placeholder="Type to create player or choose existing"
         autoFocus
         value={selectedPlayer ?? ""}
         onChange={handleChange}
