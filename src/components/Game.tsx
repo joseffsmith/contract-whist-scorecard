@@ -263,7 +263,7 @@ export const GameComp = () => {
           >
             <Typography
               sx={{ textAlign: "center", width: "100%" }}
-              level="body-md"
+              level="body-sm"
             >
               {p.name}
             </Typography>

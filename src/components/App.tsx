@@ -1,5 +1,9 @@
 import { id, tx } from "@instantdb/react";
+import FormatListNumberedIcon from "@mui/icons-material/FormatListNumbered";
+import UpdateIcon from "@mui/icons-material/Update";
+import AddIcon from "@mui/icons-material/Add";
 import {
+  Avatar,
   Button,
   DialogActions,
   DialogContent,
@@ -7,6 +11,11 @@ import {
   FormControl,
   FormLabel,
   Input,
+  List,
+  ListDivider,
+  ListItem,
+  ListItemButton,
+  ListItemDecorator,
   Modal,
   ModalDialog,
   Typography,
@@ -17,6 +26,8 @@ import { Link, Outlet, useNavigate } from "react-router-dom";
 import { db } from "..";
 import { DEALS } from "../constants";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
+import img from "/android-chrome-192x192.png";
+import { Add, PlusOne } from "@mui/icons-material";
 
 export const App = () => {
   const { isLoading, user, error } = db.useAuth();
@@ -75,32 +86,77 @@ export const App = () => {
   if (!playerUser?.players.length) {
     return <LinkPlayerToMe />;
   }
+  const player = playerUser.players[0];
 
   return (
-    <div className="bg-gray-100 fixed inset-0 pb-8 flex flex-col overscroll-y-none max-w-4xl max-h-[800px] m-auto">
-      <header className="flex items-end mt-px justify-between">
-        <h1 className="font-mono text-sm flex-shrink">Contract whist</h1>
+    <>
+      <div className="bg-gray-100 fixed inset-0 pb-8 flex flex-col overscroll-y-none max-w-4xl max-h-[800px] m-auto">
+        <List
+          role="menubar"
+          orientation="horizontal"
+          size="md"
+          sx={{
+            flexGrow: 0,
+            width: "100%",
+            justifyContent: "space-between",
+            px: 4,
+          }}
+        >
+          <ListItem>
+            <img src={img} alt="Logo" width="32" height="32" />
+          </ListItem>
+          {/* <ListDivider /> */}
 
-        <span className="flex space-x-1 flex-nowrap my-1 items-baseline">
-          <button className="whitespace-nowrap border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900">
-            <Link to={"/user"}>{playerUser.players[0].name}</Link>
-          </button>
-          <button className="whitespace-nowrap border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900">
-            <Link to={"/leaderboard"}>Leaderboard</Link>
-          </button>
-          <button className="whitespace-nowrap border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900">
-            <Link to={"/"}>All games</Link>
-          </button>
-          <button
-            onClick={createNewGame}
-            className="whitespace-nowrap border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900"
-          >
-            New game
-          </button>
-        </span>
-      </header>
-      <Outlet />
-    </div>
+          <ListItem role="none">
+            <ListItemButton
+              role="menuitem"
+              component={Link}
+              to={"/user"}
+              aria-label="Home"
+            >
+              <Avatar>
+                {player.name
+                  .split(" ")
+                  .map((i) => i[0])
+                  .join("")
+                  .toUpperCase()}
+              </Avatar>
+            </ListItemButton>
+          </ListItem>
+          {/* <ListDivider /> */}
+
+          <ListItem>
+            <ListItemButton
+              role="menuitem"
+              component={Link}
+              to={"/leaderboard"}
+            >
+              <FormatListNumberedIcon />
+            </ListItemButton>
+          </ListItem>
+          {/* <ListDivider /> */}
+          <ListItem>
+            <ListItemButton role="menuitem" component={Link} to={"/"}>
+              <UpdateIcon />
+            </ListItemButton>
+          </ListItem>
+          {/* <ListDivider /> */}
+          <ListItem>
+            <ListItemDecorator>
+              <ListItemButton
+                role="menuitem"
+                onClick={createNewGame}
+                // variant="solid"
+              >
+                <AddIcon />
+              </ListItemButton>
+            </ListItemDecorator>
+          </ListItem>
+        </List>
+
+        <Outlet />
+      </div>
+    </>
   );
 };
 

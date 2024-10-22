@@ -127,7 +127,7 @@ export const GameManager = () => {
           playerOrdersInGame={playerOrdersInGame.flatMap((p) => p.player)}
         />
       </Box>
-      <List size="lg" sx={{ flexGrow: 0, overflow: "auto", maxHeight: "60vh" }}>
+      <List size="md" sx={{ flexGrow: 0, overflow: "auto", maxHeight: "60vh" }}>
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}

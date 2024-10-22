@@ -35,7 +35,7 @@ export const Leaderboard = () => {
         stickyHeader
         stripe={"even"}
         sx={{
-          // overflow: "auto",
+          overflow: "auto",
           "& tr > td:not(:first-of-type)": { textAlign: "right" },
           "& thead th": {
             whiteSpace: "nowrap",

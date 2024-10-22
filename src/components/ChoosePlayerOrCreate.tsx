@@ -74,8 +74,8 @@ export const ChoosePlayerOrCreate = ({
 
   return (
     <Autocomplete<Player, false, true, true>
-      sx={{ flexGrow: 1, minWidth: 500 }}
-      size="lg"
+      sx={{ flexGrow: 1 }}
+      size="md"
       freeSolo
       disableClearable
       handleHomeEndKeys
