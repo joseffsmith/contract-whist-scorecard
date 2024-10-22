@@ -27,7 +27,6 @@ export const Leaderboard = () => {
 
   const { isLoading, error, data } = db.useQuery(query);
 
-  console.log(data);
   return (
     <Sheet sx={{ overflow: "auto" }}>
       <Table

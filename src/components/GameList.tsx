@@ -5,7 +5,7 @@ import { useState } from "react";
 import { enqueueSnackbar, SnackbarProvider } from "notistack";
 import { Modal, ModalDialog, DialogTitle, Button, Typography } from "@mui/joy";
 
-export const ManageGames = () => {
+export const GameList = () => {
   const { user, isLoading } = db.useAuth();
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
   const { data: gameData } = db.useQuery({

@@ -56,7 +56,7 @@ export const App = () => {
       enqueueSnackbar("Game synced", { variant: "success" });
     }
 
-    nav("/games/" + gameId);
+    nav("/games/" + gameId + "/manage");
   }
 
   if (isLoading) {

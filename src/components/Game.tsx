@@ -1,41 +1,22 @@
-import { Fragment, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Fragment, useEffect, useState } from "react";
+import { Link, useParams } from "react-router-dom";
 import { DEALS } from "../constants";
 import { id, tx } from "@instantdb/react";
-import { enqueueSnackbar } from "notistack";
 import { db } from "..";
-import { Player, Round } from "../types";
-import { AddPlayerDialog } from "./AddPlayerDialog";
+import { Player, PlayersOrders, Round } from "../types";
+
 import { getBidOptions } from "../utils/getBidOptions";
 import { getCurrentPlayerIdFromRound } from "../utils/getCurrentPlayerIdFromRound";
-import { PlayerManager } from "./PlayerManager";
 import { getDealerIdx } from "../utils/getDealerIdx";
-import {
-  closestCenter,
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
-import {
-  sortableKeyboardCoordinates,
-  arrayMove,
-  SortableContext,
-  horizontalListSortingStrategy,
-} from "@dnd-kit/sortable";
+import { Typography } from "@mui/joy";
 
 export const GameComp = () => {
-  const { isLoading: isLoadingUser, user, error: errorAuth } = db.useAuth();
   const { gameId } = useParams<{ gameId: string }>();
-  const [addPlayerDialogOpen, setAddPlayerDialogOpen] = useState(false);
 
-  const [isClosed, setIsClosed] = useState(false);
+  const [isConfettiClosed, setIsClosed] = useState(false);
 
-  if (!gameId) {
-    throw Error("No game id");
-  }
-  const query = {
+  const { isLoading: isLoadingUser, user, error: errorAuth } = db.useAuth();
+  const { isLoading, error, data } = db.useQuery({
     games: {
       playersOrders: {
         player: {},
@@ -47,26 +28,17 @@ export const GameComp = () => {
       },
       $: {
         where: {
-          id: gameId,
+          id: gameId!,
         },
       },
     },
-  };
+  });
 
-  const { isLoading, error, data } = db.useQuery(query);
-  const sensors = useSensors(
-    useSensor(PointerSensor),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
-  );
   if (!gameId) {
-    console.error("No gameId");
-    enqueueSnackbar("No gameId", { variant: "error" });
-    return null;
+    throw Error("No game id");
   }
 
-  if (!data) {
+  if (!data || isLoadingUser) {
     return <div>Loading...</div>;
   }
 
@@ -95,7 +67,9 @@ export const GameComp = () => {
 
   const dealerIdx = getDealerIdx(currentRoundIdx, numPlayers, initialDealerIdx);
 
-  const players: Player[] = Object.values(game.playersOrders)
+  const players: Player[] = (
+    Object.values(game.playersOrders) as PlayersOrders[]
+  )
     .sort((apo, bpo) => apo.orderNumber - bpo.orderNumber)
     .flatMap((p) => p.player);
 
@@ -225,48 +199,9 @@ export const GameComp = () => {
   const winningScore = scores.findIndex((s) => s === Math.max(...scores));
   const winningPlayer = null;
 
-  function handleDragEnd(event) {
-    const { active, over } = event;
-
-    if (active.id !== over.id) {
-      const oldPo = game.playersOrders.find(
-        (po) => po.player[0].id === active.id
-      );
-      const oldIndex = oldPo?.orderNumber;
-      const newPo = game.playersOrders.find(
-        (po) => po.player[0].id === over.id
-      );
-      const newIndex = newPo?.orderNumber;
-      if (
-        !oldPo ||
-        !newPo ||
-        oldIndex === undefined ||
-        newIndex === undefined
-      ) {
-        enqueueSnackbar("Error changing order", { variant: "error" });
-        return;
-      }
-      const res = db.transact([
-        tx.playersOrders[oldPo.id].update({
-          orderNumber: newIndex,
-        }),
-        tx.playersOrders[newPo.id].update({
-          orderNumber: oldIndex,
-        }),
-      ]);
-    }
-  }
-
-  if (isLoadingUser) {
-    return <div>Loading...</div>;
-  }
-
   return (
     <>
-      {(numPlayers < 2 || addPlayerDialogOpen) && (
-        <AddPlayerDialog onClose={() => setAddPlayerDialogOpen(false)} />
-      )}
-      {currentRoundIdx === null && !isClosed && (
+      {currentRoundIdx === null && !isConfettiClosed && (
         <>
           <div
             style={{
@@ -300,12 +235,10 @@ export const GameComp = () => {
       )}
       {user?.id === game.createdBy && (
         <div className="flex justify-end space-x-1 my-1">
-          <button
-            className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900"
-            onClick={() => setAddPlayerDialogOpen(true)}
-          >
-            Add player
+          <button className="whitespace-nowrap border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900">
+            <Link to={"manage"}>Manage</Link>
           </button>
+
           <button
             className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900"
             onClick={undo}
@@ -321,24 +254,22 @@ export const GameComp = () => {
         }}
       >
         <div></div>
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragEnd={handleDragEnd}
-        >
-          <SortableContext
-            items={players}
-            strategy={horizontalListSortingStrategy}
+
+        {players.map((p, idx) => (
+          <div
+            key={p.id}
+            className={`${
+              dealerIdx === idx ? "bg-red-500" : ""
+            } text-center text-xs flex items-center`}
           >
-            {players.map((p, idx) => (
-              <PlayerManager
-                player={p}
-                key={p.id}
-                isDealer={idx === dealerIdx}
-              />
-            ))}
-          </SortableContext>
-        </DndContext>
+            <Typography
+              sx={{ textAlign: "center", width: "100%" }}
+              level="body-md"
+            >
+              {p.name}
+            </Typography>
+          </div>
+        ))}
 
         {DEALS.map((t, t_idx) => (
           <Fragment key={t_idx}>
