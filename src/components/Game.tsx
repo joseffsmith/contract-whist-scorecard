@@ -1,14 +1,13 @@
-import { Fragment, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { DEALS } from "../constants";
 import { id, tx } from "@instantdb/react";
+import { Typography } from "@mui/joy";
+import { Fragment, useState } from "react";
+import { Link, useParams } from "react-router-dom";
 import { db } from "..";
+import { DEALS } from "../constants";
 import { Player, PlayersOrders, Round } from "../types";
-
 import { getBidOptions } from "../utils/getBidOptions";
 import { getCurrentPlayerIdFromRound } from "../utils/getCurrentPlayerIdFromRound";
 import { getDealerIdx } from "../utils/getDealerIdx";
-import { Typography } from "@mui/joy";
 
 export const GameComp = () => {
   const { gameId } = useParams<{ gameId: string }>();

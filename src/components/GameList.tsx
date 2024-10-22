@@ -1,9 +1,9 @@
+import { tx } from "@instantdb/react";
+import { Button, DialogTitle, Modal, ModalDialog, Typography } from "@mui/joy";
+import { enqueueSnackbar } from "notistack";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { db } from "..";
-import { tx } from "@instantdb/react";
-import { useState } from "react";
-import { enqueueSnackbar, SnackbarProvider } from "notistack";
-import { Modal, ModalDialog, DialogTitle, Button, Typography } from "@mui/joy";
 
 export const GameList = () => {
   const { user, isLoading } = db.useAuth();

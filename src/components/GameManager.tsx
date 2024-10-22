@@ -1,24 +1,3 @@
-import { Link, useParams } from "react-router-dom";
-import Delete from "@mui/icons-material/Delete";
-import DragHandle from "@mui/icons-material/DragHandle";
-import { db } from "..";
-import {
-  List,
-  ListItem,
-  ListItemButton,
-  ListItemDecorator,
-  ListItemContent,
-  Typography,
-  IconButton,
-  Chip,
-  Button,
-  Box,
-  Autocomplete,
-  AutocompleteOption,
-  FormControl,
-} from "@mui/joy";
-import { Player, PlayersOrders } from "../types";
-import { getDealerIdx } from "../utils/getDealerIdx";
 import {
   DndContext,
   DragEndEvent,
@@ -35,10 +14,26 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-
-import { enqueueSnackbar } from "notistack";
 import { id, tx } from "@instantdb/react";
-import { useMemo, useState } from "react";
+import Delete from "@mui/icons-material/Delete";
+import DragHandle from "@mui/icons-material/DragHandle";
+import {
+  Box,
+  Button,
+  Chip,
+  IconButton,
+  List,
+  ListItem,
+  ListItemContent,
+  ListItemDecorator,
+} from "@mui/joy";
+import { enqueueSnackbar } from "notistack";
+import { useState } from "react";
+import { Link, useParams } from "react-router-dom";
+import { db } from "..";
+import { Player, PlayersOrders } from "../types";
+import { getDealerIdx } from "../utils/getDealerIdx";
+import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
 
 export const GameManager = () => {
   const { gameId } = useParams<{ gameId: string }>();
@@ -267,37 +262,12 @@ const AddPlayerInput = ({
 }: {
   playerOrdersInGame: Player[];
 }) => {
-  const {
-    data: allPlayers,
-    isLoading: isLoadingAllPlayers,
-    error: errorPlayers,
-  } = db.useQuery({
-    players: {},
-  });
-
   const { gameId } = useParams<{ gameId: string }>();
-  const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
-  const [inputValue, setInputValue] = useState("");
 
-  const handleChange = (
-    event,
-    newValue: Player | null | string,
-    reason,
-    details
-  ) => {
-    if (typeof newValue === "string") {
-      throw Error("Not implemented");
-    }
-    setSelectedPlayer(newValue);
-  };
-
-  const addExistingPlayerToGame = async (
-    playerId: string,
-    orderNumber: number
-  ) => {
+  const addExistingPlayerToGame = async (playerId: string) => {
     const res = await db.transact([
       tx.playersOrders[id()]
-        .update({ orderNumber })
+        .update({ orderNumber: playerOrdersInGame?.length ?? 0 })
         .link({ player: playerId, game: gameId! }),
     ]);
     if (res.status === "enqueued") {
@@ -305,12 +275,12 @@ const AddPlayerInput = ({
     }
   };
 
-  const addNewPlayerToGame = async (name: string, orderNumber: number) => {
+  const addNewPlayerToGame = async (name: string) => {
     const playerId = id();
     const res = await db.transact([
       tx.players[playerId].update({ name }),
       tx.playersOrders[id()]
-        .update({ orderNumber })
+        .update({ orderNumber: playerOrdersInGame?.length ?? 0 })
         .link({ player: playerId, game: gameId! }),
     ]);
     if (res.status === "enqueued") {
@@ -318,79 +288,11 @@ const AddPlayerInput = ({
     }
   };
 
-  const handleAddPlayer = async (type: "new" | "existing") => {
-    if (type === "new") {
-      if (!inputValue.length) {
-        enqueueSnackbar("Name is required", { variant: "error" });
-        return;
-      }
-
-      await addNewPlayerToGame(inputValue, playerOrdersInGame?.length ?? 0);
-      setInputValue("");
-      return;
-    }
-
-    if (!selectedPlayer) {
-      enqueueSnackbar("Player is required", { variant: "error" });
-      return;
-    }
-    await addExistingPlayerToGame(
-      selectedPlayer.id,
-      playerOrdersInGame?.length ?? 0
-    );
-    setSelectedPlayer(null);
-  };
-
-  const options =
-    allPlayers?.players
-      .filter((p) => !playerOrdersInGame.map((p) => p.id).includes(p.id))
-      .map(
-        (p) =>
-          ({
-            id: p.id,
-            name: p.name as any,
-          } as Player)
-      ) ?? [];
-
-  const hasOptions = !!options.find(
-    (o) => o.name.trim().toLowerCase() === inputValue.trim().toLowerCase()
-  );
-
   return (
-    <FormControl sx={{ flexGrow: 1 }}>
-      <Autocomplete<Player, false, true, true>
-        size="lg"
-        freeSolo
-        disableClearable
-        handleHomeEndKeys
-        placeholder="Type to create player or choose existing"
-        autoFocus
-        value={selectedPlayer ?? ""}
-        onChange={handleChange}
-        onInputChange={(event, newInputValue) => {
-          setInputValue(newInputValue);
-        }}
-        endDecorator={
-          !hasOptions && inputValue ? (
-            <Button onClick={() => handleAddPlayer("new")}>Create</Button>
-          ) : selectedPlayer ? (
-            <Button onClick={() => handleAddPlayer("existing")}>Add</Button>
-          ) : null
-        }
-        isOptionEqualToValue={(o, v) => o.id === v.id}
-        options={options}
-        getOptionLabel={(option) => {
-          if (typeof option === "string") {
-            return option;
-          }
-          return option.name;
-        }}
-        renderOption={(props, option) => (
-          <AutocompleteOption {...props} key={option.id}>
-            {option.name}
-          </AutocompleteOption>
-        )}
-      />
-    </FormControl>
+    <ChoosePlayerOrCreate
+      createPlayer={addNewPlayerToGame}
+      choosePlayer={addExistingPlayerToGame}
+      excludedPlayerIds={playerOrdersInGame.map((p) => p.id)}
+    />
   );
 };

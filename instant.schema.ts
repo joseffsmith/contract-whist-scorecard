@@ -16,6 +16,7 @@ const graph = i.graph(
       "initialPlayerId": i.any(),
     }),
     "players": i.entity({
+      "isLinked": i.any(),
       "name": i.any(),
     }),
     "playersOrders": i.entity({
@@ -52,6 +53,18 @@ const graph = i.graph(
         "on": "turns",
         "has": "one",
         "label": "player"
+      }
+    },
+    "playersUser": {
+      "forward": {
+        "on": "players",
+        "has": "many",
+        "label": "user"
+      },
+      "reverse": {
+        "on": "user",
+        "has": "many",
+        "label": "players"
       }
     },
     "playersOrdersGame": {

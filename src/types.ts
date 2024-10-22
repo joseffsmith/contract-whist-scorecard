@@ -5,6 +5,7 @@ export type Schema = {
   turns: Turn; //[];
   rounds: Round; //[];
   playersOrders: PlayersOrders; //[];
+  $users: User; //[];
 };
 export type Game = {
   createdAt: string;
@@ -34,6 +35,8 @@ export type Player = {
   id: string;
   name: string;
   playersOrders: PlayersOrders[]; //[];
+  user?: User;
+  isLinked: boolean;
 };
 
 export type PlayersOrders = {
@@ -41,6 +44,11 @@ export type PlayersOrders = {
   orderNumber: number;
   player: Player[];
   game: Game;
+};
+
+export type User = {
+  id: string;
+  player?: Player;
 };
 
 export type Deal = {
