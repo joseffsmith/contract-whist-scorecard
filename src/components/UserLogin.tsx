@@ -91,17 +91,14 @@ function Email({ setSentEmail }) {
             <FormLabel>Email</FormLabel>
             <Input
               placeholder="Enter your email"
-              id="contact-email"
-              name="contact-email"
               type="email"
+              name="email"
               slotProps={{
                 input: {
                   "data-1p-ignore": true,
-                  autoComplete: "off",
-                  autoCorrect: "off",
-                  spellCheck: "false",
                 },
               }}
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
