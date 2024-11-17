@@ -95,7 +95,7 @@ function Email({ setSentEmail }) {
               name="email"
               slotProps={{
                 input: {
-                  "data-1p-ignore": undefined,
+                  "data-1p-ignore": true,
                 },
               }}
               autoComplete="email"
@@ -141,7 +141,7 @@ function MagicCode({ sentEmail }) {
             slotProps={{
               input: {
                 pattern: "[0-9]*",
-                "data-1p-ignore": undefined,
+                "data-1p-ignore": true,
               },
             }}
             onChange={(e) => setCode(e.target.value)}
