@@ -18,8 +18,8 @@ import {
   useNavigate,
 } from "react-router-dom";
 
-import Leaderboard from "@mui/icons-material";
 import Add from "@mui/icons-material/Add";
+import Leaderboard from "@mui/icons-material/Leaderboard";
 import { Button } from "@mui/joy";
 import { DEALS } from "../constants";
 import { db } from "../db";
