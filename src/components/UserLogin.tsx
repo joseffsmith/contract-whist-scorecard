@@ -127,8 +127,17 @@ function MagicCode({ sentEmail }) {
           </Typography>
           <Input
             type="text"
+            id="verification-code"
+            name="verification-code"
+            autoComplete="one-time-code"
             placeholder="123456..."
             value={code}
+            inputMode="numeric"
+            slotProps={{
+              input: {
+                pattern: "[0-9]*",
+              },
+            }}
             onChange={(e) => setCode(e.target.value)}
           />
         </DialogContent>
