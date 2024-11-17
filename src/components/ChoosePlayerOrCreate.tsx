@@ -77,7 +77,7 @@ export const ChoosePlayerOrCreate = ({
       size="md"
       slotProps={{
         input: {
-          "data-1p-ignore": "",
+          "data-1p-ignore": undefined,
         },
       }}
       freeSolo

@@ -93,7 +93,11 @@ function Email({ setSentEmail }) {
               placeholder="Enter your email"
               type="email"
               name="email"
-              data-1p-ignore
+              slotProps={{
+                input: {
+                  "data-1p-ignore": undefined,
+                },
+              }}
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -133,11 +137,11 @@ function MagicCode({ sentEmail }) {
             autoComplete="one-time-code"
             placeholder="123456..."
             value={code}
-            data-1p-ignore
             inputMode="numeric"
             slotProps={{
               input: {
                 pattern: "[0-9]*",
+                "data-1p-ignore": undefined,
               },
             }}
             onChange={(e) => setCode(e.target.value)}
