@@ -12,6 +12,7 @@ import { Schema } from "./types";
 import { Leaderboard } from "./components/Leaderboard";
 import { GameManager } from "./components/GameManager";
 import { UserManager } from "./components/UserManager";
+import { UserLogin } from "./components/UserLogin";
 
 // ID for app: contract-whist-scoreboard
 const APP_ID = "33fdf866-9fcb-4721-a84d-ca1dba1f0ab0";
@@ -27,6 +28,10 @@ const router = createBrowserRouter(
       path: "/",
       element: <App />,
       children: [
+        {
+          path: "/login",
+          element: <UserLogin />,
+        },
         {
           path: "/user",
           element: <UserManager />,

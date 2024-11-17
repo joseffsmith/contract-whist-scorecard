@@ -239,15 +239,17 @@ export const GameComp = () => {
             >
               Close
             </button>
-            <button
-              className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900"
-              onClick={(e) => {
-                e.preventDefault();
-                undo();
-              }}
-            >
-              Undo
-            </button>
+            {user && (
+              <button
+                className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900"
+                onClick={(e) => {
+                  e.preventDefault();
+                  undo();
+                }}
+              >
+                Undo
+              </button>
+            )}
           </div>
           <Confetti />
         </>
@@ -353,7 +355,7 @@ export const GameComp = () => {
         })}
       </div>
 
-      {stage === "bid" && (
+      {stage === "bid" && user && (
         <div className="flex justify-between w-full">
           {bidOptions.map((opt) => {
             return (
@@ -373,7 +375,7 @@ export const GameComp = () => {
         </div>
       )}
 
-      {stage === "score" && (
+      {stage === "score" && user && (
         <div className="flex justify-between w-full">
           {bidOptions.map((opt) => {
             return (
