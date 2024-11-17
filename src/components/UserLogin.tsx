@@ -75,7 +75,9 @@ function Email({ setSentEmail }) {
     if (!email) return;
     setSentEmail(email);
     db.auth.sendMagicCode({ email }).catch((err) => {
-      alert("Uh oh :" + err.body?.message);
+      enqueueSnackbar<"error">("Uh oh :" + err.body?.message, {
+        variant: "error",
+      });
       setSentEmail("");
     });
   };
@@ -90,6 +92,7 @@ function Email({ setSentEmail }) {
             <Input
               placeholder="Enter your email"
               type="email"
+              name="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
