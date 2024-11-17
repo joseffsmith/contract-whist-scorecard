@@ -18,12 +18,14 @@ import {
   useNavigate,
 } from "react-router-dom";
 
-import { Add, Leaderboard } from "@mui/icons-material";
+import Leaderboard from "@mui/icons-material";
+import Add from "@mui/icons-material/Add";
 import { Button } from "@mui/joy";
 import { DEALS } from "../constants";
 import { db } from "../db";
 import { queryPlayersWithUserId } from "../queries";
 import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
+
 import img from "/android-chrome-192x192.png";
 
 export const App = () => {
