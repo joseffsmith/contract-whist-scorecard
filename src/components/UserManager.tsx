@@ -1,6 +1,6 @@
-import { Typography } from "@mui/joy";
+import { Button, Typography } from "@mui/joy";
 import { db } from "../db";
-import { UserLogin } from "./UserLogin";
+import { LinkPlayerToMe, UserLogin } from "./UserLogin";
 
 export const UserManager = () => {
   const { isLoading: isLoadingUser, user, error } = db.useAuth();
@@ -18,6 +18,18 @@ export const UserManager = () => {
         }
       : null
   );
+
+  const handleLogout = () => {
+    db.auth.signOut();
+  };
+
+  const handleUnlink = async (playerId: string, userId: string) => {
+    await db.transact([
+      db.tx.players[playerId].unlink({ user: userId }),
+      db.tx.players[playerId].merge({ isLinked: false }),
+    ]);
+  };
+
   if (isLoadingUser) {
     return <div>Loading user...</div>;
   }
@@ -27,13 +39,26 @@ export const UserManager = () => {
   if (isLoadingPlayerData) {
     return <div>Loading...</div>;
   }
+  const linkedPlayer = playerData?.players[0];
+
   return (
     <div className="p-2 space-y-2">
       <Typography level="title-sm">Email</Typography>
       <Typography level="body-lg">{user?.email}</Typography>
 
+      <Button onClick={handleLogout}>Logout</Button>
+
       <Typography level="title-sm">Username</Typography>
-      <Typography level="body-lg">{playerData?.players[0].name}</Typography>
+      {linkedPlayer ? (
+        <>
+          <Typography level="body-lg">{linkedPlayer.name}</Typography>
+          <Button onClick={() => handleUnlink(linkedPlayer.id, user.id)}>
+            Unlink
+          </Button>
+        </>
+      ) : (
+        <LinkPlayerToMe />
+      )}
     </div>
   );
 };

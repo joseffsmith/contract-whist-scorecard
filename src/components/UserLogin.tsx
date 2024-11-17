@@ -136,7 +136,7 @@ function MagicCode({ sentEmail }) {
   );
 }
 
-const LinkPlayerToMe = () => {
+export const LinkPlayerToMe = () => {
   const { user } = db.useAuth();
   const { data } = db.useQuery({
     players: {

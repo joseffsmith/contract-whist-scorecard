@@ -28,10 +28,13 @@ import {
   ListItemDecorator,
 } from "@mui/joy";
 import { enqueueSnackbar } from "notistack";
-import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { db } from "../db";
-import { queryGameData, queryTurnsForGame } from "../queries";
+import {
+  queryGameData,
+  queryPlayersWithUserId,
+  queryTurnsForGame,
+} from "../queries";
 import { Player, PlayersOrders } from "../types";
 import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
 import { getDealerIdx } from "../utils/getDealerIdx";
@@ -39,10 +42,14 @@ import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
 
 export const GameManager = () => {
   const { gameId } = useParams<{ gameId: string }>();
-  const [type, settype] = useState<"existing" | "new">("existing");
+  const { user } = db.useAuth();
 
   const { isLoading, error, data } = db.useQuery(
     gameId ? queryGameData(gameId) : null
+  );
+
+  const { isLoading: isLoadingMyUser, data: playerUser } = db.useQuery(
+    user ? queryPlayersWithUserId(user.id) : null
   );
 
   const sensors = useSensors(
@@ -135,6 +142,7 @@ export const GameManager = () => {
               }
               return (
                 <PlayerRow
+                  isSelf={po.player?.id === playerUser?.players[0].id}
                   playerOrderId={po.id}
                   key={po.id}
                   player={player}
@@ -160,15 +168,18 @@ export const GameManager = () => {
 };
 
 const PlayerRow = ({
+  isSelf,
   playerOrderId,
   player,
   isDealer,
 }: {
+  isSelf: boolean;
   playerOrderId: string;
   player: Player;
   isDealer: boolean;
 }) => {
   const { gameId } = useParams<{ gameId: string }>();
+  const { user } = db.useAuth();
   const { attributes, listeners, setNodeRef, transform, transition } =
     useSortable({ id: playerOrderId });
   const style = {
@@ -224,6 +235,7 @@ const PlayerRow = ({
             color="danger"
             variant="plain"
             onClick={handleRemove}
+            disabled={isSelf}
           >
             <Delete />
           </IconButton>

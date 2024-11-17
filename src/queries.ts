@@ -1,5 +1,5 @@
-import { InstantQuery, InstantQueryResult } from "@instantdb/react";
-import { DB } from "./db";
+import { InstantQuery, InstantQueryResult } from "@instantdb/react"
+import { DB } from "./db"
 
 export const queryPlayersWithUserId = (userId: string) => ({
   players: {
