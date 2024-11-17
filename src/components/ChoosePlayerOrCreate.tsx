@@ -1,9 +1,9 @@
-import { Autocomplete, Button, AutocompleteOption } from "@mui/joy";
+import { Autocomplete, AutocompleteOption, Button } from "@mui/joy";
 import { enqueueSnackbar } from "notistack";
 import { useState } from "react";
 import { db } from "../db";
-import { Player } from "../types";
 import { queryAllPlayers } from "../queries";
+import { Player } from "../types";
 
 export const ChoosePlayerOrCreate = ({
   createPlayer,
@@ -75,6 +75,11 @@ export const ChoosePlayerOrCreate = ({
     <Autocomplete<Player, false, true, true>
       sx={{ flexGrow: 1 }}
       size="md"
+      slotProps={{
+        input: {
+          "data-1p-ignore": "",
+        },
+      }}
       freeSolo
       disableClearable
       handleHomeEndKeys
