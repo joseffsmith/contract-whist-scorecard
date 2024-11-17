@@ -92,13 +92,13 @@ function Email({ setSentEmail }) {
             <Input
               placeholder="Enter your email"
               type="email"
-              name="email"
+              name="contact-email"
               slotProps={{
                 input: {
                   "data-1p-ignore": true,
                 },
               }}
-              autoComplete="email"
+              autoComplete="section-contact email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
