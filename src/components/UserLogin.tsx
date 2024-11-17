@@ -93,6 +93,7 @@ function Email({ setSentEmail }) {
               placeholder="Enter your email"
               type="email"
               name="email"
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
