@@ -78,7 +78,7 @@ export const GameList = () => {
           const canDelete = isOwnGame;
           //|| user?.email === "xxx@icloud.com";
           return (
-            <div key={game.id} className="py-1 my-1 border-t">
+            <div key={game.id} className="py-1 mb-1 border-b">
               <div className="flex justify-between">
                 <span>{new Date(game.createdAt).toLocaleString()}</span>
                 <div className="flex">

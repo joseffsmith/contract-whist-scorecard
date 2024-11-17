@@ -188,6 +188,7 @@ export const GameComp = () => {
   const scores = players.map((p) => getScoreForPlayer(p!.id));
   const winningScorerIdx = scores.findIndex((s) => s === Math.max(...scores));
   const winningPlayer = players[winningScorerIdx]?.name;
+  const isOwnGame = user?.id === game.createdBy;
 
   return (
     <>
@@ -220,7 +221,7 @@ export const GameComp = () => {
             >
               Close
             </button>
-            {user && (
+            {isOwnGame && (
               <button
                 className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900"
                 onClick={(e) => {
@@ -235,7 +236,7 @@ export const GameComp = () => {
           <Confetti />
         </>
       )}
-      {user?.id === game.createdBy && (
+      {isOwnGame && (
         <div className="flex justify-end space-x-1 my-1">
           <button className="whitespace-nowrap border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900">
             <Link to={"manage"}>Manage</Link>
@@ -333,7 +334,7 @@ export const GameComp = () => {
         })}
       </div>
 
-      {stage === "bid" && user && (
+      {stage === "bid" && isOwnGame && (
         <div className="flex justify-between w-full">
           {bidOptions.map((opt) => {
             return (
@@ -353,7 +354,7 @@ export const GameComp = () => {
         </div>
       )}
 
-      {stage === "score" && user && (
+      {stage === "score" && isOwnGame && (
         <div className="flex justify-between w-full">
           {bidOptions.map((opt) => {
             return (

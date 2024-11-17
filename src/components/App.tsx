@@ -1,23 +1,30 @@
 import { id } from "@instantdb/react";
-import AddIcon from "@mui/icons-material/Add";
-import FormatListNumberedIcon from "@mui/icons-material/FormatListNumbered";
 import UpdateIcon from "@mui/icons-material/Update";
 import {
   Avatar,
-  List,
-  ListItem,
-  ListItemButton,
   ListItemDecorator,
+  Tab,
+  TabList,
+  Tabs,
+  useTheme,
 } from "@mui/joy";
+import useMediaQuery from "@mui/material/useMediaQuery";
 import { enqueueSnackbar } from "notistack";
-import { useState } from "react";
-import { Link, Outlet, redirect, useNavigate } from "react-router-dom";
+import {
+  Link,
+  matchPath,
+  Outlet,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 
+import { Add, Leaderboard } from "@mui/icons-material";
+import { Button } from "@mui/joy";
 import { DEALS } from "../constants";
+import { db } from "../db";
+import { queryPlayersWithUserId } from "../queries";
 import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
 import img from "/android-chrome-192x192.png";
-import { queryPlayersWithUserId } from "../queries";
-import { db } from "../db";
 
 export const App = () => {
   const nav = useNavigate();
@@ -64,6 +71,11 @@ export const App = () => {
     nav("/games/" + gameId + "/manage");
   }
 
+  const match = useRouteMatch(["/user", "/leaderboard", "/"]);
+  const theme = useTheme();
+  const canFitText = useMediaQuery(theme.breakpoints.up("sm"));
+  const route = match?.pattern.path;
+
   if (isLoading) {
     return <div>Loading...</div>;
   }
@@ -75,65 +87,148 @@ export const App = () => {
 
   return (
     <>
-      <div className="bg-gray-100 fixed inset-0 pb-8 flex flex-col overscroll-y-none max-w-4xl max-h-[800px] m-auto">
-        <List
-          role="menubar"
-          orientation="horizontal"
-          size="md"
-          sx={{
-            flexGrow: 0,
-            width: "100%",
-            justifyContent: "space-between",
-            px: 4,
-          }}
-        >
-          <ListItem>
-            <img src={img} alt="Logo" width="32" height="32" />
-          </ListItem>
-
-          <ListItem role="none">
-            <ListItemButton
-              role="menuitem"
-              component={Link}
-              to={"/user"}
-              aria-label="Home"
-            >
-              <Avatar>
-                {player?.name
-                  .split(" ")
-                  .map((i) => i[0])
-                  .join("")
-                  .toUpperCase()}
-              </Avatar>
-            </ListItemButton>
-          </ListItem>
-
-          <ListItem>
-            <ListItemButton
-              role="menuitem"
-              component={Link}
-              to={"/leaderboard"}
-            >
-              <FormatListNumberedIcon />
-            </ListItemButton>
-          </ListItem>
-
-          <ListItem>
-            <ListItemButton role="menuitem" component={Link} to={"/"}>
-              <UpdateIcon />
-            </ListItemButton>
-          </ListItem>
-          <ListItem>
-            <ListItemDecorator>
-              <ListItemButton role="menuitem" onClick={createNewGame}>
-                <AddIcon />
+      <div className="bg-gray-100 fixed inset-0 pb-8 flex flex-col overscroll-y-none max-w-4xl max-h-[1000px] m-auto">
+        <div className="flex items-stretch w-full">
+          <div className="flex items-center">
+            <img src={img} alt="Logo" width="32" height="32" className="mx-4" />
+          </div>
+          <Tabs
+            aria-label="Icon tabs"
+            value={match ? route : null}
+            className="flex-grow"
+          >
+            <TabList tabFlex={1} underlinePlacement="bottom">
+              <Tab
+                indicatorPlacement="top"
+                variant="plain"
+                color="neutral"
+                component={Link}
+                to={"/user"}
+                value="/user"
+              >
+                <ListItemDecorator>
+                  <Avatar>
+                    {player?.name
+                      .split(" ")
+                      .map((i) => i[0])
+                      .join("")
+                      .toUpperCase()}
+                  </Avatar>
+                </ListItemDecorator>
+                {canFitText && "Account"}
+              </Tab>
+              <Tab
+                indicatorPlacement="top"
+                variant="plain"
+                color="neutral"
+                component={Link}
+                to={"/leaderboard"}
+                value="/leaderboard"
+              >
+                <ListItemDecorator>
+                  <Leaderboard />
+                </ListItemDecorator>
+                {canFitText && "Leaderboard"}
+              </Tab>
+              <Tab
+                indicatorPlacement="top"
+                variant="plain"
+                color="neutral"
+                component={Link}
+                to={"/"}
+                value="/"
+              >
+                <ListItemDecorator>
+                  <UpdateIcon />
+                </ListItemDecorator>
+                {canFitText && "History"}
+              </Tab>
+            </TabList>
+          </Tabs>
+          <Button
+            // variant="soft"
+            size="lg"
+            // px={4}
+            color="primary"
+            sx={{
+              whiteSpace: "nowrap",
+              py: 1,
+              borderRadius: 0,
+              // backgroundColor: "#fff",
+              // borderBottom: "1px solid grey",
+            }}
+            onClick={createNewGame}
+            variant="plain"
+          >
+            {/* <ListItemDecorator> */}
+            <Add />
+            {/* </ListItemDecorator> */}
+            {canFitText && "New game"}
+          </Button>
+          {/* <List
+            role="menubar"
+            orientation="horizontal"
+            size="md"
+            sx={{
+              flexGrow: 0,
+              width: "100%",
+              justifyContent: "space-between",
+              px: 4,
+            }}
+          >
+            <ListItem>
+              <ListItemButton component={Link} to={"/user"}>
+                <Avatar>
+                  {player?.name
+                    .split(" ")
+                    .map((i) => i[0])
+                    .join("")
+                    .toUpperCase()}
+                </Avatar>
               </ListItemButton>
-            </ListItemDecorator>
-          </ListItem>
-        </List>
+            </ListItem>
 
+            <ListItem>
+              <ListItemButton
+                role="menuitem"
+                component={Link}
+                to={"/leaderboard"}
+              >
+                <FormatListNumberedIcon />
+              </ListItemButton>
+            </ListItem>
+
+            <ListItem>
+              <ListItemButton role="menuitem" component={Link} to={"/"}>
+                <UpdateIcon />
+              </ListItemButton>
+            </ListItem>
+
+            <ListItem>
+              <ListItemDecorator>
+                <ListItemButton role="menuitem" onClick={createNewGame}>
+                  <AddIcon />
+                </ListItemButton>
+              </ListItemDecorator>
+            </ListItem>
+          </List> */}
+        </div>
         <Outlet />
       </div>
     </>
   );
 };
+
+function useRouteMatch(patterns: readonly string[]) {
+  const { pathname } = useLocation();
+
+  for (let i = 0; i < patterns.length; i += 1) {
+    const pattern = patterns[i];
+    const possibleMatch = matchPath(pattern, pathname);
+    if (possibleMatch !== null) {
+      return possibleMatch;
+    }
+  }
+
+  return null;
+}
