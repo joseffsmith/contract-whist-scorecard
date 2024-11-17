@@ -115,45 +115,49 @@ export const GameManager = () => {
         display: "flex",
         flexDirection: "column",
         height: "100%",
-        justifyContent: "start",
+        justifyContent: "space-between",
         rowGap: 1,
         px: 2,
         mt: 2,
       }}
     >
-      <Box display={"flex"} alignItems={"flex-start"} columnGap={4}>
-        <AddPlayerInput playersInGame={playerOrdersInGame} />
-      </Box>
-      <List size="md" sx={{ flexGrow: 0, overflow: "auto", maxHeight: "60vh" }}>
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragEnd={handleDragEnd}
+      <Box>
+        <Box display={"flex"} alignItems={"flex-start"} columnGap={4}>
+          <AddPlayerInput playersInGame={playerOrdersInGame} />
+        </Box>
+        <List
+          size="md"
+          sx={{ flexGrow: 0, overflow: "auto", maxHeight: "60vh" }}
         >
-          <SortableContext
-            items={playerOrdersInGame.map((po) => po.id)}
-            strategy={verticalListSortingStrategy}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
           >
-            {playerOrdersInGame.map((po, idx) => {
-              const isDealer = dealerIdx === idx;
-              const player = po.player;
-              if (!player) {
-                return null;
-              }
-              return (
-                <PlayerRow
-                  isSelf={po.player?.id === playerUser?.players[0].id}
-                  playerOrderId={po.id}
-                  key={po.id}
-                  player={player}
-                  isDealer={isDealer}
-                />
-              );
-            })}
-          </SortableContext>
-        </DndContext>
-      </List>
-
+            <SortableContext
+              items={playerOrdersInGame.map((po) => po.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              {playerOrdersInGame.map((po, idx) => {
+                const isDealer = dealerIdx === idx;
+                const player = po.player;
+                if (!player) {
+                  return null;
+                }
+                return (
+                  <PlayerRow
+                    isSelf={po.player?.id === playerUser?.players[0].id}
+                    playerOrderId={po.id}
+                    key={po.id}
+                    player={player}
+                    isDealer={isDealer}
+                  />
+                );
+              })}
+            </SortableContext>
+          </DndContext>
+        </List>
+      </Box>
       <Button
         size="lg"
         component={Link}
