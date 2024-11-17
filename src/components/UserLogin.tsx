@@ -1,22 +1,22 @@
+import { id } from "@instantdb/react";
 import {
-  Modal,
-  ModalDialog,
-  ModalClose,
-  DialogTitle,
+  Button,
+  DialogActions,
   DialogContent,
-  Typography,
+  DialogTitle,
   FormControl,
   FormLabel,
   Input,
-  DialogActions,
-  Button,
+  Modal,
+  ModalClose,
+  ModalDialog,
+  Typography,
 } from "@mui/joy";
-import { useState } from "react";
-import { db } from "..";
-import { id, tx } from "@instantdb/react";
 import { enqueueSnackbar } from "notistack";
-import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { db } from "../db";
+import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
 
 export const UserLogin = () => {
   const nav = useNavigate();
@@ -161,7 +161,7 @@ const LinkPlayerToMe = () => {
 
     const playerId = id();
     await db.transact([
-      tx.players[playerId]
+      db.tx.players[playerId]
         .update({
           name,
         })
@@ -173,7 +173,7 @@ const LinkPlayerToMe = () => {
     if (!user) {
       throw Error("No user");
     }
-    await db.transact([tx.players[id].link({ user: user.id })]);
+    await db.transact([db.tx.players[id].link({ user: user.id })]);
   };
 
   return (

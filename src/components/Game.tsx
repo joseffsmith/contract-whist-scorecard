@@ -1,41 +1,27 @@
-import { id, tx } from "@instantdb/react";
+import { id } from "@instantdb/react";
 import { Typography } from "@mui/joy";
 import { Fragment, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { db } from "..";
+import Confetti from "react-confetti";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { DEALS } from "../constants";
-import { Player, PlayersOrders, Round } from "../types";
+import { db } from "../db";
+import { queryGameData } from "../queries";
 import { getBidOptions } from "../utils/getBidOptions";
 import { getCurrentPlayerIdFromRound } from "../utils/getCurrentPlayerIdFromRound";
 import { getDealerIdx } from "../utils/getDealerIdx";
-import Confetti from "react-confetti";
 
 export const GameComp = () => {
   const { gameId } = useParams<{ gameId: string }>();
-
+  const navigate = useNavigate();
   const [isConfettiClosed, setIsClosed] = useState(false);
 
   const { isLoading: isLoadingUser, user, error: errorAuth } = db.useAuth();
-  const { isLoading, error, data } = db.useQuery({
-    games: {
-      playersOrders: {
-        player: {},
-      },
-      rounds: {
-        turns: {
-          player: {},
-        },
-      },
-      $: {
-        where: {
-          id: gameId!,
-        },
-      },
-    },
-  });
+  const { isLoading, error, data } = db.useQuery(
+    gameId ? queryGameData(gameId) : null
+  );
 
   if (!gameId) {
-    throw Error("No game id");
+    navigate("/");
   }
 
   if (!data || isLoadingUser) {
@@ -46,7 +32,7 @@ export const GameComp = () => {
   const initialDealerId = game.initialDealerId;
 
   const initialDealerIdx =
-    game.playersOrders.find((po) => po.player?.[0]?.id === initialDealerId)
+    game.playersOrders.find((po) => po.player?.id === initialDealerId)
       ?.orderNumber ?? null;
 
   const rs = game.rounds.sort((a, b) => a.roundNumber - b.roundNumber);
@@ -70,17 +56,12 @@ export const GameComp = () => {
       }) ?? rs[0];
   const currentRoundIdx = lastRound.roundNumber;
 
-  const currentRound = (
-    rs.length ? rs[currentRoundIdx] ?? null : null
-  ) as Round | null;
-
+  const currentRound = rs.length ? rs[currentRoundIdx] ?? null : null;
   const dealerIdx = getDealerIdx(currentRoundIdx, numPlayers, initialDealerIdx);
 
-  const players: Player[] = (
-    Object.values(game.playersOrders) as PlayersOrders[]
-  )
+  const players = Object.values(game.playersOrders)
     .sort((apo, bpo) => apo.orderNumber - bpo.orderNumber)
-    .flatMap((p) => p.player);
+    .flatMap((p) => p.player!);
 
   const currentPlayerId = getCurrentPlayerIdFromRound(
     currentRound,
@@ -95,7 +76,7 @@ export const GameComp = () => {
   const getScoreForPlayer = (playerId: string) => {
     return rs.length
       ? rs.reduce((prev, curr) => {
-          const turn = curr.turns.find((t) => t.player[0].id === playerId);
+          const turn = curr.turns.find((t) => t.player?.id === playerId);
           if (!turn) {
             return prev;
           }
@@ -107,7 +88,7 @@ export const GameComp = () => {
   const handleBid = async (opt: { number: number; disabled: boolean }) => {
     if (!opt.disabled && currentPlayerId !== null) {
       const res = await db.transact([
-        tx.turns[id()]
+        db.tx.turns[id()]
           .update({
             bid: opt.number,
           })
@@ -119,12 +100,12 @@ export const GameComp = () => {
   const setTricksMade = async (tricks: number) => {
     if (currentPlayerId !== null) {
       const turn = currentRound?.turns.find(
-        (t) => t.player[0].id === currentPlayerId
+        (t) => t.player?.id === currentPlayerId
       );
       const score = turn?.bid === tricks ? tricks + 10 : tricks;
 
       const res = await db.transact([
-        tx.turns[turn!.id].merge({
+        db.tx.turns[turn!.id].merge({
           score,
         }),
       ]);
@@ -163,12 +144,12 @@ export const GameComp = () => {
     let player = getCurrentPlayerIdFromRound(round_to_undo, dealerIdx, players);
     if (!player) {
       const last_player_idx = round_idx % players.length;
-      player = players[last_player_idx].id;
+      player = players[last_player_idx]?.id ?? null;
     }
 
     // get the previous turn idx
 
-    let player_idx = players.findIndex((p) => p.id === player);
+    let player_idx = players.findIndex((p) => p?.id === player);
     player_idx -= 1;
     if (player_idx < 0) {
       player_idx = players.length - 1;
@@ -179,12 +160,12 @@ export const GameComp = () => {
 
     // work out which stage we're on
     const turnToUndo = round_to_undo.turns.find(
-      (p) => p.player[0].id === playerToUndo.id
+      (p) => p.player?.id === playerToUndo?.id
     );
 
     if (turnToUndo?.score !== undefined && turnToUndo.score !== null) {
       const res = await db.transact([
-        tx.turns[turnToUndo.id].merge({
+        db.tx.turns[turnToUndo.id].merge({
           score: undefined,
         }),
       ]);
@@ -192,8 +173,8 @@ export const GameComp = () => {
     }
 
     const res = await db.transact([
-      tx.turns[
-        round_to_undo.turns.find((p) => p.player[0].id === playerToUndo.id)!.id
+      db.tx.turns[
+        round_to_undo.turns.find((p) => p.player?.id === playerToUndo?.id)!.id
       ].delete(),
     ]);
   };
@@ -204,9 +185,9 @@ export const GameComp = () => {
     players,
     stage
   );
-  const scores = players.map((p) => getScoreForPlayer(p.id));
+  const scores = players.map((p) => getScoreForPlayer(p!.id));
   const winningScorerIdx = scores.findIndex((s) => s === Math.max(...scores));
-  const winningPlayer = players[winningScorerIdx].name;
+  const winningPlayer = players[winningScorerIdx]?.name;
 
   return (
     <>
@@ -278,7 +259,7 @@ export const GameComp = () => {
 
         {players.map((p, idx) => (
           <div
-            key={p.id}
+            key={p!.id}
             className={`${
               dealerIdx === idx ? "bg-red-500" : ""
             } text-center text-xs flex items-center`}
@@ -287,7 +268,7 @@ export const GameComp = () => {
               sx={{ textAlign: "center", width: "100%" }}
               level="body-sm"
             >
-              {p.name}
+              {p!.name}
             </Typography>
           </div>
         ))}
@@ -306,35 +287,32 @@ export const GameComp = () => {
             {players.map((p, p_idx) => {
               return (
                 <div
-                  key={p.id}
+                  key={p!.id}
                   className={`text-xl border-b ${
                     p_idx === players.length ? "" : "border-r"
                   } border-gray-400 flex justify-center items-center text-center`}
                 >
                   <div
                     className={`${
-                      currentPlayerId === p.id &&
+                      currentPlayerId === p!.id &&
                       currentRoundIdx === t_idx &&
                       stage === "bid"
                         ? "bg-green-300"
                         : ""
                     } h-full flex items-center justify-center flex-grow w-full border-r`}
                   >
-                    {rs[t_idx].turns.find((t) => t.player[0].id === p.id)?.bid}
+                    {rs[t_idx].turns.find((t) => t.player?.id === p!.id)?.bid}
                   </div>
                   <div
                     className={`${
-                      currentPlayerId === p.id &&
+                      currentPlayerId === p!.id &&
                       currentRoundIdx === t_idx &&
                       stage === "score"
                         ? "bg-green-300"
                         : ""
                     } h-full flex items-center justify-center flex-grow w-full `}
                   >
-                    {
-                      rs[t_idx].turns.find((t) => t.player[0].id === p.id)
-                        ?.score
-                    }
+                    {rs[t_idx].turns.find((t) => t.player?.id === p!.id)?.score}
                   </div>
                 </div>
               );
@@ -349,7 +327,7 @@ export const GameComp = () => {
               key={idx}
               className="text-xl text-center border-r border-gray-400 last:border-r-0 "
             >
-              {getScoreForPlayer(p.id)}
+              {getScoreForPlayer(p!.id)}
             </div>
           );
         })}

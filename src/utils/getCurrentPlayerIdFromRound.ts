@@ -3,10 +3,10 @@ import { Round, Player, Turn } from "../types";
 export const getCurrentPlayerIdFromRound = (
   round: Round | null,
   dealerIdx: number | null,
-  ps: Player[]
+  ps: (Player | undefined)[]
 ): string | null => {
   if (dealerIdx === null) {
-    return ps[0].id;
+    return ps[0]!.id;
   }
   const startingPlayerIdx = (dealerIdx + 1) % ps.length;
 
@@ -16,18 +16,18 @@ export const getCurrentPlayerIdFromRound = (
   ];
 
   if (!round) {
-    return orderedPlayers[0].id;
+    return orderedPlayers[0]!.id;
   }
 
   const playerId =
     orderedPlayers.find((p) => {
-      const turn = round.turns.find((t) => t.player[0].id === p.id) as
+      const turn = round.turns.find((t) => t.player?.id === p!.id) as
         | Turn
         | undefined;
       return turn?.bid === undefined || turn.bid === null;
     }) ??
     orderedPlayers.find((p) => {
-      const turn = round.turns.find((t) => t.player[0].id === p.id) as
+      const turn = round.turns.find((t) => t.player?.id === p!.id) as
         | Turn
         | undefined;
 

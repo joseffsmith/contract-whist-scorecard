@@ -1,5 +1,5 @@
-import { Divider, Grid, Typography } from "@mui/joy";
-import { db } from "..";
+import { Typography } from "@mui/joy";
+import { db } from "../db";
 import { UserLogin } from "./UserLogin";
 
 export const UserManager = () => {

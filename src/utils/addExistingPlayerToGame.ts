@@ -1,6 +1,6 @@
-import { tx, id } from "@instantdb/react";
+import { id } from "@instantdb/react";
 import { enqueueSnackbar } from "notistack";
-import { db } from "..";
+import { db } from "../db";
 
 export const addExistingPlayerToGame = async (
   gameId: string,
@@ -8,7 +8,7 @@ export const addExistingPlayerToGame = async (
   order: number
 ) => {
   const res = await db.transact([
-    tx.playersOrders[id()]
+    db.tx.playersOrders[id()]
       .update({ orderNumber: order })
       .link({ player: playerId, game: gameId! }),
   ]);

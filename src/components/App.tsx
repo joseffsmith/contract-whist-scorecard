@@ -1,4 +1,4 @@
-import { id, tx } from "@instantdb/react";
+import { id } from "@instantdb/react";
 import AddIcon from "@mui/icons-material/Add";
 import FormatListNumberedIcon from "@mui/icons-material/FormatListNumbered";
 import UpdateIcon from "@mui/icons-material/Update";
@@ -12,26 +12,19 @@ import {
 import { enqueueSnackbar } from "notistack";
 import { useState } from "react";
 import { Link, Outlet, redirect, useNavigate } from "react-router-dom";
-import { db } from "..";
+
 import { DEALS } from "../constants";
 import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
 import img from "/android-chrome-192x192.png";
+import { queryPlayersWithUserId } from "../queries";
+import { db } from "../db";
 
 export const App = () => {
   const nav = useNavigate();
   const { isLoading, user, error } = db.useAuth();
+
   const { isLoading: isLoadingPlayerUser, data: playerUser } = db.useQuery(
-    user
-      ? {
-          players: {
-            $: {
-              where: {
-                user: user?.id!,
-              },
-            },
-          },
-        }
-      : null
+    user ? queryPlayersWithUserId(user.id) : null
   );
 
   async function createNewGame() {
@@ -51,14 +44,14 @@ export const App = () => {
     });
 
     const res = await db.transact([
-      tx.games[gameId].update({
+      db.tx.games[gameId].update({
         createdAt: new Date().toISOString(),
         deletedAt: "",
         createdBy: user.id,
       }),
 
       ...rounds.map((round) => {
-        return tx.rounds[round.id]
+        return db.tx.rounds[round.id]
           .update({
             roundNumber: round.roundNumber,
           })

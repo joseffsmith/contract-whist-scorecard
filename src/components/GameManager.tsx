@@ -1,9 +1,9 @@
 import {
+  closestCenter,
   DndContext,
   DragEndEvent,
   KeyboardSensor,
   PointerSensor,
-  closestCenter,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
@@ -14,7 +14,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { id, tx } from "@instantdb/react";
+import { id } from "@instantdb/react";
 import Delete from "@mui/icons-material/Delete";
 import DragHandle from "@mui/icons-material/DragHandle";
 import {
@@ -30,29 +30,20 @@ import {
 import { enqueueSnackbar } from "notistack";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { db } from "..";
+import { db } from "../db";
+import { queryGameData, queryTurnsForGame } from "../queries";
 import { Player, PlayersOrders } from "../types";
+import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
 import { getDealerIdx } from "../utils/getDealerIdx";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
-import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
 
 export const GameManager = () => {
   const { gameId } = useParams<{ gameId: string }>();
   const [type, settype] = useState<"existing" | "new">("existing");
-  const query = {
-    games: {
-      playersOrders: {
-        player: {},
-      },
-      $: {
-        where: {
-          id: gameId,
-        },
-      },
-    },
-  };
 
-  const { isLoading, error, data } = db.useQuery(query);
+  const { isLoading, error, data } = db.useQuery(
+    gameId ? queryGameData(gameId) : null
+  );
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -61,8 +52,8 @@ export const GameManager = () => {
     })
   );
 
-  const playerOrdersInGame: PlayersOrders[] = (
-    Object.values(data?.games[0]?.playersOrders ?? {}) as PlayersOrders[]
+  const playerOrdersInGame = Object.values(
+    data?.games[0].playersOrders ?? {}
   ).sort((apo, bpo) => apo.orderNumber - bpo.orderNumber);
 
   if (isLoading || !data) {
@@ -94,7 +85,7 @@ export const GameManager = () => {
 
       // Update the orderNumber of all items to match their new positions
       const updates = items.map((po, index) =>
-        tx.playersOrders[po.id].update({ orderNumber: index })
+        db.tx.playersOrders[po.id].update({ orderNumber: index })
       );
 
       // Perform the updates in a transaction
@@ -103,7 +94,7 @@ export const GameManager = () => {
   }
 
   let initialDealerIdx: number | null = playerOrdersInGame.findIndex(
-    (po) => po.player?.[0]?.id === game.initialDealerId
+    (po) => po.player?.id === game.initialDealerId
   );
   if (initialDealerIdx === -1) {
     initialDealerIdx = null;
@@ -124,9 +115,7 @@ export const GameManager = () => {
       }}
     >
       <Box display={"flex"} alignItems={"flex-start"} columnGap={4}>
-        <AddPlayerInput
-          playerOrdersInGame={playerOrdersInGame.flatMap((p) => p.player)}
-        />
+        <AddPlayerInput playersInGame={playerOrdersInGame} />
       </Box>
       <List size="md" sx={{ flexGrow: 0, overflow: "auto", maxHeight: "60vh" }}>
         <DndContext
@@ -140,7 +129,7 @@ export const GameManager = () => {
           >
             {playerOrdersInGame.map((po, idx) => {
               const isDealer = dealerIdx === idx;
-              const player = po.player[0];
+              const player = po.player;
               if (!player) {
                 return null;
               }
@@ -187,19 +176,13 @@ const PlayerRow = ({
     transition,
   };
 
-  const { data: turnsData } = db.useQuery({
-    turns: {
-      $: {
-        where: {
-          "round.game.id": gameId!,
-        },
-      },
-    },
-  });
+  const { data: turnsData } = db.useQuery(
+    gameId ? queryTurnsForGame(gameId) : null
+  );
   const canChangeDealer = turnsData?.turns.length === 0;
 
   const handleRemove = async () => {
-    await db.transact([tx.playersOrders[playerOrderId].delete()]);
+    await db.transact([db.tx.playersOrders[playerOrderId].delete()]);
   };
 
   const handleMakeDealer = async (playerId: string) => {
@@ -209,8 +192,9 @@ const PlayerRow = ({
       });
       return;
     }
+
     await db.transact([
-      tx.games[gameId!].update({ initialDealerId: playerId }),
+      db.tx.games[gameId!].update({ initialDealerId: playerId }),
     ]);
   };
 
@@ -259,18 +243,18 @@ const PlayerRow = ({
 };
 
 const AddPlayerInput = ({
-  playerOrdersInGame,
+  playersInGame,
 }: {
-  playerOrdersInGame: Player[];
+  playersInGame: PlayersOrders[];
 }) => {
   const { gameId } = useParams<{ gameId: string }>();
 
   const addNewPlayerToGame = async (name: string) => {
     const playerId = id();
     const res = await db.transact([
-      tx.players[playerId].update({ name }),
-      tx.playersOrders[id()]
-        .update({ orderNumber: playerOrdersInGame?.length ?? 0 })
+      db.tx.players[playerId].update({ name }),
+      db.tx.playersOrders[id()]
+        .update({ orderNumber: playersInGame?.length ?? 0 })
         .link({ player: playerId, game: gameId! }),
     ]);
     if (res.status === "enqueued") {
@@ -282,9 +266,9 @@ const AddPlayerInput = ({
     <ChoosePlayerOrCreate
       createPlayer={addNewPlayerToGame}
       choosePlayer={(playerId) =>
-        addExistingPlayerToGame(gameId!, playerId, playerOrdersInGame.length)
+        addExistingPlayerToGame(gameId!, playerId, playersInGame.length)
       }
-      excludedPlayerIds={playerOrdersInGame.map((p) => p.id)}
+      excludedPlayerIds={playersInGame.map((p) => p.player?.id)}
     />
   );
 };

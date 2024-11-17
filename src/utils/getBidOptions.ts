@@ -1,5 +1,5 @@
 import { DEALS } from "../constants";
-import { Round, Player, Deal } from "../types";
+import { Deal, Player, Round } from "../types";
 
 export const getBidOptions = (
   currentRound: Round | null,

@@ -1,8 +1,9 @@
 import { Autocomplete, Button, AutocompleteOption } from "@mui/joy";
 import { enqueueSnackbar } from "notistack";
 import { useState } from "react";
-import { db } from "..";
+import { db } from "../db";
 import { Player } from "../types";
+import { queryAllPlayers } from "../queries";
 
 export const ChoosePlayerOrCreate = ({
   createPlayer,
@@ -11,15 +12,13 @@ export const ChoosePlayerOrCreate = ({
 }: {
   createPlayer: (name: string) => Promise<void>;
   choosePlayer: (id: string) => Promise<void>;
-  excludedPlayerIds: string[];
+  excludedPlayerIds: (string | undefined)[];
 }) => {
   const {
     data: allPlayers,
     isLoading: isLoadingAllPlayers,
     error: errorPlayers,
-  } = db.useQuery({
-    players: {},
-  });
+  } = db.useQuery(queryAllPlayers);
 
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
   const [inputValue, setInputValue] = useState("");

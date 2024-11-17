@@ -1,5 +1,5 @@
 import { Sheet, Table } from "@mui/joy";
-import { db } from "..";
+import { db } from "../db";
 
 export const Leaderboard = () => {
   // query where game is not deleted
@@ -26,7 +26,7 @@ export const Leaderboard = () => {
   };
 
   const { isLoading, error, data } = db.useQuery(query);
-
+  console.log(isLoading, error);
   return (
     <Sheet sx={{ overflow: "auto" }}>
       <Table

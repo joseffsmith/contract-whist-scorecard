@@ -1,16 +1,14 @@
-import { tx } from "@instantdb/react";
 import { Button, DialogTitle, Modal, ModalDialog, Typography } from "@mui/joy";
 import { enqueueSnackbar } from "notistack";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { db } from "..";
+import { db } from "../db";
+import { queryAllGamesWithPlayers } from "../queries";
 
 export const GameList = () => {
   const { user, isLoading } = db.useAuth();
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
-  const { data: gameData } = db.useQuery({
-    games: { playersOrders: { player: {} } },
-  });
+  const { data: gameData } = db.useQuery(queryAllGamesWithPlayers);
 
   const handleDelete = (gameIsDeleting: string) => {
     setIsDeleting(gameIsDeleting);
@@ -26,7 +24,7 @@ export const GameList = () => {
 
     try {
       await db.transact([
-        tx.games[isDeleting].update({
+        db.tx.games[isDeleting].update({
           deletedAt: new Date().toISOString(),
         }),
       ]);
@@ -106,13 +104,13 @@ export const GameList = () => {
                 }}
               >
                 {game.playersOrders.map((p, idx) => (
-                  <div key={idx}>{p.player[0].name}</div>
+                  <div key={idx}>{p.player?.name}</div>
                 ))}
                 {game.playersOrders.map((po, idx) => {
                   return (
                     <PlayerScore
                       key={po.id}
-                      playerId={po.player[0].id}
+                      playerId={po.player?.id}
                       gameId={game.id}
                     />
                   );
