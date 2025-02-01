@@ -35,7 +35,7 @@ import {
   queryPlayersWithUserId,
   queryTurnsForGame,
 } from "../queries";
-import { Player, PlayersOrders } from "../types";
+import { Player, PlayersOrdersWithPlayers } from "../types";
 import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
 import { getDealerIdx } from "../utils/getDealerIdx";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
@@ -261,7 +261,7 @@ const PlayerRow = ({
 const AddPlayerInput = ({
   playersInGame,
 }: {
-  playersInGame: PlayersOrders[];
+  playersInGame: PlayersOrdersWithPlayers[];
 }) => {
   const { gameId } = useParams<{ gameId: string }>();
 

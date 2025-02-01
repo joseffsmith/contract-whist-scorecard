@@ -1,36 +1,36 @@
-// contract-whist-scoreboard
-// https://instantdb.com/dash?s=main&t=home&app=33fdf866-9fcb-4721-a84d-ca1dba1f0ab0
-
 import { i } from "@instantdb/react";
 
-const graph = i.graph(
-  {
+const _schema = i.schema({
+  // We inferred 10 attributes!
+  // Take a look at this schema, and if everything looks good,
+  // run `push schema` again to enforce the types.
+  entities: {
     $users: i.entity({
-      email: i.any().unique().indexed(),
+      email: i.string().unique().indexed(),
     }),
     games: i.entity({
-      createdAt: i.any(),
-      createdBy: i.any(),
-      deletedAt: i.any(),
-      initialDealerId: i.any(),
+      createdAt: i.string(),
+      createdBy: i.string(),
+      deletedAt: i.string(),
+      initialDealerId: i.string(),
       initialPlayerId: i.any(),
     }),
     players: i.entity({
-      isLinked: i.any(),
-      name: i.any(),
+      isLinked: i.boolean(),
+      name: i.string(),
     }),
     playersOrders: i.entity({
-      orderNumber: i.any(),
+      orderNumber: i.number(),
     }),
     rounds: i.entity({
-      roundNumber: i.any(),
+      roundNumber: i.number(),
     }),
     turns: i.entity({
-      bid: i.any(),
-      score: i.any(),
+      bid: i.number(),
+      score: i.number(),
     }),
   },
-  {
+  links: {
     players$user: {
       forward: {
         on: "players",
@@ -53,18 +53,6 @@ const graph = i.graph(
         on: "turns",
         has: "one",
         label: "player",
-      },
-    },
-    playersUser: {
-      forward: {
-        on: "players",
-        has: "many",
-        label: "user",
-      },
-      reverse: {
-        on: "$users",
-        has: "many",
-        label: "players",
       },
     },
     playersOrdersGame: {
@@ -115,7 +103,16 @@ const graph = i.graph(
         label: "round",
       },
     },
-  }
-);
+  },
+  // If you use presence, you can define a room schema here
+  // https://www.instantdb.com/docs/presence-and-topics#typesafety
+  rooms: {},
+});
 
-export default graph;
+// This helps Typescript display nicer intellisense
+type _AppSchema = typeof _schema;
+interface AppSchema extends _AppSchema {}
+const schema: AppSchema = _schema;
+
+export type { AppSchema };
+export default schema;

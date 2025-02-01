@@ -2,6 +2,7 @@ import { id } from "@instantdb/react";
 import UpdateIcon from "@mui/icons-material/Update";
 import {
   Avatar,
+  Badge,
   ListItemDecorator,
   Tab,
   TabList,
@@ -78,6 +79,18 @@ export const App = () => {
   const canFitText = useMediaQuery(theme.breakpoints.up("sm"));
   const route = match?.pattern.path;
 
+  const status = db.useConnectionStatus();
+  const connectionState =
+    status === "connecting" || status === "opened"
+      ? "authenticating"
+      : status === "authenticated"
+      ? "connected"
+      : status === "closed"
+      ? "closed"
+      : status === "errored"
+      ? "errored"
+      : "unexpected state";
+
   if (isLoading) {
     return <div>Loading...</div>;
   }
@@ -89,10 +102,28 @@ export const App = () => {
 
   return (
     <>
-      <div className="bg-gray-100 fixed inset-0 pb-8 flex flex-col overscroll-y-none max-w-4xl max-h-[1000px] m-auto">
+      <div className="bg-gray-100 dark:bg-gray-800 fixed inset-0 pb-8 flex flex-col overscroll-y-none max-w-4xl max-h-[1000px] m-auto">
         <div className="flex items-stretch w-full">
           <div className="flex items-center">
-            <img src={img} alt="Logo" width="32" height="32" className="mx-4" />
+            <Badge
+              color={
+                connectionState === "connected"
+                  ? "success"
+                  : connectionState === "authenticating"
+                  ? "warning"
+                  : "danger"
+              }
+              anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+              badgeInset={"0px 6px"}
+            >
+              <img
+                src={img}
+                alt="Logo"
+                width="32"
+                height="32"
+                className="mx-4"
+              />
+            </Badge>
           </div>
           <Tabs
             aria-label="Icon tabs"

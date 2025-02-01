@@ -1,8 +1,8 @@
 import { DEALS } from "../constants";
-import { Deal, Player, Round } from "../types";
+import { Deal, Player, RoundData } from "../types";
 
 export const getBidOptions = (
-  currentRound: Round | null,
+  currentRound: RoundData | null,
   currentRoundIdx: number,
   players: Player[],
   stage: "score" | "bid"

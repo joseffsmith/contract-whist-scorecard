@@ -184,7 +184,7 @@ export const LinkPlayerToMe = () => {
         .update({
           name,
         })
-        .link({ user: user.id }),
+        .link({ $user: user.id }),
     ]);
   };
 
@@ -192,7 +192,7 @@ export const LinkPlayerToMe = () => {
     if (!user) {
       throw Error("No user");
     }
-    await db.transact([db.tx.players[id].link({ user: user.id })]);
+    await db.transact([db.tx.players[id].link({ $user: user.id })]);
   };
 
   return (

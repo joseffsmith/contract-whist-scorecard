@@ -11,7 +11,7 @@ export const UserManager = () => {
           players: {
             $: {
               where: {
-                user: user?.id!,
+                $user: user?.id!,
               },
             },
           },
@@ -25,7 +25,7 @@ export const UserManager = () => {
 
   const handleUnlink = async (playerId: string, userId: string) => {
     await db.transact([
-      db.tx.players[playerId].unlink({ user: userId }),
+      db.tx.players[playerId].unlink({ $user: userId }),
       db.tx.players[playerId].merge({ isLinked: false }),
     ]);
   };

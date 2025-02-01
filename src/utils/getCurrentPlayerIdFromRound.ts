@@ -1,7 +1,7 @@
-import { Round, Player, Turn } from "../types";
+import { Player, RoundData, Turn } from "../types";
 
 export const getCurrentPlayerIdFromRound = (
-  round: Round | null,
+  round: RoundData | null,
   dealerIdx: number | null,
   ps: (Player | undefined)[]
 ): string | null => {

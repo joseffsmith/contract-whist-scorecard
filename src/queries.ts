@@ -1,11 +1,11 @@
-import { InstantQuery, InstantQueryResult } from "@instantdb/react"
-import { DB } from "./db"
+import { InstaQLParams } from "@instantdb/react"
+import { AppSchema } from "../instant.schema"
 
 export const queryPlayersWithUserId = (userId: string) => ({
   players: {
     $: {
       where: {
-        user: userId,
+        $user: userId,
       },
     },
   },
@@ -13,7 +13,7 @@ export const queryPlayersWithUserId = (userId: string) => ({
 
 export const queryAllPlayers = {
   players: {},
-} satisfies InstantQuery<DB>;
+} satisfies InstaQLParams<AppSchema>;
 
 export const queryGameData = (gameId: string) => {
   return {
@@ -32,12 +32,12 @@ export const queryGameData = (gameId: string) => {
         },
       },
     },
-  } satisfies InstantQuery<DB>;
+  } satisfies InstaQLParams<AppSchema>;;
 };
 
 export const queryAllGamesWithPlayers = {
   games: { playersOrders: { player: {} } },
-};
+} satisfies InstaQLParams<AppSchema>;;
 
 export const queryTurnsForGame = (gameId: string) => ({
   turns: {
@@ -49,7 +49,3 @@ export const queryTurnsForGame = (gameId: string) => ({
   },
 });
 
-export type GameDataType = InstantQueryResult<
-  DB,
-  ReturnType<typeof queryGameData>
->["games"];
