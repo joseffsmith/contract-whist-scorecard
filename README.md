@@ -1,6 +1,6 @@
 # Contract whist scorecard
 
-Demo: https://zealous-ride-fda2b4.netlify.app/
+Demo: https://joseffsmith.uk/contract-whist
 
 ## Stretch goals
 - reorder players
