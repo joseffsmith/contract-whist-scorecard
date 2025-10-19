@@ -2,15 +2,11 @@ import { Sheet, Table } from "@mui/joy";
 import { db } from "../db";
 
 export const Leaderboard = () => {
-  // query where game is not deleted
+  // Query all players with their games and turns
   const query = {
     players: {
       playersOrders: {
-        $: {
-          where: {
-            "game.deletedAt": "",
-          },
-        },
+        game: {},
       },
       turns: {
         round: {
@@ -26,6 +22,13 @@ export const Leaderboard = () => {
   };
 
   const { isLoading, error, data } = db.useQuery(query);
+
+  // Filter out players from deleted games in JavaScript
+  const filteredPlayers = data?.players.map(player => ({
+    ...player,
+    playersOrders: player.playersOrders.filter(po => !po.game?.deletedAt),
+    turns: player.turns.filter(turn => !turn.round?.game?.deletedAt),
+  }));
 
   return (
     <Sheet sx={{ overflow: "auto" }}>
@@ -75,8 +78,8 @@ export const Leaderboard = () => {
           {/* <td></td> */}
         </thead>
         <tbody>
-          {data?.players ? (
-            data.players
+          {filteredPlayers ? (
+            filteredPlayers
               .filter((p) => p.playersOrders.length > 0)
               .sort((a, b) => a.name.localeCompare(b.name))
               .map((player) => {

@@ -40,7 +40,7 @@ const Login = ({ open, onClose }: { open: boolean; onClose: () => void }) => {
           players: {
             $: {
               where: {
-                user: user?.id!,
+                $user: user?.id!,
               },
             },
           },
@@ -48,7 +48,7 @@ const Login = ({ open, onClose }: { open: boolean; onClose: () => void }) => {
       : null
   );
 
-  if (user && !playerUser?.players.length) {
+  if (user && !playerUser?.players?.length) {
     return <LinkPlayerToMe />;
   }
 
@@ -114,13 +114,20 @@ function Email({ setSentEmail }) {
 
 function MagicCode({ sentEmail }) {
   const [code, setCode] = useState("");
+  const nav = useNavigate()
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    db.auth.signInWithMagicCode({ email: sentEmail, code }).catch((err) => {
-      alert("Uh oh :" + err.body?.message);
-      setCode("");
-    });
+    db.auth.signInWithMagicCode({ email: sentEmail, code })
+      .catch((err) => {
+        alert("Uh oh :" + err.body?.message);
+        setCode("");
+      })
+      .then((val) => {
+        console.log("Signed in!", val);
+        // Navigate to the home page or dashboard
+        nav("/");
+      });
   };
 
   return (
@@ -159,14 +166,11 @@ export const LinkPlayerToMe = () => {
   const { user } = db.useAuth();
   const { data } = db.useQuery({
     players: {
-      $: {
-        where: {
-          isLinked: true,
-        },
-      },
+      $user: {},
     },
   });
 
+  // Exclude players that are already linked to any user
   const excludedPlayerIds = data?.players.map((p) => p.id) ?? [];
 
   const createPlayer = async (name: string) => {

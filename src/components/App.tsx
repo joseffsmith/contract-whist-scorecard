@@ -57,7 +57,6 @@ export const App = () => {
     const res = await db.transact([
       db.tx.games[gameId].update({
         createdAt: new Date().toISOString(),
-        deletedAt: "",
         createdBy: user.id,
       }),
 
@@ -182,9 +181,7 @@ export const App = () => {
           <div className="flex items-center">
             <ThemeToggle size="md" variant="plain" />
             <Button
-              // variant="soft"
               size="lg"
-              // px={4}
               color="primary"
               sx={{
                 whiteSpace: "nowrap",

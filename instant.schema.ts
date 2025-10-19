@@ -11,12 +11,10 @@ const _schema = i.schema({
     games: i.entity({
       createdAt: i.string(),
       createdBy: i.string(),
-      deletedAt: i.string(),
-      initialDealerId: i.string(),
-      initialPlayerId: i.any(),
+      deletedAt: i.string().optional(),
+      initialDealerId: i.string().optional(),
     }),
     players: i.entity({
-      isLinked: i.boolean(),
       name: i.string(),
     }),
     playersOrders: i.entity({
@@ -26,8 +24,8 @@ const _schema = i.schema({
       roundNumber: i.number(),
     }),
     turns: i.entity({
-      bid: i.number(),
-      score: i.number(),
+      bid: i.number().optional(),
+      score: i.number().optional(),
     }),
   },
   links: {
