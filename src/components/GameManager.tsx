@@ -64,7 +64,7 @@ export const GameManager = () => {
   ).sort((apo, bpo) => apo.orderNumber - bpo.orderNumber);
 
   if (isLoading || !data) {
-    return <div>Loading...</div>;
+    return <div className="text-gray-900 dark:text-gray-100 p-4">Loading...</div>;
   }
 
   const game = data.games[0];

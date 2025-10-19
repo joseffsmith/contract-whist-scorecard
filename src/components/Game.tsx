@@ -1,5 +1,5 @@
 import { id } from "@instantdb/react";
-import { Typography } from "@mui/joy";
+import { Typography, Sheet } from "@mui/joy";
 import { Fragment, useState } from "react";
 import Confetti from "react-confetti";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -25,7 +25,7 @@ export const GameComp = () => {
   }
 
   if (!data || isLoadingUser) {
-    return <div>Loading...</div>;
+    return <div className="text-gray-900 dark:text-gray-100 p-4">Loading...</div>;
   }
 
   const game = data.games[0];
@@ -194,10 +194,9 @@ export const GameComp = () => {
     <>
       {isGameFinished && !isConfettiClosed && (
         <>
-          <div
-            style={{
+          <Sheet
+            sx={{
               position: "fixed",
-              backgroundColor: "#fafafaaa",
               left: 0,
               right: 0,
               bottom: 0,
@@ -206,14 +205,21 @@ export const GameComp = () => {
               flexDirection: "column",
               justifyContent: "center",
               alignItems: "center",
-              gap: 8,
+              gap: 1,
+              backgroundColor: "background.body",
+              opacity: 0.95,
+              backdropFilter: "blur(4px)",
+              zIndex: 1000,
             }}
           >
-            <h2 style={{ fontSize: "2em", fontWeight: "bold" }}>
+            <Typography 
+              level="h1"
+              sx={{ fontSize: "2em", fontWeight: "bold" }}
+            >
               {winningPlayer} wins!
-            </h2>
+            </Typography>
             <button
-              className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900"
+              className="border rounded-sm py-0.5 px-2 bg-indigo-100 dark:bg-indigo-900 border-indigo-900 dark:border-indigo-100 text-indigo-900 dark:text-indigo-100"
               onClick={(e) => {
                 e.preventDefault();
                 setIsClosed(true);
@@ -223,7 +229,7 @@ export const GameComp = () => {
             </button>
             {isOwnGame && (
               <button
-                className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900"
+                className="border rounded-sm py-0.5 px-2 bg-indigo-100 dark:bg-indigo-900 border-indigo-900 dark:border-indigo-100 text-indigo-900 dark:text-indigo-100"
                 onClick={(e) => {
                   e.preventDefault();
                   undo();
@@ -232,18 +238,18 @@ export const GameComp = () => {
                 Undo
               </button>
             )}
-          </div>
+          </Sheet>
           <Confetti />
         </>
       )}
       {isOwnGame && (
         <div className="flex justify-end space-x-1 my-1">
-          <button className="whitespace-nowrap border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900">
+          <button className="whitespace-nowrap border rounded-sm py-0.5 px-2 bg-indigo-100 dark:bg-indigo-900 border-indigo-900 dark:border-indigo-100 text-indigo-900 dark:text-indigo-100">
             <Link to={"manage"}>Manage</Link>
           </button>
 
           <button
-            className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900"
+            className="border rounded-sm py-0.5 px-2 bg-indigo-100 dark:bg-indigo-900 border-indigo-900 dark:border-indigo-100 text-indigo-900 dark:text-indigo-100"
             onClick={undo}
           >
             Undo
@@ -262,7 +268,7 @@ export const GameComp = () => {
           <div
             key={p!.id}
             className={`${
-              dealerIdx === idx ? "bg-red-500" : ""
+              dealerIdx === idx ? "bg-red-500 dark:bg-red-600" : ""
             } text-center text-xs flex items-center`}
           >
             <Typography
@@ -291,16 +297,16 @@ export const GameComp = () => {
                   key={p!.id}
                   className={`text-xl border-b ${
                     p_idx === players.length ? "" : "border-r"
-                  } border-gray-400 flex justify-center items-center text-center`}
+                  } border-gray-400 dark:border-gray-600 flex justify-center items-center text-center`}
                 >
                   <div
                     className={`${
                       currentPlayerId === p!.id &&
                       currentRoundIdx === t_idx &&
                       stage === "bid"
-                        ? "bg-green-300"
+                        ? "bg-green-300 dark:bg-green-700"
                         : ""
-                    } h-full flex items-center justify-center flex-grow w-full border-r`}
+                    } h-full flex items-center justify-center flex-grow w-full border-r border-gray-400 dark:border-gray-600`}
                   >
                     {rs[t_idx].turns.find((t) => t.player?.id === p!.id)?.bid}
                   </div>
@@ -309,7 +315,7 @@ export const GameComp = () => {
                       currentPlayerId === p!.id &&
                       currentRoundIdx === t_idx &&
                       stage === "score"
-                        ? "bg-green-300"
+                        ? "bg-green-300 dark:bg-green-700"
                         : ""
                     } h-full flex items-center justify-center flex-grow w-full `}
                   >
@@ -326,7 +332,7 @@ export const GameComp = () => {
           return (
             <div
               key={idx}
-              className="text-xl text-center border-r border-gray-400 last:border-r-0 "
+              className="text-xl text-center border-r border-gray-400 dark:border-gray-600 last:border-r-0 "
             >
               {getScoreForPlayer(p!.id)}
             </div>
@@ -343,8 +349,8 @@ export const GameComp = () => {
                 onClick={() => handleBid(opt)}
                 className={`${
                   opt.disabled
-                    ? "border-purple-50 bg-white opacity-50"
-                    : "border-gray-900 bg-indigo-100"
+                    ? "border-purple-50 dark:border-purple-900 bg-white dark:bg-gray-800 opacity-50"
+                    : "border-gray-900 dark:border-gray-300 bg-indigo-100 dark:bg-indigo-900"
                 } border rounded-sm  py-2 flex-1 m-0.5`}
               >
                 {opt.number}
@@ -361,7 +367,7 @@ export const GameComp = () => {
               <button
                 key={opt.number}
                 onClick={() => setTricksMade(opt.number)}
-                className="border-gray-900 bg-indigo-100 border rounded-sm py-2 flex-1 m-0.5"
+                className="border-gray-900 dark:border-gray-300 bg-indigo-100 dark:bg-indigo-900 border rounded-sm py-2 flex-1 m-0.5"
               >
                 {opt.number}
               </button>

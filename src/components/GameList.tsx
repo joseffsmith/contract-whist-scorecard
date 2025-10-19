@@ -80,18 +80,18 @@ export const GameList = () => {
           return (
             <div key={game.id} className="py-1 mb-1 border-b">
               <div className="flex justify-between">
-                <span>{new Date(game.createdAt).toLocaleString()}</span>
+                <span className="text-gray-900 dark:text-gray-100">{new Date(game.createdAt).toLocaleString()}</span>
                 <div className="flex">
                   {canDelete && (
                     <button
                       onClick={() => handleDelete(game.id)}
-                      className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900 mx-1"
+                      className="border rounded-sm py-0.5 px-2 bg-indigo-100 dark:bg-indigo-900 border-indigo-900 dark:border-indigo-100 text-indigo-900 dark:text-indigo-100 mx-1"
                     >
                       Delete game
                     </button>
                   )}
                   <Link to={`/games/${game.id}`}>
-                    <button className="border rounded-sm py-0.5 px-2 bg-indigo-100 border-indigo-900">
+                    <button className="border rounded-sm py-0.5 px-2 bg-indigo-100 dark:bg-indigo-900 border-indigo-900 dark:border-indigo-100 text-indigo-900 dark:text-indigo-100">
                       Load game
                     </button>
                   </Link>

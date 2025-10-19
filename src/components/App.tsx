@@ -7,7 +7,7 @@ import {
   Tab,
   TabList,
   Tabs,
-  useTheme,
+  useTheme as useMuiTheme,
 } from "@mui/joy";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import { enqueueSnackbar } from "notistack";
@@ -26,6 +26,7 @@ import { DEALS } from "../constants";
 import { db } from "../db";
 import { queryPlayersWithUserId } from "../queries";
 import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
+import { ThemeToggle } from "./ThemeToggle";
 
 import img from "/android-chrome-192x192.png";
 
@@ -75,8 +76,8 @@ export const App = () => {
   }
 
   const match = useRouteMatch(["/user", "/leaderboard", "/"]);
-  const theme = useTheme();
-  const canFitText = useMediaQuery(theme.breakpoints.up("sm"));
+  const muiTheme = useMuiTheme();
+  const canFitText = useMediaQuery(muiTheme.breakpoints.up("sm"));
   const route = match?.pattern.path;
 
   const status = db.useConnectionStatus();
@@ -92,10 +93,10 @@ export const App = () => {
       : "unexpected state";
 
   if (isLoading) {
-    return <div>Loading...</div>;
+    return <div className="text-gray-900 dark:text-gray-100 p-4">Loading...</div>;
   }
   if (error) {
-    return <div>Uh oh! {error.message}</div>;
+    return <div className="text-red-600 dark:text-red-400 p-4">Uh oh! {error.message}</div>;
   }
 
   const player = playerUser?.players[0];
@@ -178,73 +179,27 @@ export const App = () => {
               </Tab>
             </TabList>
           </Tabs>
-          <Button
-            // variant="soft"
-            size="lg"
-            // px={4}
-            color="primary"
-            sx={{
-              whiteSpace: "nowrap",
-              py: 1,
-              borderRadius: 0,
-              // backgroundColor: "#fff",
-              // borderBottom: "1px solid grey",
-            }}
-            onClick={createNewGame}
-            variant="plain"
-          >
-            {/* <ListItemDecorator> */}
-            <Add />
-            {/* </ListItemDecorator> */}
-            {canFitText && "New game"}
-          </Button>
-          {/* <List
-            role="menubar"
-            orientation="horizontal"
-            size="md"
-            sx={{
-              flexGrow: 0,
-              width: "100%",
-              justifyContent: "space-between",
-              px: 4,
-            }}
-          >
-            <ListItem>
-              <ListItemButton component={Link} to={"/user"}>
-                <Avatar>
-                  {player?.name
-                    .split(" ")
-                    .map((i) => i[0])
-                    .join("")
-                    .toUpperCase()}
-                </Avatar>
-              </ListItemButton>
-            </ListItem>
-
-            <ListItem>
-              <ListItemButton
-                role="menuitem"
-                component={Link}
-                to={"/leaderboard"}
-              >
-                <FormatListNumberedIcon />
-              </ListItemButton>
-            </ListItem>
-
-            <ListItem>
-              <ListItemButton role="menuitem" component={Link} to={"/"}>
-                <UpdateIcon />
-              </ListItemButton>
-            </ListItem>
-
-            <ListItem>
-              <ListItemDecorator>
-                <ListItemButton role="menuitem" onClick={createNewGame}>
-                  <AddIcon />
-                </ListItemButton>
-              </ListItemDecorator>
-            </ListItem>
-          </List> */}
+          <div className="flex items-center">
+            <ThemeToggle size="md" variant="plain" />
+            <Button
+              // variant="soft"
+              size="lg"
+              // px={4}
+              color="primary"
+              sx={{
+                whiteSpace: "nowrap",
+                py: 1,
+                borderRadius: 0,
+                ml: 1,
+              }}
+              onClick={createNewGame}
+              variant="plain"
+            >
+              <Add />
+              {canFitText && "New game"}
+            </Button>
+          </div>
+        
         </div>
         <Outlet />
       </div>

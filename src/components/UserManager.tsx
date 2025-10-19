@@ -31,13 +31,13 @@ export const UserManager = () => {
   };
 
   if (isLoadingUser) {
-    return <div>Loading user...</div>;
+    return <div className="text-gray-900 dark:text-gray-100">Loading user...</div>;
   }
   if (!user) {
     return <UserLogin />;
   }
   if (isLoadingPlayerData) {
-    return <div>Loading...</div>;
+    return <div className="text-gray-900 dark:text-gray-100">Loading...</div>;
   }
   const linkedPlayer = playerData?.players[0];
 
