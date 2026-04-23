@@ -1,86 +1,34 @@
 import { id } from "@instantdb/react";
-import UpdateIcon from "@mui/icons-material/Update";
-import {
-  Avatar,
-  Badge,
-  ListItemDecorator,
-  Tab,
-  TabList,
-  Tabs,
-  useTheme as useMuiTheme,
-} from "@mui/joy";
-import useMediaQuery from "@mui/material/useMediaQuery";
 import { enqueueSnackbar } from "notistack";
 import {
-  Link,
-  matchPath,
   Outlet,
   useLocation,
   useNavigate,
+  matchPath,
 } from "react-router-dom";
-
-import Add from "@mui/icons-material/Add";
-import Leaderboard from "@mui/icons-material/Leaderboard";
-import { Button } from "@mui/joy";
 import { DEALS } from "../constants";
 import { db } from "../db";
 import { queryPlayersWithUserId } from "../queries";
 import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
-import { ThemeToggle } from "./ThemeToggle";
+import { Shell } from "./chrome/Shell";
+import { RootHeader, RootTabId } from "./chrome/RootHeader";
+import { t } from "../theme/tokens";
 
-import img from "/android-chrome-192x192.png";
+// Map a pathname to a root-tab id, or null if this is a deep (breadcrumb) route.
+function matchRootTab(pathname: string): RootTabId | null {
+  if (matchPath("/", pathname)) return "home";
+  if (matchPath("/games", pathname)) return "games";
+  if (matchPath("/leaderboard", pathname)) return "board";
+  if (matchPath("/user", pathname)) return "you";
+  return null;
+}
 
 export const App = () => {
   const nav = useNavigate();
+  const location = useLocation();
   const { isLoading, user, error } = db.useAuth();
-
-  const { isLoading: isLoadingPlayerUser, data: playerUser } = db.useQuery(
-    user ? queryPlayersWithUserId(user.id) : null
-  );
-
-  async function createNewGame() {
-    if (!user) {
-      nav("/login");
-      return;
-    }
-    if (!playerUser?.players.length) {
-      console.error("No user");
-      enqueueSnackbar("No user", { variant: "error" });
-      return;
-    }
-    const gameId = id();
-
-    const rounds = DEALS.map((deal) => {
-      return { id: id(), roundNumber: deal.id };
-    });
-
-    const res = await db.transact([
-      db.tx.games[gameId].update({
-        createdAt: new Date().toISOString(),
-        createdBy: user.id,
-      }),
-
-      ...rounds.map((round) => {
-        return db.tx.rounds[round.id]
-          .update({
-            roundNumber: round.roundNumber,
-          })
-          .link({ game: gameId });
-      }),
-    ]);
-
-    await addExistingPlayerToGame(gameId, playerUser.players[0].id, 0);
-
-    nav("/games/" + gameId + "/manage");
-  }
-
-  const match = useRouteMatch(["/user", "/leaderboard", "/"]);
-  const muiTheme = useMuiTheme();
-  const canFitText = useMediaQuery(muiTheme.breakpoints.up("sm"));
-  const route = match?.pattern.path;
-
   const status = db.useConnectionStatus();
-  const connectionState =
+  const connection =
     status === "connecting" || status === "opened"
       ? "authenticating"
       : status === "authenticated"
@@ -91,129 +39,70 @@ export const App = () => {
       ? "errored"
       : "unexpected state";
 
+  const { data: playerUser } = db.useQuery(
+    user ? queryPlayersWithUserId(user.id) : null
+  );
+
+  async function createNewGame() {
+    if (!user) {
+      nav("/login");
+      return;
+    }
+    if (!playerUser?.players.length) {
+      enqueueSnackbar("No user linked", { variant: "error" });
+      return;
+    }
+    const gameId = id();
+    const rounds = DEALS.map((deal) => ({
+      id: id(),
+      roundNumber: deal.id,
+    }));
+    await db.transact([
+      db.tx.games[gameId].update({
+        createdAt: new Date().toISOString(),
+        createdBy: user.id,
+      }),
+      ...rounds.map((round) =>
+        db.tx.rounds[round.id]
+          .update({ roundNumber: round.roundNumber })
+          .link({ game: gameId })
+      ),
+    ]);
+    await addExistingPlayerToGame(gameId, playerUser.players[0].id, 0);
+    nav("/games/" + gameId + "/manage");
+  }
+
+  const rootTab = matchRootTab(location.pathname);
+
   if (isLoading) {
-    return <div className="text-gray-900 dark:text-gray-100 p-4">Loading...</div>;
+    return (
+      <Shell>
+        <div style={{ padding: 20, opacity: 0.6, fontSize: 13 }}>Loading…</div>
+      </Shell>
+    );
   }
   if (error) {
-    return <div className="text-red-600 dark:text-red-400 p-4">Uh oh! {error.message}</div>;
+    return (
+      <Shell>
+        <div style={{ padding: 20, color: t.red, fontSize: 13 }}>
+          {error.message}
+        </div>
+      </Shell>
+    );
   }
-
-  const player = playerUser?.players[0];
 
   return (
-    <>
-      <div className="bg-gray-100 dark:bg-gray-800 fixed inset-0 pb-8 flex flex-col overscroll-y-none max-w-4xl max-h-[1000px] m-auto">
-        <div className="flex items-stretch w-full">
-          <div className="flex items-center">
-            <Badge
-              color={
-                connectionState === "connected"
-                  ? "success"
-                  : connectionState === "authenticating"
-                  ? "warning"
-                  : "danger"
-              }
-              anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
-              badgeInset={"0px 6px"}
-            >
-              <img
-                src={img}
-                alt="Logo"
-                width="32"
-                height="32"
-                className="mx-4"
-              />
-            </Badge>
-          </div>
-          <Tabs
-            aria-label="Icon tabs"
-            value={match ? route : null}
-            className="flex-grow"
-          >
-            <TabList tabFlex={1} underlinePlacement="bottom">
-              <Tab
-                indicatorPlacement="top"
-                variant="plain"
-                color="neutral"
-                component={Link}
-                to={"/user"}
-                value="/user"
-              >
-                <ListItemDecorator>
-                  <Avatar>
-                    {player?.name
-                      .split(" ")
-                      .map((i) => i[0])
-                      .join("")
-                      .toUpperCase()}
-                  </Avatar>
-                </ListItemDecorator>
-                {canFitText && "Account"}
-              </Tab>
-              <Tab
-                indicatorPlacement="top"
-                variant="plain"
-                color="neutral"
-                component={Link}
-                to={"/leaderboard"}
-                value="/leaderboard"
-              >
-                <ListItemDecorator>
-                  <Leaderboard />
-                </ListItemDecorator>
-                {canFitText && "Leaderboard"}
-              </Tab>
-              <Tab
-                indicatorPlacement="top"
-                variant="plain"
-                color="neutral"
-                component={Link}
-                to={"/"}
-                value="/"
-              >
-                <ListItemDecorator>
-                  <UpdateIcon />
-                </ListItemDecorator>
-                {canFitText && "History"}
-              </Tab>
-            </TabList>
-          </Tabs>
-          <div className="flex items-center">
-            <ThemeToggle size="md" variant="plain" />
-            <Button
-              size="lg"
-              color="primary"
-              sx={{
-                whiteSpace: "nowrap",
-                py: 1,
-                borderRadius: 0,
-                ml: 1,
-              }}
-              onClick={createNewGame}
-              variant="plain"
-            >
-              <Add />
-              {canFitText && "New game"}
-            </Button>
-          </div>
-        
-        </div>
-        <Outlet />
+    <Shell>
+      {rootTab && (
+        <RootHeader
+          activeTab={rootTab}
+          onDeal={createNewGame}
+          connection={connection}
+        />
+      )}
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+        <Outlet context={{ onDeal: createNewGame }} />
       </div>
-    </>
+    </Shell>
   );
 };
-
-function useRouteMatch(patterns: readonly string[]) {
-  const { pathname } = useLocation();
-
-  for (let i = 0; i < patterns.length; i += 1) {
-    const pattern = patterns[i];
-    const possibleMatch = matchPath(pattern, pathname);
-    if (possibleMatch !== null) {
-      return possibleMatch;
-    }
-  }
-
-  return null;
-}

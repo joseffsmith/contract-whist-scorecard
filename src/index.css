@@ -1,49 +1,53 @@
-@import 'tailwindcss/base';
-@import 'tailwindcss/components';
-@import 'tailwindcss/utilities';
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
 
 body {
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out;
+  background: radial-gradient(ellipse at top, #0f3a2e 0%, #0a2a21 100%);
+  color: #f6ebcf;
+  font-family: "Inter Tight", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overscroll-behavior-y: none;
 }
 
-/* Dark mode styles */
-.dark {
-    color-scheme: dark;
-}
-
-/* Ensure smooth transitions for theme changes */
 * {
-    transition: background-color 0.2s ease-in-out, border-color 0.2s ease-in-out;
+  box-sizing: border-box;
+  touch-action: manipulation;
 }
 
-/* Custom scrollbar for dark mode */
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+input,
+textarea {
+  font-family: inherit;
+  color: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
 ::-webkit-scrollbar {
-    width: 8px;
+  width: 6px;
+  height: 6px;
 }
-
 ::-webkit-scrollbar-track {
-    background: #f1f5f9;
+  background: transparent;
 }
-
-.dark ::-webkit-scrollbar-track {
-    background: #1e293b;
-}
-
 ::-webkit-scrollbar-thumb {
-    background: #cbd5e1;
-    border-radius: 9999px;
+  background: rgba(200, 162, 74, 0.35);
+  border-radius: 9999px;
 }
-
-.dark ::-webkit-scrollbar-thumb {
-    background: #475569;
-}
-
 ::-webkit-scrollbar-thumb:hover {
-    background: #94a3b8;
-}
-
-.dark ::-webkit-scrollbar-thumb:hover {
-    background: #64748b;
+  background: rgba(200, 162, 74, 0.6);
 }
