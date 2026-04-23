@@ -10,6 +10,7 @@ import { DEALS } from "../constants";
 import { db } from "../db";
 import { queryPlayersWithUserId } from "../queries";
 import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
+import { OfflineBanner } from "./chrome/OfflineBanner";
 import { Shell } from "./chrome/Shell";
 import { RootHeader, RootTabId } from "./chrome/RootHeader";
 import { t } from "../theme/tokens";
@@ -93,6 +94,7 @@ export const App = () => {
 
   return (
     <Shell>
+      <OfflineBanner connection={connection} />
       {rootTab && (
         <RootHeader
           activeTab={rootTab}
