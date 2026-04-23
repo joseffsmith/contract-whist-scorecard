@@ -3,13 +3,17 @@ import { enqueueSnackbar } from "notistack";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { db } from "../db";
+import { createGame as createGuestGame, listGames as listGuestGames } from "../guest/guestStore";
+import { useGuestGames } from "../guest/useGuestGame";
 import { goldButton, t } from "../theme/tokens";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
+import { GuestMigrationDialog } from "./GuestMigrationDialog";
 import { Shell } from "./chrome/Shell";
 
 export const UserLogin = () => {
   const { user } = db.useAuth();
   const [sentEmail, setSentEmail] = useState("");
+  const guestGames = useGuestGames();
 
   const { isLoading, data: playerUser } = db.useQuery(
     user
@@ -28,7 +32,18 @@ export const UserLogin = () => {
     if (!playerUser?.players?.length) {
       return <LinkPlayerToMe />;
     }
-    // signed in + linked — redirect out of /login
+    if (guestGames.length > 0) {
+      return (
+        <GuestMigrationDialog
+          userId={user.id}
+          games={guestGames}
+          onDone={() => {
+            /* subscribe will re-render with empty list → falls through to RedirectHome */
+          }}
+        />
+      );
+    }
+    // signed in + linked + no guest games — redirect out of /login
     return <RedirectHome />;
   }
 
@@ -36,12 +51,96 @@ export const UserLogin = () => {
     <Shell>
       <LoginFrame>
         {!sentEmail ? (
-          <EmailStep onSent={setSentEmail} />
+          <>
+            <EmailStep onSent={setSentEmail} />
+            <GuestEntry />
+          </>
         ) : (
           <MagicCodeStep sentEmail={sentEmail} />
         )}
       </LoginFrame>
     </Shell>
+  );
+};
+
+const GuestEntry = () => {
+  const nav = useNavigate();
+  // Resume the most recent unfinished game, if any — otherwise start fresh.
+  const resume = () => {
+    const games = listGuestGames().filter((g) => !g.deletedAt);
+    const active = games.find((g) => {
+      if (g.players.length < 2) return true; // still in setup
+      return g.rounds.some((r) =>
+        r.turns.length !== g.players.length ||
+        r.turns.some((t) => t.score === null)
+      );
+    });
+    if (active) {
+      const inSetup = active.players.length < 2 || active.initialDealerId === null;
+      nav(
+        inSetup
+          ? `/games/guest/${active.id}/manage`
+          : `/games/guest/${active.id}`
+      );
+      return;
+    }
+    const g = createGuestGame();
+    nav(`/games/guest/${g.id}/manage`);
+  };
+  const games = listGuestGames().filter((g) => !g.deletedAt);
+  const hasActive = games.some((g) => {
+    if (g.players.length < 2) return true;
+    return g.rounds.some((r) =>
+      r.turns.length !== g.players.length ||
+      r.turns.some((t) => t.score === null)
+    );
+  });
+  return (
+    <div style={{ marginTop: 18, textAlign: "center" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          color: t.cream,
+          opacity: 0.35,
+          fontSize: 10,
+          letterSpacing: "0.2em",
+          textTransform: "uppercase",
+          marginBottom: 12,
+        }}
+      >
+        <div style={{ flex: 1, height: 1, background: `${t.gold}22` }} />
+        <span>or</span>
+        <div style={{ flex: 1, height: 1, background: `${t.gold}22` }} />
+      </div>
+      <button
+        onClick={resume}
+        style={{
+          width: "100%",
+          padding: "14px 0",
+          borderRadius: 12,
+          border: `1px solid ${t.gold}66`,
+          background: "transparent",
+          color: t.cream,
+          fontFamily: t.display,
+          fontSize: 15,
+          fontWeight: 600,
+        }}
+      >
+        {hasActive ? "Resume guest game" : "Play as guest"}
+      </button>
+      <div
+        style={{
+          fontSize: 11,
+          color: t.cream,
+          opacity: 0.45,
+          marginTop: 8,
+        }}
+      >
+        No account — saved on this device only
+      </div>
+    </div>
   );
 };
 
