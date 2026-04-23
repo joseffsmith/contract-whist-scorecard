@@ -395,7 +395,18 @@ const MagicCodeStep = ({ sentEmail }: { sentEmail: string }) => {
 export const LinkPlayerToMe = () => {
   const { user } = db.useAuth();
   const { data } = db.useQuery({ players: { $user: {} } });
-  const excludedPlayerIds = data?.players.map((p) => p.id) ?? [];
+  // Only exclude players that are already claimed by a user — not every
+  // player in the DB. `$user` may come back as an object or an array
+  // depending on instantdb's shape for has-one relations; handle both.
+  const excludedPlayerIds =
+    data?.players
+      .filter((p) => {
+        const u = (p as { $user?: unknown }).$user;
+        if (!u) return false;
+        if (Array.isArray(u)) return u.length > 0;
+        return true;
+      })
+      .map((p) => p.id) ?? [];
 
   const createPlayer = async (name: string) => {
     if (!user) throw new Error("No user");
