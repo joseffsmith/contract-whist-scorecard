@@ -284,7 +284,7 @@ export const GameComp = () => {
             right: -20,
             top: -20,
             fontSize: 130,
-            color: `${sColor}22`,
+            color: `${sColor === t.cream ? t.feltDk : sColor}22`,
             lineHeight: 1,
             fontWeight: 700,
           }}
