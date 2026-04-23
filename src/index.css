@@ -6,6 +6,10 @@ body,
   padding: 0;
 }
 
+html {
+  background: #0a2a21;
+}
+
 body {
   background: radial-gradient(ellipse at top, #0f3a2e 0%, #0a2a21 100%);
   color: #f6ebcf;
