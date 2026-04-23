@@ -1,7 +1,7 @@
 import { id } from "@instantdb/react";
 import { enqueueSnackbar } from "notistack";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { db } from "../db";
 import { createGame as createGuestGame, listGames as listGuestGames } from "../guest/guestStore";
 import { useGuestGames } from "../guest/useGuestGame";
@@ -44,7 +44,7 @@ export const UserLogin = () => {
       );
     }
     // signed in + linked + no guest games — redirect out of /login
-    return <RedirectHome />;
+    return <Navigate to="/" replace />;
   }
 
   return (
@@ -142,12 +142,6 @@ const GuestEntry = () => {
       </div>
     </div>
   );
-};
-
-const RedirectHome = () => {
-  const nav = useNavigate();
-  nav("/");
-  return null;
 };
 
 const LoginFrame = ({ children }: { children: React.ReactNode }) => (

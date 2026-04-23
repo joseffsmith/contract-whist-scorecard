@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 import { db } from "../db";
 import { queryHomeGames, queryPlayersWithUserId } from "../queries";
 import { t } from "../theme/tokens";
@@ -6,7 +6,6 @@ import { summarizeGame } from "../utils/gameStatus";
 import { LinkPlayerToMe } from "./UserLogin";
 
 export const UserManager = () => {
-  const nav = useNavigate();
   const { isLoading: isLoadingUser, user } = db.useAuth();
 
   const { data: playerData, isLoading: isLoadingPlayer } = db.useQuery(
@@ -18,8 +17,7 @@ export const UserManager = () => {
     return <div style={{ padding: 20, opacity: 0.6 }}>Loading…</div>;
   }
   if (!user) {
-    nav("/login");
-    return null;
+    return <Navigate to="/login" replace />;
   }
   if (isLoadingPlayer) {
     return <div style={{ padding: 20, opacity: 0.6 }}>Loading…</div>;
