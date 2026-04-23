@@ -35,6 +35,7 @@
     "instant-cli": "^1.0.14",
     "prettier": "^2.2.1",
     "typescript": "5.5.4",
-    "vite": "4.4.11"
+    "vite": "4.4.11",
+    "vite-plugin-pwa": "^1.2.0"
   }
 }
