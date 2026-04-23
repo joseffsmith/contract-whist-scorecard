@@ -1,9 +1,8 @@
-import { Autocomplete, AutocompleteOption, Button } from "@mui/joy";
 import { enqueueSnackbar } from "notistack";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { db } from "../db";
 import { queryAllPlayers } from "../queries";
-import { Player } from "../types";
+import { t } from "../theme/tokens";
 
 export const ChoosePlayerOrCreate = ({
   createPlayer,
@@ -14,103 +13,121 @@ export const ChoosePlayerOrCreate = ({
   choosePlayer: (id: string) => Promise<void>;
   excludedPlayerIds: (string | undefined)[];
 }) => {
-  const {
-    data: allPlayers,
-    isLoading: isLoadingAllPlayers,
-    error: errorPlayers,
-  } = db.useQuery(queryAllPlayers);
+  const { data } = db.useQuery(queryAllPlayers);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
-  const [inputValue, setInputValue] = useState("");
-
-  const handleChange = (
-    event,
-    newValue: Player | null | string,
-    reason,
-    details
-  ) => {
-    if (typeof newValue === "string") {
-      throw Error("Not implemented");
-    }
-    setSelectedPlayer(newValue);
-  };
-
-  const handleAddPlayer = async (type: "new" | "existing") => {
-    if (type === "new") {
-      if (!inputValue.length) {
-        enqueueSnackbar("Name is required", { variant: "error" });
-        return;
-      }
-
-      await createPlayer(inputValue);
-      setInputValue("");
-      setSelectedPlayer(null);
-      return;
-    }
-
-    if (!selectedPlayer) {
-      enqueueSnackbar("Player is required", { variant: "error" });
-      return;
-    }
-    await choosePlayer(selectedPlayer.id);
-    setSelectedPlayer(null);
-  };
-
-  const options =
-    allPlayers?.players
+  const options = useMemo(() => {
+    const q = input.trim().toLowerCase();
+    return (data?.players ?? [])
       .filter((p) => !excludedPlayerIds.includes(p.id))
-      .map(
-        (p) =>
-          ({
-            id: p.id,
-            name: p.name as any,
-          } as Player)
-      ) ?? [];
+      .filter((p) => !q || p.name.toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [data?.players, input, excludedPlayerIds]);
 
-  const hasOptions = !!options.find(
-    (o) => o.name.trim().toLowerCase() === inputValue.trim().toLowerCase()
+  const exact = options.find(
+    (o) => o.name.trim().toLowerCase() === input.trim().toLowerCase()
   );
 
+  const submitNew = async () => {
+    if (!input.trim()) {
+      enqueueSnackbar("Name is required", { variant: "error" });
+      return;
+    }
+    setBusy(true);
+    try {
+      await createPlayer(input.trim());
+      setInput("");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pick = async (id: string) => {
+    setBusy(true);
+    try {
+      await choosePlayer(id);
+      setInput("");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <Autocomplete<Player, false, true, true>
-      sx={{ flexGrow: 1 }}
-      size="md"
-      slotProps={{
-        input: {
-          "data-1p-ignore": true,
-        },
-      }}
-      freeSolo
-      disableClearable
-      handleHomeEndKeys
-      placeholder="Type to create player or choose existing"
-      autoFocus
-      value={selectedPlayer ?? ""}
-      onChange={handleChange}
-      inputValue={inputValue}
-      onInputChange={(event, newInputValue) => {
-        setInputValue(newInputValue);
-      }}
-      endDecorator={
-        !hasOptions && inputValue ? (
-          <Button onClick={() => handleAddPlayer("new")}>Create</Button>
-        ) : selectedPlayer ? (
-          <Button onClick={() => handleAddPlayer("existing")}>Choose</Button>
-        ) : null
-      }
-      isOptionEqualToValue={(o, v) => o.id === v.id}
-      options={options}
-      getOptionLabel={(option) => {
-        if (typeof option === "string") {
-          return option;
-        }
-        return option.name;
-      }}
-      renderOption={(props, option) => (
-        <AutocompleteOption {...props} key={option.id}>
-          {option.name}
-        </AutocompleteOption>
+    <div style={{ width: "100%" }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          padding: 10,
+          borderRadius: 10,
+          background: "rgba(0,0,0,0.25)",
+          border: `1px solid ${t.gold}33`,
+        }}
+      >
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Search or create player"
+          data-1p-ignore
+          style={{
+            flex: 1,
+            background: "transparent",
+            border: "none",
+            outline: "none",
+            color: t.cream,
+            fontSize: 14,
+            padding: "4px 6px",
+          }}
+        />
+        {input.trim() && !exact && (
+          <button
+            onClick={submitNew}
+            disabled={busy}
+            style={{
+              border: `1px solid ${t.gold}`,
+              color: t.gold,
+              background: "transparent",
+              borderRadius: 8,
+              padding: "4px 10px",
+              fontSize: 12,
+              fontFamily: t.display,
+              fontWeight: 600,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+            }}
+          >
+            Create
+          </button>
+        )}
+      </div>
+      {input && options.length > 0 && (
+        <div
+          style={{
+            marginTop: 6,
+            borderRadius: 10,
+            overflow: "hidden",
+            border: `1px solid ${t.gold}22`,
+          }}
+        >
+          {options.map((o) => (
+            <div
+              key={o.id}
+              onClick={() => pick(o.id)}
+              style={{
+                padding: "10px 12px",
+                background: "rgba(0,0,0,0.3)",
+                borderBottom: `1px solid ${t.gold}15`,
+                cursor: "pointer",
+                fontSize: 14,
+                color: t.cream,
+              }}
+            >
+              {o.name}
+            </div>
+          ))}
+        </div>
       )}
-    />
+    </div>
   );
 };

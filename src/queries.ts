@@ -37,7 +37,14 @@ export const queryGameData = (gameId: string) => {
 
 export const queryAllGamesWithPlayers = {
   games: { playersOrders: { player: {} } },
-} satisfies InstaQLParams<AppSchema>;;
+} satisfies InstaQLParams<AppSchema>;
+
+export const queryHomeGames = {
+  games: {
+    playersOrders: { player: {} },
+    rounds: { turns: { player: {} } },
+  },
+} satisfies InstaQLParams<AppSchema>;
 
 export const queryTurnsForGame = (gameId: string) => ({
   turns: {

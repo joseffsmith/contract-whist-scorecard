@@ -6,3 +6,6 @@ dist-ssr
 
 .env*
 .firebase
+
+.claude
+pnpm-lock.yaml

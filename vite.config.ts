@@ -7,5 +7,9 @@ export default defineConfig({
   esbuild: {
     jsxInject: `import * as React from "react"`,
   },
+  css: {
+    // Don't walk up to find a stray postcss.config.js in a parent dir.
+    postcss: { plugins: [] },
+  },
   base: "/contract-whist",
 });

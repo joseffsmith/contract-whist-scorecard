@@ -3,37 +3,24 @@ import { App } from "./components/App";
 import { GameComp } from "./components/Game";
 import { GameList } from "./components/GameList";
 import { GameManager } from "./components/GameManager";
+import { Home } from "./components/Home";
 import { Leaderboard } from "./components/Leaderboard";
 import { UserLogin } from "./components/UserLogin";
 import { UserManager } from "./components/UserManager";
 
 export const router = createBrowserRouter(
   [
+    { path: "/login", element: <UserLogin /> },
     {
       path: "/",
       element: <App />,
       children: [
-        {
-          path: "/login",
-          element: <UserLogin />,
-        },
-        {
-          path: "/user",
-          element: <UserManager />,
-        },
-        {
-          path: "/leaderboard",
-          element: <Leaderboard />,
-        },
-        {
-          path: "/games/:gameId",
-          element: <GameComp />,
-        },
+        { path: "/", element: <Home /> },
+        { path: "/games", element: <GameList /> },
+        { path: "/leaderboard", element: <Leaderboard /> },
+        { path: "/user", element: <UserManager /> },
+        { path: "/games/:gameId", element: <GameComp /> },
         { path: "/games/:gameId/manage", element: <GameManager /> },
-        {
-          path: "/",
-          element: <GameList />,
-        },
       ],
     },
   ],
