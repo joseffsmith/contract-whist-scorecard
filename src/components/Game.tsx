@@ -143,8 +143,9 @@ export const GameComp = () => {
     const dealerIdx = getDealerIdx(round_idx, players.length, initialDealerIdx);
     let player = getCurrentPlayerIdFromRound(round_to_undo, dealerIdx, players);
     if (!player) {
-      const last_player_idx = round_idx % players.length;
-      player = players[last_player_idx]?.id ?? null;
+      // Round is complete — last actor was the dealer. Pick the slot after the
+      // dealer so the player_idx -= 1 below lands on the dealer.
+      player = players[(dealerIdx + 1) % players.length]?.id ?? null;
     }
 
     // get the previous turn idx
@@ -166,7 +167,7 @@ export const GameComp = () => {
     if (turnToUndo?.score !== undefined && turnToUndo.score !== null) {
       const res = await db.transact([
         db.tx.turns[turnToUndo.id].merge({
-          score: undefined,
+          score: null,
         }),
       ]);
       return;
