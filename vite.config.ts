@@ -8,12 +8,7 @@ export default defineConfig({
     reactRefresh(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: [
-        "favicon.ico",
-        "favicon-16x16.png",
-        "favicon-32x32.png",
-        "apple-touch-icon.png",
-      ],
+      includeAssets: ["favicon.ico", "apple-touch-icon.png"],
       manifest: {
         name: "contract-whist-scorecard",
         short_name: "whist",
