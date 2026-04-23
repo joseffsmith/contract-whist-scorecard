@@ -105,7 +105,7 @@ export const GameComp = () => {
       const score = turn?.bid === tricks ? tricks + 10 : tricks;
 
       const res = await db.transact([
-        db.tx.turns[turn!.id].merge({
+        db.tx.turns[turn!.id].update({
           score,
         }),
       ]);
@@ -166,7 +166,7 @@ export const GameComp = () => {
 
     if (turnToUndo?.score !== undefined && turnToUndo.score !== null) {
       const res = await db.transact([
-        db.tx.turns[turnToUndo.id].merge({
+        db.tx.turns[turnToUndo.id].update({
           score: null,
         }),
       ]);
