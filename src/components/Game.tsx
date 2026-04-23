@@ -530,14 +530,26 @@ export const GameComp = () => {
               ? `bid ${currentDeal.num_cards} tricks`
               : `tricks made`}
           </div>
+          {stage === "bid" && bidOptions.some((o) => o.disabled) && (
+            <div
+              style={{
+                fontSize: 10,
+                color: t.cream,
+                opacity: 0.45,
+                textAlign: "center",
+                marginBottom: 8,
+                fontStyle: "italic",
+              }}
+            >
+              Last bidder can't make bids total {currentDeal.num_cards}
+              <span style={{ color: sColor }}>{currentDeal.suit}</span>
+            </div>
+          )}
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: `repeat(${Math.min(
-                bidOptions.length,
-                4
-              )}, 1fr)`,
-              gap: 8,
+              gridTemplateColumns: `repeat(${bidOptions.length}, minmax(0, 1fr))`,
+              gap: 6,
             }}
           >
             {bidOptions.map((opt) => (
@@ -548,7 +560,8 @@ export const GameComp = () => {
                   stage === "bid" ? handleBid(opt) : setTricksMade(opt.number)
                 }
                 style={{
-                  padding: "16px 0",
+                  minWidth: 0,
+                  padding: "14px 0",
                   borderRadius: 10,
                   border: `1.5px solid ${
                     opt.disabled ? t.gold + "30" : t.gold
@@ -558,7 +571,7 @@ export const GameComp = () => {
                     : `linear-gradient(180deg, ${t.gold} 0%, ${t.goldDk} 100%)`,
                   color: opt.disabled ? t.gold + "80" : t.feltDk,
                   fontFamily: t.display,
-                  fontSize: 22,
+                  fontSize: `clamp(16px, 5.5vw, 22px)`,
                   fontWeight: 600,
                   textDecoration: opt.disabled ? "line-through" : "none",
                   boxShadow: opt.disabled
@@ -570,21 +583,6 @@ export const GameComp = () => {
               </button>
             ))}
           </div>
-          {stage === "bid" && bidOptions.some((o) => o.disabled) && (
-            <div
-              style={{
-                fontSize: 10,
-                color: t.cream,
-                opacity: 0.45,
-                textAlign: "center",
-                marginTop: 8,
-                fontStyle: "italic",
-              }}
-            >
-              Last bidder can't make bids total {currentDeal.num_cards}
-              <span style={{ color: sColor }}>{currentDeal.suit}</span>
-            </div>
-          )}
         </div>
       )}
     </>
