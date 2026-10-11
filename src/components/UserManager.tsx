@@ -2,9 +2,16 @@ import { useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { act } from "../lib/dispatch";
 import { useMyPlayer } from "../players/account";
-import { selectHomeGames, sync, useAuth, useSyncView } from "../sync";
-import { alpha, t } from "../theme/tokens";
+import {
+  selectHomeGames,
+  sync,
+  useAuth,
+  usePendingCount,
+  useSyncView,
+} from "../sync";
+import { alpha, goldButton, t } from "../theme/tokens";
 import { summarizeGame } from "../utils/gameStatus";
+import { Sheet } from "./chrome/Sheet";
 import { ThemePicker } from "./chrome/ThemeToggle";
 import { AccountMovedBanner } from "./chrome/AccountMovedBanner";
 import { AlsoYou } from "./AlsoYou";
@@ -15,6 +22,8 @@ export const UserManager = () => {
   const { isLoading: isLoadingUser, user } = useAuth();
   const nav = useNavigate();
   const [passwordOpen, setPasswordOpen] = useState(false);
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const pending = usePendingCount();
 
   const { player: linkedPlayer, isLoading: isLoadingPlayer } = useMyPlayer();
   const { view } = useSyncView();
@@ -68,7 +77,8 @@ export const UserManager = () => {
     await act("unclaimPlayer", { playerId: linkedPlayer.id });
   };
 
-  const logout = () => sync.logOut();
+  // Signing out drops changes that haven't reached the server yet.
+  const logout = () => (pending > 0 ? setConfirmSignOut(true) : sync.logOut());
 
   return (
     <>
@@ -208,6 +218,57 @@ export const UserManager = () => {
         )}
         {passwordOpen && (
           <SetPasswordSheet onClose={() => setPasswordOpen(false)} />
+        )}
+        {confirmSignOut && (
+          <Sheet onClose={() => setConfirmSignOut(false)}>
+            <div
+              style={{
+                fontFamily: t.display,
+                fontSize: 20,
+                fontWeight: 600,
+                color: t.cream,
+                marginBottom: 6,
+              }}
+            >
+              Sign out?
+            </div>
+            <div style={{ fontSize: 13, color: t.cream, opacity: 0.8 }}>
+              You have {pending} change{pending === 1 ? "" : "s"} that haven't
+              synced yet. Signing out will lose them.
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button
+                onClick={() => setConfirmSignOut(false)}
+                style={{
+                  flex: 1,
+                  padding: "12px 0",
+                  borderRadius: 10,
+                  border: `1px solid ${alpha(t.gold, 0.4)}`,
+                  background: "transparent",
+                  color: t.cream,
+                  fontFamily: t.display,
+                  fontSize: 14,
+                  fontWeight: 600,
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => sync.logOut()}
+                style={{
+                  ...goldButton,
+                  flex: 1,
+                  padding: "12px 0",
+                  borderRadius: 10,
+                  fontSize: 14,
+                  background: `linear-gradient(180deg, ${t.red}, #8a2a1e)`,
+                  color: t.cream,
+                }}
+              >
+                Sign out anyway
+              </button>
+            </div>
+          </Sheet>
         )}
         <Row
           label="Players & duplicates"

@@ -5,7 +5,7 @@ import { claimPlayer, useMyPlayer } from "../players/account";
 import { mergePlayers } from "../players/merge";
 import { newId } from "../lib/dispatch";
 import { useGame, useIsOffline } from "../lib/offline";
-import { sync } from "../sync";
+import { sync, useConnectionStatus } from "../sync";
 import { alpha, goldButton, t } from "../theme/tokens";
 import { nextSeatOrder } from "../utils/addExistingPlayerToGame";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
@@ -19,6 +19,7 @@ export const JoinGame = () => {
   const { user, player: me, isLoading: meLoading } = useMyPlayer();
   const { game, isLoading } = useGame(gameId);
   const offline = useIsOffline();
+  const connecting = useConnectionStatus() === "connecting";
   const [busy, setBusy] = useState(false);
   const [notListed, setNotListed] = useState(false);
 
@@ -70,7 +71,9 @@ export const JoinGame = () => {
       </Frame>
     );
   }
-  if (isLoading || meLoading) return <Frame>Loading…</Frame>;
+  if (isLoading || meLoading || (!game && connecting)) {
+    return <Frame>Loading…</Frame>;
+  }
   if (!game || game.deletedAt) {
     return (
       <Frame title="Game not found">

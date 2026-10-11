@@ -12,6 +12,7 @@ import { claimPlayer, useMyPlayer } from "../players/account";
 import { sync, useAuth } from "../sync";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
 import { GuestMigrationDialog } from "./GuestMigrationDialog";
+import { AccountMovedBanner } from "./chrome/AccountMovedBanner";
 import { Shell } from "./chrome/Shell";
 
 // Where to go after signing in, e.g. /login?next=/join/abc.
@@ -68,6 +69,7 @@ export const UserLogin = () => {
 
   return (
     <Shell>
+      <AccountMovedBanner signedIn={false} />
       <LoginFrame
         title={user?.isGuest ? "Keep your games" : "Welcome back"}
         subtitle={
