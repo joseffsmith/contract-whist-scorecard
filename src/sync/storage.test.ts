@@ -86,7 +86,13 @@ describe.each([
     await storage.putPending([entry(1, 7)]);
     await storage.setSession({
       token: "t",
-      user: { id: "u1", email: null, isGuest: true },
+      user: {
+        id: "u1",
+        email: null,
+        isGuest: true,
+        hasPassword: false,
+        passkeyCount: 0,
+      },
     });
     let stored = await storage.load();
     expect(stored.pending.map((e) => [e.id, e.ackVersion])).toEqual([

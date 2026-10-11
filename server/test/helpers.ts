@@ -71,6 +71,8 @@ function makeApi(server: Running, dir: string) {
       token?: string,
       headers?: Record<string, string>
     ) => call("POST", route, body, token, headers),
+    delete: (route: string, body?: unknown, token?: string) =>
+      call("DELETE", route, body, token),
     async guest(): Promise<AuthResponse> {
       return (await call("POST", "/auth/guest", {})).body;
     },

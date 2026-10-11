@@ -10,7 +10,9 @@ rules. Branch: `own-backend`.
   score, add players and reload with no signal. Writes queue and sync later.
 - **Live.** Every phone watching a game sees bids/scores within ~1s online.
 - **No new runtime dependencies** unless agreed. Server uses Node 22
-  built-ins (`node:http`, `node:sqlite`, `node:crypto`). Dev deps available:
+  built-ins (`node:http`, `node:sqlite`, `node:crypto`); agreed exceptions:
+  `@simplewebauthn/server` (passkeys, bundled by esbuild) and
+  `@simplewebauthn/browser` (client). Dev deps available:
   vitest, fake-indexeddb, @types/node, esbuild (via vite), typescript.
 - Small, readable code that matches the repo's style (see `src/`).
 
@@ -112,7 +114,60 @@ every rebase. Ops must not depend on row iteration order (sort ids).
   `bad_credentials` error).
 - `POST /auth/logout` (a guest's claimed players are released first),
   `GET /auth/me` → `{ user }`. `PublicUser.isAdmin` is set for admins.
+  `PublicUser.hasPassword` is true when the account can log in with email and
+  password (it has both); `passkeyCount` is how many passkeys it has.
 - `POST /auth/password {password}` (signed-in, non-guest) → set/change.
+- **Passkeys** (WebAuthn, `@simplewebauthn/server`). Table `passkeys(id =
+  credential id base64url, user_id, public_key, counter, transports,
+  device_type, backed_up, name, created_at, last_used_at)`. Credentials are
+  discoverable (`residentKey: "required"`, `userVerification: "preferred"`,
+  verified without requiring UV), so signing in needs no username. RP name
+  "Whist". Config: `PASSKEY_RP_ID` (default: host of `PUBLIC_URL`) and
+  `PASSKEY_ORIGINS` (comma list; default: origin of `PUBLIC_URL`); the
+  browser's reported origin and RP ID must match. The authenticator's user
+  handle is a random 32-byte `users.webauthn_user_id`, made on first use
+  (never the user id), and checked on sign-in. A user has at most 20 passkeys.
+  - Challenges are kept in memory (single process): random id → challenge,
+    single-use (spent even by a failed attempt), 5-minute expiry, bound to the
+    kind of ceremony and, for registration, to the user; the oldest go first
+    beyond 5000. Every `…/options` answer is `{ challengeId, options }` and the
+    client sends `challengeId` back with the browser's response. A missing,
+    spent or expired id → 400 `challenge_expired`.
+  - `POST /auth/passkey/register/options` (signed in, guest or account) →
+    options. `user.name`/`displayName` = the email, else the name of the
+    user's claimed player, else "Whist player". `excludeCredentials` = the
+    user's passkeys.
+  - `POST /auth/passkey/register/verify {challengeId, response, name?}` →
+    `AuthResponse`. A guest is upgraded in place exactly as signup does it
+    (`is_guest = 0`, id kept so claims stay, email stays null, no password,
+    guest token retired and a new session returned); an account keeps its
+    session. A credential id that already exists (anyone's) → 409
+    `passkey_exists`. Bad attestation → 400 `passkey_failed`.
+  - `POST /auth/passkey/login/options` (no session; empty `allowCredentials`)
+    and `POST /auth/passkey/login/verify {challengeId, response, guestToken?}`
+    → `AuthResponse`. The credential is looked up by id, verified (signature,
+    origin, RP ID, counter) and its counter, `backed_up` and `last_used_at`
+    updated. `guestToken` does the same guest → account handoff as password
+    login (same code). Unknown credential or deleted user → 401
+    `unknown_passkey` "That passkey isn't recognised."; failed verification
+    (including a counter that went backwards) → 401 `passkey_failed`.
+  - `GET /auth/passkeys` → `{ passkeys: [{ id, name, createdAt, lastUsedAt,
+    deviceType, backedUp }] }` (never the key). `DELETE /auth/passkeys/:id`
+    removes one of the caller's; 409 `last_sign_in` if the account would be
+    left with no way in (no email+password and no other passkey).
+  - Rate limits per IP: options 60 and verify 30 per 15 minutes.
+- **Delete account**: `DELETE /auth/me {confirm: "DELETE"}` (signed in; guests
+  too). In one go: the user's claimed players are released through the same
+  `unclaimPlayer` action as a guest logout (so it syncs); sessions, passkeys and
+  reset links are deleted; email, password, guest secret and
+  `webauthn_user_id` are cleared, `is_admin` is dropped and `deleted_at` set.
+  The `users` row stays as a **tombstone**: `POST /auth/guest {id}` for it
+  answers 409 `id_taken`, like any reserved id. Games, scores and players stay
+  (others played in them). A deleted user is treated as non-existent by every
+  auth path: session lookup, email login, passkey login, reset links, signup
+  upgrade. The email can be used for a new, empty account. 10 per IP per 15
+  minutes. If the only admin deletes themselves the role is gone, so
+  `ADMIN_BOOTSTRAP_TOKEN`, if still set, works again.
 - No email sending (no external services). Forgotten passwords: an admin
   creates a set-password link and shares it by hand.
 - Admin: `users.is_admin`. The first admin is made with the secret env
@@ -167,6 +222,15 @@ every rebase. Ops must not depend on row iteration order (sort ids).
   current guest token as `guestToken`), `logOut()`, `setPassword(pw)`,
   `resetPassword(token, pw)`. Logging out keeps the synced data, clears the
   session and pending actions.
+- Passkeys: `registerPasskey(name?)` (upgrades a guest, like `signUp`),
+  `logInWithPasskey()` (pushes the guest's queued work, then sends the guest
+  token, like `logIn`), `listPasskeys()`, `deletePasskey(id)` and
+  `deleteAccount()` (signs out locally and drops unsent changes). The first
+  two resolve `null` when the person dismisses the browser prompt
+  (`NotAllowedError`/`AbortError`): the UI treats that as a quiet no-op. They
+  go through `SyncDeps.passkeys` (`@simplewebauthn/browser`, loaded on first
+  use) so tests can stub the prompt. The UI only offers passkeys when
+  `window.PublicKeyCredential` exists (`passkeysSupported()`).
 - Selectors (`src/sync/selectors.ts`) returning the old query shapes so the
   UI changes little: `selectHomeGames(view)` →
   `{ games: (GameRow & { playersOrders: (SeatRow & { player?: PlayerRow })[];

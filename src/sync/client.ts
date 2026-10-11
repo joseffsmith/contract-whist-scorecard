@@ -18,6 +18,8 @@ import type {
   TableName,
 } from "../../shared/types";
 import { BASE_PATH } from "../lib/paths";
+import { browserPasskeys, isCancelled, passkeyError } from "./passkeys";
+import type { PasskeyApi } from "./passkeys";
 import { createMemoryStorage, openStorage } from "./storage";
 import type {
   PendingEntry,
@@ -41,6 +43,15 @@ export type ConnectionStatus = "connected" | "connecting" | "offline";
 export type StorageHealth = "ok" | "memory" | "failing";
 export type AuthState = { isLoading: boolean; user: PublicUser | null };
 export type ActionRejection = { action: Action; error: string; code: string };
+// One of the account's passkeys, as the server lists them.
+export type PasskeyInfo = {
+  id: string;
+  name: string | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+  deviceType: string | null;
+  backedUp: boolean;
+};
 
 export type NetworkSignal = {
   isOnline(): boolean;
@@ -57,6 +68,7 @@ export type SyncDeps = {
   // A random secret (32 bytes, base64url) for a provisional guest.
   secret: () => string;
   network: NetworkSignal;
+  passkeys: PasskeyApi;
   apiBase: string;
   backoff: { minMs: number; maxMs: number };
   batchSize: number;
@@ -94,6 +106,16 @@ export type SyncClient = {
   signInAsGuest(): Promise<PublicUser>;
   signUp(email: string, password: string): Promise<PublicUser>;
   logIn(email: string, password: string): Promise<PublicUser>;
+  // Make a passkey for the signed-in user; a guest becomes an account. Null
+  // when the person dismisses the prompt.
+  registerPasskey(name?: string): Promise<PublicUser | null>;
+  // Sign in with any passkey on this device (a guest's player moves over, as
+  // with logIn). Null when the person dismisses the prompt.
+  logInWithPasskey(): Promise<PublicUser | null>;
+  listPasskeys(): Promise<PasskeyInfo[]>;
+  deletePasskey(id: string): Promise<void>;
+  // Deletes the account for good, then signs out on this device.
+  deleteAccount(): Promise<void>;
   logOut(): Promise<void>;
   setPassword(password: string): Promise<void>;
   resetPassword(token: string, password: string): Promise<PublicUser>;
@@ -151,6 +173,7 @@ function defaultDeps(): SyncDeps {
     uuid: randomUuid,
     secret: randomSecret,
     network: browserNetwork,
+    passkeys: browserPasskeys,
     apiBase: `${BASE_PATH}/api`,
     backoff: { minMs: 1000, maxMs: 30_000 },
     batchSize: 50,
@@ -564,7 +587,9 @@ export function createSyncClient(
         user.id === checked.user.id &&
         (user.email !== checked.user.email ||
           user.isGuest !== checked.user.isGuest ||
-          !!user.isAdmin !== !!checked.user.isAdmin)
+          !!user.isAdmin !== !!checked.user.isAdmin ||
+          user.hasPassword !== checked.user.hasPassword ||
+          user.passkeyCount !== checked.user.passkeyCount)
       ) {
         session = { token: checked.token, user };
         saveSession(session);
@@ -1018,23 +1043,87 @@ export function createSyncClient(
     await saved;
   }
 
+  // The guest session to hand over when signing in as someone else. Its
+  // queued work goes up under the guest before we leave it. If it can't, stay
+  // a guest rather than lose it.
+  async function guestToHandOver() {
+    const guest = session?.user.isGuest ? session : null;
+    if (guest && unacked().length) {
+      await push();
+      if (unacked().length) throw new SyncError(UNSYNCED_MESSAGE, "unsynced");
+    }
+    return guest;
+  }
+
   async function logIn(email: string, password: string) {
     await ensureReal();
     if (!deps.network.isOnline())
       throw new SyncError(OFFLINE_MESSAGE, "offline");
-    const guest = session?.user.isGuest ? session : null;
-    if (guest && unacked().length) {
-      // The guest's queued work goes up under the guest before we leave it.
-      // If it can't, stay a guest rather than lose it.
-      await push();
-      if (unacked().length) throw new SyncError(UNSYNCED_MESSAGE, "unsynced");
-    }
+    const guest = await guestToHandOver();
     return adopt(
       await authRequest("/auth/login", {
         email,
         password,
         guestToken: guest?.token ?? undefined,
       })
+    );
+  }
+
+  // Shows the browser's passkey prompt. Null when it is dismissed.
+  async function prompt<T>(ask: () => Promise<T>): Promise<T | null> {
+    try {
+      return await ask();
+    } catch (error) {
+      if (isCancelled(error)) return null;
+      throw passkeyError(error);
+    }
+  }
+
+  // What the server sends before a passkey prompt.
+  type Ceremony<T> = { challengeId: string; options: T };
+  const isCeremony = (json: any) =>
+    typeof json.challengeId === "string" &&
+    typeof json.options === "object" &&
+    json.options !== null;
+
+  async function logInWithPasskey() {
+    await ensureReal();
+    if (!deps.network.isOnline())
+      throw new SyncError(OFFLINE_MESSAGE, "offline");
+    const guest = await guestToHandOver();
+    const { challengeId, options } = await authRequest<
+      Ceremony<Parameters<PasskeyApi["get"]>[0]>
+    >("/auth/passkey/login/options", {}, undefined, isCeremony);
+    const response = await prompt(() => deps.passkeys.get(options));
+    if (!response) return null;
+    return adopt(
+      await authRequest("/auth/passkey/login/verify", {
+        challengeId,
+        response,
+        guestToken: guest?.token ?? undefined,
+      })
+    );
+  }
+
+  async function registerPasskey(name?: string) {
+    await ensureReal();
+    const asked = session;
+    if (!asked?.token) throw new SyncError("Sign in first.", "not_signed_in");
+    const { challengeId, options } = await authRequest<
+      Ceremony<Parameters<PasskeyApi["create"]>[0]>
+    >("/auth/passkey/register/options", {}, asked.token, isCeremony);
+    const response = await prompt(() => deps.passkeys.create(options));
+    if (!response) return null;
+    // The prompt can stay open a long time.
+    if (session?.token !== asked.token) {
+      throw new SyncError("You signed out. Try again.", "not_signed_in");
+    }
+    return adopt(
+      await authRequest(
+        "/auth/passkey/register/verify",
+        { challengeId, response, name },
+        asked.token
+      )
     );
   }
 
@@ -1078,7 +1167,13 @@ export function createSyncClient(
       }
       // No signal on first use: carry on as a guest that exists only here
       // until we can register it.
-      const user: PublicUser = { id: deps.uuid(), email: null, isGuest: true };
+      const user: PublicUser = {
+        id: deps.uuid(),
+        email: null,
+        isGuest: true,
+        hasPassword: false,
+        passkeyCount: 0,
+      };
       setSession({
         token: null,
         user,
@@ -1107,6 +1202,43 @@ export function createSyncClient(
       if (token && deps.network.isOnline()) {
         transport.post("/auth/logout", {}, token).catch(() => {});
       }
+    },
+    registerPasskey,
+    logInWithPasskey,
+    async listPasskeys() {
+      await begin();
+      if (!session?.token)
+        throw new SyncError("Sign in first.", "not_signed_in");
+      const { passkeys } = await transport.get<{ passkeys?: PasskeyInfo[] }>(
+        "/auth/passkeys",
+        session.token
+      );
+      return passkeys ?? [];
+    },
+    async deletePasskey(id) {
+      await begin();
+      const asked = session;
+      if (!asked?.token) throw new SyncError("Sign in first.", "not_signed_in");
+      await transport.delete(
+        `/auth/passkeys/${encodeURIComponent(id)}`,
+        asked.token
+      );
+      // The passkey count is part of the user.
+      await checkSession();
+    },
+    async deleteAccount() {
+      await begin();
+      const asked = session;
+      if (!asked?.token) throw new SyncError("Sign in first.", "not_signed_in");
+      if (!deps.network.isOnline())
+        throw new SyncError(OFFLINE_MESSAGE, "offline");
+      await transport.delete("/auth/me", asked.token, { confirm: "DELETE" });
+      if (session?.token !== asked.token) return;
+      dropPending(() => true, {
+        code: "signed_out",
+        error: "You deleted your account before this change was saved.",
+      });
+      setSession(null);
     },
     async setPassword(password) {
       await begin();

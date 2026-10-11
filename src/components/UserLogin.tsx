@@ -1,11 +1,12 @@
 import { enqueueSnackbar } from "notistack";
 import { useEffect, useState } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
+import { deviceName } from "../lib/deviceName";
 import { newId } from "../lib/dispatch";
 import { alpha, goldButton, t } from "../theme/tokens";
 import { useGuestGames } from "../guest/useGuestGame";
 import { claimPlayer, useMyPlayer } from "../players/account";
-import { sync, useAuth } from "../sync";
+import { passkeysSupported, sync, useAuth } from "../sync";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
 import { AccountMovedBanner } from "./chrome/AccountMovedBanner";
 import { Shell } from "./chrome/Shell";
@@ -61,11 +62,20 @@ export const UserLogin = () => {
         title={user?.isGuest ? "Keep your games" : "Welcome back"}
         subtitle={
           user?.isGuest
-            ? "Add an email to keep your player on any phone."
+            ? passkeysSupported()
+              ? "Create a passkey to keep your player on any phone."
+              : "Add an email to keep your player on any phone."
             : "Log in, or create an account in seconds."
         }
       >
-        <PasswordStep onSignedIn={() => setSettling(true)} />
+        {passkeysSupported() ? (
+          <>
+            <PasskeyEntry onSignedIn={() => setSettling(true)} />
+            <EmailEntry onSignedIn={() => setSettling(true)} />
+          </>
+        ) : (
+          <PasswordStep onSignedIn={() => setSettling(true)} />
+        )}
         {!user && <GuestEntry onStart={() => setPlayingAsGuest(true)} />}
         {!user && localGames.length > 0 && (
           <div
@@ -86,6 +96,126 @@ export const UserLogin = () => {
         )}
       </LoginFrame>
     </Shell>
+  );
+};
+
+const showError = (e: Error) =>
+  enqueueSnackbar(e.message, { variant: "error" });
+
+// Sign in with a passkey, or make an account with one. Dismissing the
+// browser's prompt just leaves things as they were.
+const PasskeyEntry = ({ onSignedIn }: { onSignedIn: () => void }) => {
+  const { user } = useAuth();
+  const [busy, setBusy] = useState(false);
+
+  const signIn = async () => {
+    setBusy(true);
+    try {
+      if (await sync.logInWithPasskey()) onSignedIn();
+    } catch (e) {
+      showError(e as Error);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // A passkey upgrades the signed-in guest, so there has to be one.
+  const create = async () => {
+    setBusy(true);
+    const madeGuest = !user;
+    let done = false;
+    try {
+      if (madeGuest) await sync.signInAsGuest();
+      done = !!(await sync.registerPasskey(deviceName()));
+      if (done) onSignedIn();
+    } catch (e) {
+      showError(e as Error);
+    } finally {
+      // Don't leave a stray guest behind if no account came of it.
+      if (madeGuest && !done) await sync.logOut().catch(() => {});
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <button
+        onClick={signIn}
+        disabled={busy}
+        style={{
+          ...goldButton,
+          width: "100%",
+          padding: "16px 0",
+          borderRadius: 12,
+          fontSize: 16,
+          opacity: busy ? 0.5 : 1,
+        }}
+      >
+        {busy ? "…" : "Continue with a passkey"}
+      </button>
+      <button
+        onClick={create}
+        disabled={busy}
+        style={{
+          width: "100%",
+          marginTop: 8,
+          padding: "13px 0",
+          borderRadius: 12,
+          border: `1px solid ${alpha(t.gold, 0.4)}`,
+          background: "transparent",
+          color: t.cream,
+          fontFamily: t.display,
+          fontSize: 15,
+          fontWeight: 600,
+          opacity: busy ? 0.6 : 1,
+        }}
+      >
+        Create an account with a passkey
+      </button>
+      <div
+        style={{
+          fontSize: 12,
+          color: t.cream,
+          opacity: 0.55,
+          marginTop: 10,
+          textAlign: "center",
+          lineHeight: 1.4,
+        }}
+      >
+        Uses Face ID, your fingerprint or your screen lock. No password to
+        remember.
+      </div>
+    </div>
+  );
+};
+
+// Email and password, a step down from passkeys: tucked behind a button
+// unless a link asked for the form (/login?mode=signup).
+const EmailEntry = ({ onSignedIn }: { onSignedIn: () => void }) => {
+  const [params] = useSearchParams();
+  const [open, setOpen] = useState(params.has("mode"));
+  return (
+    <div style={{ marginTop: 18 }}>
+      {!open ? (
+        <button
+          onClick={() => setOpen(true)}
+          style={{
+            display: "block",
+            margin: "0 auto",
+            padding: "6px 8px",
+            background: "transparent",
+            border: "none",
+            color: t.gold,
+            fontSize: 13,
+            fontWeight: 600,
+          }}
+        >
+          Use email and password instead
+        </button>
+      ) : (
+        <PasswordStep onSignedIn={onSignedIn} />
+      )}
+    </div>
   );
 };
 
@@ -487,9 +617,6 @@ const PasswordStep = ({ onSignedIn }: { onSignedIn: () => void }) => {
     </form>
   );
 };
-
-const showError = (e: Error) =>
-  enqueueSnackbar(e.message, { variant: "error" });
 
 export const LinkPlayerToMe = () => {
   const createPlayer = async (name: string) => {

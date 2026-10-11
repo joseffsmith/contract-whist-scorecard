@@ -35,6 +35,7 @@ export interface Transport {
     token?: string,
     validate?: (json: any) => boolean
   ): Promise<T>;
+  delete<T>(path: string, token?: string, body?: unknown): Promise<T>;
   openStream(
     since: number,
     onChangeSet: (changes: ChangeSet) => void,
@@ -157,6 +158,7 @@ export function createTransport(options: TransportOptions): Transport {
     get: (path, token) => request("GET", path, { token }),
     post: (path, body, token, validate) =>
       request("POST", path, { body, token, validate }),
+    delete: (path, token, body) => request("DELETE", path, { body, token }),
     openStream(since, onChangeSet, onStatus) {
       const controller = new AbortController();
       let closed = false;

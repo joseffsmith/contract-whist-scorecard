@@ -1,6 +1,7 @@
 export { sync, createSyncClient, isConfirmed } from "./client";
 export type {
   ActionRejection,
+  PasskeyInfo,
   AuthState,
   ConnectionStatus,
   NetworkSignal,
@@ -22,6 +23,7 @@ export {
   selectPlayersByClaim,
 } from "./selectors";
 export type { HomeGame, HomeGames } from "./selectors";
+export { passkeysSupported } from "./passkeys";
 export { openStorage } from "./storage";
 export type { SyncStorage } from "./storage";
 export { OFFLINE_MESSAGE, SyncError, isNetworkError } from "./transport";

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { accountLabel, useMyPlayer } from "../players/account";
 import { sync, useAuth } from "../sync";
 import { alpha, goldButton, t } from "../theme/tokens";
 import { Shell } from "./chrome/Shell";
@@ -28,6 +29,7 @@ const store = (token: string | null) => {
 export const AdminSetup = () => {
   const { hash } = useLocation();
   const { user, isLoading } = useAuth();
+  const { player } = useMyPlayer();
   const [token, setToken] = useState(
     () => hash.replace(/^#/, "") || readStored()
   );
@@ -78,7 +80,7 @@ export const AdminSetup = () => {
   } else if (!user || user.isGuest) {
     body = (
       <Note>
-        Sign in with your email account first.
+        Sign in with your account first.
         <LinkButton to="/login?next=/admin">Sign in</LinkButton>
       </Note>
     );
@@ -86,7 +88,7 @@ export const AdminSetup = () => {
     body = (
       <>
         <Note>
-          Signed in as <b>{user.email}</b>.
+          Signed in as <b>{accountLabel(user, player?.name)}</b>.
         </Note>
         <button
           onClick={claim}

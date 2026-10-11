@@ -119,6 +119,20 @@ const MIGRATIONS = [
     SELECT DISTINCT "claimedBy", 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now') FROM players
     WHERE "claimedBy" IS NOT NULL AND "claimedBy" != '';
   `,
+  `
+  -- Passkeys (WebAuthn). id is the credential id, base64url.
+  CREATE TABLE passkeys (
+    id TEXT NOT NULL PRIMARY KEY, user_id TEXT NOT NULL, public_key BLOB NOT NULL,
+    counter INTEGER NOT NULL, transports TEXT, device_type TEXT, backed_up INTEGER,
+    name TEXT, created_at TEXT NOT NULL, last_used_at TEXT
+  );
+  CREATE INDEX passkeys_user_id ON passkeys (user_id);
+  -- The random handle authenticators know the user by (never the user id).
+  ALTER TABLE users ADD COLUMN webauthn_user_id TEXT;
+  CREATE UNIQUE INDEX users_webauthn_user_id ON users (webauthn_user_id);
+  -- A deleted account stays as a tombstone, so its id can't be registered again.
+  ALTER TABLE users ADD COLUMN deleted_at TEXT;
+  `,
 ];
 
 function migrate(sql: DatabaseSync): void {

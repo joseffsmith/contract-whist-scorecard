@@ -15,6 +15,8 @@ export type ServerOptions = {
   publicUrl?: string;
   host?: string;
   adminBootstrapToken?: string; // POST /auth/claim-admin; the first admin only
+  passkeyRpId?: string; // default: the host of publicUrl
+  passkeyOrigins?: string[]; // default: the origin of publicUrl
   importToken?: string; // enables POST /admin/import (one-off migration)
   trustProxyHops?: number; // proxies in front (default 1); see README
   backupDays?: number; // copies of the database to keep (default 14, 0 = off)
@@ -30,7 +32,13 @@ const PUSH_MAX_BYTES = 256 * 1024;
 const IMPORT_MAX_BYTES = 20 * 1024 * 1024;
 const STREAMED = Symbol("streamed");
 
-type Ctx = { req: IncomingMessage; res: ServerResponse; url: URL; ip: string };
+type Ctx = {
+  req: IncomingMessage;
+  res: ServerResponse;
+  url: URL;
+  ip: string;
+  id: string; // the last path segment of a ".../:id" route
+};
 
 const sameSecret = (a: string, b: string) =>
   timingSafeEqual(
@@ -42,9 +50,26 @@ export async function startServer(opts: ServerOptions) {
   const db = openDb(opts.dataDir);
   const limiter = createLimiter();
   const sync = createSync(db, limiter, opts);
+  const publicUrl = opts.publicUrl || DEFAULT_PUBLIC_URL;
+  // Passkeys default to this site's host and origin.
+  let site: URL;
+  try {
+    site = new URL(publicUrl);
+  } catch {
+    throw new Error(
+      "PUBLIC_URL must be a full URL, like https://example.com/contract-whist."
+    );
+  }
   const auth = createAuth(db, sync, limiter, {
     adminBootstrapToken: opts.adminBootstrapToken || undefined,
-    publicUrl: opts.publicUrl || DEFAULT_PUBLIC_URL,
+    publicUrl,
+    passkey: {
+      rpID: opts.passkeyRpId || site.hostname,
+      origins: opts.passkeyOrigins?.length
+        ? opts.passkeyOrigins
+        : [site.origin],
+    },
+    now: opts.now,
   });
 
   const backups = createBackups(db, {
@@ -90,7 +115,18 @@ export async function startServer(opts: ServerOptions) {
     "POST /auth/login": (c) => auth.login(c.req, c.ip),
     "POST /auth/logout": (c) => auth.logout(c.req),
     "GET /auth/me": (c) => auth.me(c.req),
+    "DELETE /auth/me": (c) => auth.deleteAccount(c.req, c.ip),
     "POST /auth/password": (c) => auth.password(c.req, c.ip),
+    "POST /auth/passkey/register/options": (c) =>
+      auth.passkeyRegisterOptions(c.req, c.ip),
+    "POST /auth/passkey/register/verify": (c) =>
+      auth.passkeyRegisterVerify(c.req, c.ip),
+    "POST /auth/passkey/login/options": (c) =>
+      auth.passkeyLoginOptions(c.req, c.ip),
+    "POST /auth/passkey/login/verify": (c) =>
+      auth.passkeyLoginVerify(c.req, c.ip),
+    "GET /auth/passkeys": (c) => auth.passkeys(c.req),
+    "DELETE /auth/passkeys/:id": (c) => auth.deletePasskey(c.req, c.ip, c.id),
     "POST /auth/claim-admin": (c) => auth.claimAdmin(c.req, c.ip),
     "POST /auth/reset-link": (c) => auth.resetLink(c.req),
     "POST /auth/reset": (c) => auth.reset(c.req, c.ip),
@@ -125,13 +161,26 @@ export async function startServer(opts: ServerOptions) {
         throw new HttpError(400, "Bad request.", "bad_request");
       }
       const path = url.pathname.replace(/\/+$/, "") || "/";
-      const handler = routes[`${req.method} ${path}`];
+      let handler: ((c: Ctx) => unknown) | undefined =
+        routes[`${req.method} ${path}`];
+      let id = "";
+      if (!handler) {
+        // Routes with an id in the last segment: "/auth/passkeys/<id>".
+        const m = /^(\/auth\/passkeys)\/([^/]+)$/.exec(path);
+        handler = m ? routes[`${req.method} ${m[1]}/:id`] : undefined;
+        try {
+          id = m ? decodeURIComponent(m[2]) : "";
+        } catch {
+          handler = undefined;
+        }
+      }
       if (!handler) throw new HttpError(404, "Not found.", "not_found");
       const result = await handler({
         req,
         res,
         url,
         ip: clientIp(req, opts.trustProxyHops ?? 1),
+        id,
       });
       if (result !== STREAMED) send(res, 200, result);
     } catch (e) {

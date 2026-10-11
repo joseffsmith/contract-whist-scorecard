@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { act } from "../lib/dispatch";
-import { useMyPlayer } from "../players/account";
+import { accountLabel, useMyPlayer } from "../players/account";
 import {
+  passkeysSupported,
   selectHomeGames,
   sync,
   useAuth,
@@ -15,6 +16,8 @@ import { Sheet } from "./chrome/Sheet";
 import { ThemePicker } from "./chrome/ThemeToggle";
 import { AccountMovedBanner } from "./chrome/AccountMovedBanner";
 import { AlsoYou } from "./AlsoYou";
+import { DeleteAccountSheet } from "./DeleteAccountSheet";
+import { GuestPasskeyPrompt, PasskeysCard } from "./PasskeysCard";
 import { SetPasswordSheet } from "./SetPasswordSheet";
 import { LinkPlayerToMe } from "./UserLogin";
 
@@ -23,6 +26,7 @@ export const UserManager = () => {
   const nav = useNavigate();
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const pending = usePendingCount();
 
   const { player: linkedPlayer, isLoading: isLoadingPlayer } = useMyPlayer();
@@ -121,33 +125,36 @@ export const UserManager = () => {
               {linkedPlayer.name}
             </div>
             <div style={{ fontSize: 12, color: t.cream, opacity: 0.55 }}>
-              {user.email ?? "Guest · this phone only"}
+              {user.isGuest ? "Guest · this phone only" : accountLabel(user)}
             </div>
           </div>
         </div>
 
-        {user.isGuest && (
-          <div
-            style={{
-              padding: 14,
-              borderRadius: 12,
-              border: `1px solid ${alpha(t.gold, 0.33)}`,
-              marginBottom: 14,
-              fontSize: 13,
-              color: t.cream,
-              lineHeight: 1.45,
-            }}
-          >
-            This phone remembers you without an account.{" "}
-            <Link
-              to="/login?next=/user"
-              style={{ color: t.gold, fontWeight: 600 }}
+        {user.isGuest &&
+          (passkeysSupported() ? (
+            <GuestPasskeyPrompt />
+          ) : (
+            <div
+              style={{
+                padding: 14,
+                borderRadius: 12,
+                border: `1px solid ${alpha(t.gold, 0.33)}`,
+                marginBottom: 14,
+                fontSize: 13,
+                color: t.cream,
+                lineHeight: 1.45,
+              }}
             >
-              Add your email
-            </Link>{" "}
-            to keep your games on any phone.
-          </div>
-        )}
+              This phone remembers you without an account.{" "}
+              <Link
+                to="/login?next=/user"
+                style={{ color: t.gold, fontWeight: 600 }}
+              >
+                Add your email
+              </Link>{" "}
+              to keep your games on any phone.
+            </div>
+          ))}
 
         <AlsoYou playerId={linkedPlayer.id} />
 
@@ -209,9 +216,12 @@ export const UserManager = () => {
           <ThemePicker />
         </div>
 
-        {!user.isGuest && (
+        <PasskeysCard />
+
+        {/* A password only works together with an email. */}
+        {!user.isGuest && user.email && (
           <Row
-            label="Change password"
+            label={user.hasPassword ? "Change password" : "Set a password"}
             sub="Used to log in on other phones"
             onClick={() => setPasswordOpen(true)}
           />
@@ -295,6 +305,60 @@ export const UserManager = () => {
           onClick={logout}
           danger
         />
+        {!user.isGuest && (
+          <div
+            style={{
+              marginTop: 18,
+              padding: 14,
+              borderRadius: 12,
+              border: `1px solid ${alpha(t.red, 0.5)}`,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 10,
+                color: t.red,
+                letterSpacing: "0.2em",
+                textTransform: "uppercase",
+                fontWeight: 700,
+                marginBottom: 6,
+              }}
+            >
+              Danger zone
+            </div>
+            <div
+              style={{
+                fontSize: 12,
+                color: t.cream,
+                opacity: 0.65,
+                lineHeight: 1.4,
+              }}
+            >
+              Delete your account and sign out everywhere. Your games and scores
+              stay for the people you played with.
+            </div>
+            <button
+              onClick={() => setDeleteOpen(true)}
+              style={{
+                width: "100%",
+                marginTop: 10,
+                padding: "12px 0",
+                borderRadius: 10,
+                border: `1px solid ${alpha(t.red, 0.6)}`,
+                background: "transparent",
+                color: t.red,
+                fontFamily: t.display,
+                fontSize: 14,
+                fontWeight: 600,
+              }}
+            >
+              Delete account
+            </button>
+          </div>
+        )}
+        {deleteOpen && (
+          <DeleteAccountSheet onClose={() => setDeleteOpen(false)} />
+        )}
       </div>
     </>
   );

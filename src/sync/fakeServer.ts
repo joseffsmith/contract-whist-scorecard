@@ -40,6 +40,9 @@ export function createFakeServer() {
   let userCounter = 0;
   const knownIds = new Set<string>();
   const guestSecrets = new Map<string, string>();
+  // credential id -> owner, for the passkey endpoints
+  const passkeys = new Map<string, { userId: string; name: string | null }>();
+  let challengeCounter = 0;
 
   const server = {
     data,
@@ -92,10 +95,23 @@ export function createFakeServer() {
     },
 
     addAccount(email: string, password: string, isGuest = false): PublicUser {
-      const account = { id: `u-${++userCounter}`, email, isGuest, password };
+      const account = {
+        id: `u-${++userCounter}`,
+        email,
+        isGuest,
+        hasPassword: !isGuest,
+        passkeyCount: 0,
+        password,
+      };
       knownIds.add(account.id);
       accounts.push(account);
-      return { id: account.id, email, isGuest };
+      return {
+        id: account.id,
+        email,
+        isGuest,
+        hasPassword: !isGuest,
+        passkeyCount: 0,
+      };
     },
 
     tokenFor(user: PublicUser) {
@@ -182,7 +198,14 @@ export function createFakeServer() {
         server.streamOpens += 1;
         return openStream(Number(url.searchParams.get("since")), init?.signal);
       }
-      return handle(path, url, body, auth, String(init?.body ?? "").length);
+      return handle(
+        method,
+        path,
+        url,
+        body,
+        auth,
+        String(init?.body ?? "").length
+      );
     }) as typeof fetch,
   };
 
@@ -195,6 +218,7 @@ export function createFakeServer() {
     json(status, { error, code });
 
   function handle(
+    method: string,
     path: string,
     url: URL,
     body: any,
@@ -202,6 +226,16 @@ export function createFakeServer() {
     size = 0
   ): Response {
     const user = token ? tokens.get(token) : undefined;
+    const countPasskeys = (userId: string) =>
+      [...passkeys.values()].filter((p) => p.userId === userId).length;
+    if (method === "DELETE" && path.startsWith("/auth/passkeys/")) {
+      if (!user) return fail(401, "Sign in to do that.", "not_signed_in");
+      const id = decodeURIComponent(path.slice("/auth/passkeys/".length));
+      if (passkeys.get(id)?.userId !== user.id)
+        return fail(404, "No such passkey.", "not_found");
+      passkeys.delete(id);
+      return json(200, { ok: true });
+    }
     switch (path) {
       case "/sync/pull":
         server.pullCount += 1;
@@ -273,7 +307,13 @@ export function createFakeServer() {
             guestSecrets.set(id, body.secret);
         }
         knownIds.add(id);
-        const guest = { id, email: null, isGuest: true };
+        const guest = {
+          id,
+          email: null,
+          isGuest: true,
+          hasPassword: false,
+          passkeyCount: 0,
+        };
         const token = server.tokenFor(guest);
         if (server.loseNextGuestResponse) {
           server.loseNextGuestResponse = false;
@@ -294,6 +334,8 @@ export function createFakeServer() {
             id: user.id,
             email: body.email as string,
             isGuest: false,
+            hasPassword: true,
+            passkeyCount: 0,
           };
           tokens.set(token!, upgraded);
           accounts.push({ ...upgraded, password: body.password });
@@ -312,14 +354,29 @@ export function createFakeServer() {
           id: account.id,
           email: account.email,
           isGuest: false,
+          hasPassword: true,
+          passkeyCount: countPasskeys(account.id),
           ...(account.isAdmin ? { isAdmin: true } : {}),
         };
         return json(200, { token: server.tokenFor(loggedIn), user: loggedIn });
       }
       case "/auth/me":
-        return user
-          ? json(200, { user })
-          : fail(401, "Sign in to do that.", "not_signed_in");
+        if (!user) return fail(401, "Sign in to do that.", "not_signed_in");
+        if (method === "DELETE") {
+          if (body?.confirm !== "DELETE")
+            return fail(400, "Type DELETE to confirm.", "confirm_required");
+          for (const [t, u] of [...tokens])
+            if (u.id === user.id) tokens.delete(t);
+          for (const [id, p] of [...passkeys]) {
+            if (p.userId === user.id) passkeys.delete(id);
+          }
+          const at = accounts.findIndex((a) => a.id === user.id);
+          if (at >= 0) accounts.splice(at, 1);
+          return json(200, { ok: true });
+        }
+        return json(200, {
+          user: { ...user, passkeyCount: countPasskeys(user.id) },
+        });
       case "/auth/claim-admin":
         if (!user) return fail(401, "Sign in to do that.", "not_signed_in");
         if (user.isGuest) return fail(403, "Create an account first.", "guest");
@@ -334,6 +391,63 @@ export function createFakeServer() {
         return user
           ? json(200, { ok: true })
           : fail(401, "Sign in to do that.", "not_signed_in");
+      case "/auth/passkey/register/options":
+        if (!user) return fail(401, "Sign in to do that.", "not_signed_in");
+        return json(200, {
+          challengeId: `c-${++challengeCounter}`,
+          options: { challenge: "x", user: { id: "h", name: "n" } },
+        });
+      case "/auth/passkey/register/verify": {
+        if (!user) return fail(401, "Sign in to do that.", "not_signed_in");
+        passkeys.set(body.response.id, {
+          userId: user.id,
+          name: body.name ?? null,
+        });
+        // A guest becomes an account, keeping the id (and the session here).
+        const owner = {
+          ...user,
+          isGuest: false,
+          passkeyCount: countPasskeys(user.id),
+        };
+        tokens.set(token!, owner);
+        if (!accounts.some((a) => a.id === owner.id)) accounts.push(owner);
+        return json(200, { token: token!, user: owner });
+      }
+      case "/auth/passkey/login/options":
+        return json(200, {
+          challengeId: `c-${++challengeCounter}`,
+          options: { challenge: "x" },
+        });
+      case "/auth/passkey/login/verify": {
+        const found = passkeys.get(body.response?.id);
+        const account = accounts.find((a) => a.id === found?.userId);
+        if (!account) {
+          return fail(401, "That passkey isn't recognised.", "unknown_passkey");
+        }
+        const loggedIn = {
+          id: account.id,
+          email: account.email,
+          isGuest: false,
+          hasPassword: !!account.password,
+          passkeyCount: countPasskeys(account.id),
+        };
+        return json(200, { token: server.tokenFor(loggedIn), user: loggedIn });
+      }
+      case "/auth/passkeys":
+        if (!user) return fail(401, "Sign in to do that.", "not_signed_in");
+        return json(200, {
+          passkeys: [...passkeys]
+            .filter(([, p]) => p.userId === user.id)
+            .map(([id, p]) => ({
+              id,
+              name: p.name,
+              createdAt: "2026-01-01T00:00:00.000Z",
+              lastUsedAt: null,
+              deviceType: "multiDevice",
+              backedUp: true,
+            })),
+        });
+
       default:
         return fail(404, "Not found", "not_found");
     }

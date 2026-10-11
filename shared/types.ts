@@ -175,6 +175,8 @@ export type PublicUser = {
   email: string | null;
   isGuest: boolean;
   isAdmin?: boolean; // can create password reset links
+  hasPassword: boolean; // can log in with email + password
+  passkeyCount: number;
 };
 
 // ── HTTP API payloads (prefix /contract-whist/api) ──────────────────────

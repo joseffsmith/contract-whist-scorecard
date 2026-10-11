@@ -2,8 +2,8 @@
 # nginx serves the Vite build at /contract-whist/ on port 80 and proxies
 # /contract-whist/api/ to the Node server (server/src, SQLite in /data).
 # Mount a persistent volume at /data. Environment variables (PUBLIC_URL,
-# ADMIN_BOOTSTRAP_TOKEN, IMPORT_TOKEN, TRUST_PROXY_HOPS) are in the README,
-# "Deploying (Coolify)".
+# PASSKEY_RP_ID, PASSKEY_ORIGINS, ADMIN_BOOTSTRAP_TOKEN, IMPORT_TOKEN,
+# TRUST_PROXY_HOPS) are in the README, "Deploying (Coolify)".
 
 FROM node:22-alpine AS build
 WORKDIR /app

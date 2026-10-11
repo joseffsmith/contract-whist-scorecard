@@ -484,6 +484,8 @@ describe("auth", () => {
       id: guest.id,
       email: "ann@example.com",
       isGuest: false,
+      hasPassword: true,
+      passkeyCount: 0,
     });
     expect(client.getAuth().user).toEqual(user);
     expect(client.getPendingCount()).toBe(1);
@@ -593,6 +595,185 @@ describe("auth", () => {
     await client.logIn("ann@example.com", "secret123");
     await synced(client);
     expect(server.data.players.has("p1")).toBe(true);
+  });
+});
+
+// A browser that answers passkey prompts with a fixed credential id, or
+// dismisses them.
+function fakePasskeys(id = "cred-1") {
+  const prompts = { create: 0, get: 0 };
+  const api = {
+    dismiss: false,
+    create: async () => {
+      prompts.create += 1;
+      if (api.dismiss)
+        throw Object.assign(new Error("x"), { name: "NotAllowedError" });
+      return { id } as never;
+    },
+    get: async () => {
+      prompts.get += 1;
+      if (api.dismiss)
+        throw Object.assign(new Error("x"), { name: "NotAllowedError" });
+      return { id } as never;
+    },
+  };
+  return { api, prompts };
+}
+
+describe("passkeys", () => {
+  it("turns a guest into an account with a passkey, keeping queued work", async () => {
+    const { api } = fakePasskeys();
+    const client = await signedInClient({ deps: { passkeys: api } });
+    const guest = client.getAuth().user!;
+    server.blockPush = true;
+    await client.dispatch("createPlayer", { playerId: "p1", name: "Ann" });
+
+    const user = await client.registerPasskey("My iPhone");
+    expect(user).toEqual({
+      id: guest.id,
+      email: null,
+      isGuest: false,
+      hasPassword: false,
+      passkeyCount: 1,
+    });
+    expect(client.getAuth().user).toEqual(user);
+    const sent = server.requests.find(
+      (r) => r.path === "/auth/passkey/register/verify"
+    )!;
+    expect(sent.body).toMatchObject({
+      challengeId: "c-1",
+      response: { id: "cred-1" },
+      name: "My iPhone",
+    });
+    expect(client.getPendingCount()).toBe(1);
+    server.blockPush = false;
+    await synced(client);
+    expect(server.data.players.has("p1")).toBe(true);
+    expect(await client.listPasskeys()).toMatchObject([
+      { id: "cred-1", name: "My iPhone" },
+    ]);
+  });
+
+  it("does nothing, quietly, when the prompt is dismissed", async () => {
+    const { api, prompts } = fakePasskeys();
+    api.dismiss = true;
+    const client = await signedInClient({ deps: { passkeys: api } });
+    const guest = client.getAuth().user;
+    expect(await client.registerPasskey()).toBeNull();
+    expect(await client.logInWithPasskey()).toBeNull();
+    expect(prompts).toEqual({ create: 1, get: 1 });
+    expect(client.getAuth().user).toEqual(guest);
+    expect(server.requests.some((r) => r.path.endsWith("/verify"))).toBe(false);
+  });
+
+  it("reports other prompt failures in plain words", async () => {
+    const { api } = fakePasskeys();
+    api.create = async () => {
+      throw Object.assign(new Error("InvalidStateError: technical"), {
+        name: "InvalidStateError",
+        code: "ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED",
+      });
+    };
+    api.get = async () => {
+      throw new Error("SecurityError: technical");
+    };
+    const client = await signedInClient({ deps: { passkeys: api } });
+    const exists = await client.registerPasskey().catch((e) => e);
+    expect([exists.code, exists.message]).toEqual([
+      "passkey_exists",
+      "This device already has a passkey for you.",
+    ]);
+    const failed = await client.logInWithPasskey().catch((e) => e);
+    expect([failed.code, failed.message]).toEqual([
+      "passkey_failed",
+      "Couldn't use a passkey here. Try again.",
+    ]);
+  });
+
+  it("signs in with a passkey, sending the guest token and pushing the guest's work first", async () => {
+    const { api } = fakePasskeys();
+    const first = await signedInClient({ deps: { passkeys: api } });
+    await first.registerPasskey();
+    await first.logOut();
+
+    const client = await signedInClient({
+      storage: new IDBFactory(),
+      deps: { passkeys: api },
+    });
+    await client.dispatch("createPlayer", {
+      playerId: "p2",
+      name: "Guest Ann",
+    });
+    const user = await client.logInWithPasskey();
+    expect(user).toMatchObject({ isGuest: false, passkeyCount: 1 });
+    const login = server.requests.find(
+      (r) => r.path === "/auth/passkey/login/verify"
+    )!;
+    const guestPush = server.requests.find((r) => r.path === "/sync/push")!;
+    expect(login.body.guestToken).toBe(guestPush.token);
+    expect(server.data.players.has("p2")).toBe(true);
+    expect(client.getAuth().user).toEqual(user);
+  });
+
+  it("says so when the passkey isn't recognised", async () => {
+    const { api } = fakePasskeys("unknown");
+    const client = newClient({ deps: { passkeys: api } });
+    await client.start();
+    const error = await client.logInWithPasskey().catch((e) => e);
+    expect([error.code, error.message]).toEqual([
+      "unknown_passkey",
+      "That passkey isn't recognised.",
+    ]);
+    expect(client.getAuth().user).toBeNull();
+  });
+
+  it("needs a connection", async () => {
+    const { api, prompts } = fakePasskeys();
+    const client = await signedInClient({ deps: { passkeys: api } });
+    goOffline();
+    for (const attempt of [
+      () => client.registerPasskey(),
+      () => client.logInWithPasskey(),
+      () => client.deleteAccount(),
+    ]) {
+      const error = await attempt().catch((e) => e);
+      expect(error.code).toBe("offline");
+    }
+    expect(prompts).toEqual({ create: 0, get: 0 });
+  });
+
+  it("refreshes the passkey count after removing one", async () => {
+    const { api } = fakePasskeys();
+    const client = await signedInClient({ deps: { passkeys: api } });
+    await client.registerPasskey();
+    expect(client.getAuth().user?.passkeyCount).toBe(1);
+    await client.deletePasskey("cred-1");
+    expect(client.getAuth().user?.passkeyCount).toBe(0);
+    expect(await client.listPasskeys()).toEqual([]);
+    const error = await client.deletePasskey("cred-1").catch((e) => e);
+    expect(error.code).toBe("not_found");
+  });
+
+  it("deletes the account, then signs out here and drops unsent changes", async () => {
+    const { api } = fakePasskeys();
+    const client = await signedInClient({ deps: { passkeys: api } });
+    await client.registerPasskey();
+    server.blockPush = true;
+    await client.dispatch("createPlayer", { playerId: "p1", name: "Ann" });
+    const rejected: ActionRejection[] = [];
+    client.onActionRejected((r) => rejected.push(r));
+
+    await client.deleteAccount();
+    const sent = server.requests.find(
+      (r) => r.method === "DELETE" && r.path === "/auth/me"
+    )!;
+    expect(sent.body).toEqual({ confirm: "DELETE" });
+    expect(client.getAuth().user).toBeNull();
+    expect(client.getPendingCount()).toBe(0);
+    expect(rejected.map((r) => r.code)).toEqual(["signed_out"]);
+    // The passkey no longer signs in.
+    const error = await client.logInWithPasskey().catch((e) => e);
+    expect(error.code).toBe("unknown_passkey");
   });
 });
 
@@ -1536,6 +1717,8 @@ describe("provisional guests", () => {
       id: user.id,
       email: "ann@example.com",
       isGuest: false,
+      hasPassword: true,
+      passkeyCount: 0,
     });
     await synced(client);
     expect(server.data.games.get("g1")?.createdBy).toBe(user.id);

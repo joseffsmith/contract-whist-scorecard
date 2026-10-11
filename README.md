@@ -43,6 +43,15 @@ serving the app under `/contract-whist/` (`/` redirects there) and proxying
 6. **Environment variables:**
    - `PUBLIC_URL`: the app's public URL, used in password reset links.
      Default `https://joseffsmith.uk/contract-whist`.
+   - `PASSKEY_RP_ID`: the domain passkeys are tied to (the "relying party
+     ID"). Default: the host of `PUBLIC_URL`, i.e. `joseffsmith.uk`. A
+     passkey made for `joseffsmith.uk` also works on its subdomains, but not
+     the other way round, and changing this later orphans every passkey.
+   - `PASSKEY_ORIGINS`: comma-separated list of the page origins allowed to
+     make or use passkeys. Default: the origin of `PUBLIC_URL`. For the live
+     site: `https://joseffsmith.uk,https://whist.joseffsmith.uk`. For local
+     development with `PUBLIC_URL=http://localhost:5173/contract-whist` the
+     defaults are `localhost` and `http://localhost:5173`.
    - `ADMIN_BOOTSTRAP_TOKEN`: a long random secret. Sign up, then open
      `https://<your domain>/contract-whist/admin#<token>` while signed in and
      tap **Make me the admin**. It works once, for the first admin only;
@@ -63,6 +72,13 @@ serving the app under `/contract-whist/` (`/` redirects there) and proxying
    - `BACKUP_DAYS` (default `14`, `0` turns backups off): see Backups below.
    - `DATA_DIR` (default `/data`), `PORT` (default 3001) and `HOST` (default
      `127.0.0.1`) rarely need changing.
+
+People sign in with a passkey (Face ID, fingerprint) or email and password.
+A lost passkey is replaced by making a new one on a device that still signs
+in; there is no recovery for an account whose only passkey is gone, so the
+You page asks for a second one. Signed-in accounts can delete themselves
+from the You page (the row stays as a tombstone so its id is never reused;
+games and scores stay).
 
 Password recovery is manual: an admin creates a one-time link for a user on
 the admin page (or `POST /contract-whist/api/auth/reset-link` with

@@ -17,7 +17,13 @@ describe("guest, signup, login, logout, me", () => {
     const id = "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b";
     const res = await api.post("/auth/guest", { id });
     expect(res.status).toBe(200);
-    expect(res.body.user).toEqual({ id, email: null, isGuest: true });
+    expect(res.body.user).toEqual({
+      id,
+      email: null,
+      isGuest: true,
+      hasPassword: false,
+      passkeyCount: 0,
+    });
     expect((await api.get("/auth/me", res.body.token)).body.user.id).toBe(id);
     // It owns what it creates under that id.
     const game = newGame();
@@ -159,6 +165,10 @@ describe("guest, signup, login, logout, me", () => {
       `INSERT INTO games (id, "createdAt", "createdBy", version) VALUES ('g1', '2024-01-01T00:00:00.000Z', '${orphan}', 1)`,
       `INSERT INTO players (id, name, "claimedBy", version) VALUES ('p1', 'Ann', '${claimer}', 1)`,
       "ALTER TABLE users DROP COLUMN guest_secret_hash",
+      "DROP TABLE passkeys",
+      "DROP INDEX users_webauthn_user_id",
+      "ALTER TABLE users DROP COLUMN webauthn_user_id",
+      "ALTER TABLE users DROP COLUMN deleted_at",
       "PRAGMA user_version = 2",
     ]) {
       db.stmt(sql).run();
@@ -258,6 +268,8 @@ describe("guest, signup, login, logout, me", () => {
       id: guest.user.id,
       email: "g@example.com",
       isGuest: false,
+      hasPassword: true,
+      passkeyCount: 0,
     });
     // A fresh session replaces the guest's: the old token stops working.
     expect(signup.body.token).not.toBe(guest.token);

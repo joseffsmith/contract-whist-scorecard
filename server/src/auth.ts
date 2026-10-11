@@ -1,4 +1,4 @@
-// Accounts: guests, email + password, sessions, admin reset links.
+// Accounts: guests, email + password, passkeys, sessions, admin reset links.
 import {
   createHash,
   randomBytes,
@@ -8,12 +8,23 @@ import {
 } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { promisify } from "node:util";
+import {
+  generateAuthenticationOptions,
+  generateRegistrationOptions,
+  verifyAuthenticationResponse,
+  verifyRegistrationResponse,
+} from "@simplewebauthn/server";
+import type {
+  AuthenticationResponseJSON,
+  RegistrationResponseJSON,
+} from "@simplewebauthn/server";
 import type {
   Action,
   ActionName,
   AuthResponse,
   PublicUser,
 } from "../../shared/types";
+import { createChallenges } from "./challenges";
 import type { Db } from "./db";
 import { HttpError, bearerToken, readJson } from "./http";
 import type { Limiter } from "./http";
@@ -33,6 +44,8 @@ const SCRYPT = { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const MIN_PASSWORD = 8;
 const RESET_LINK_MS = 7 * 24 * 60 * 60 * 1000;
 const TOO_MANY = "Too many attempts. Try again in a few minutes.";
+const RP_NAME = "Whist";
+const MAX_PASSKEYS = 20; // per account
 
 type UserRow = {
   id: string;
@@ -42,6 +55,20 @@ type UserRow = {
   password_salt: string | null;
   password_hash: string | null;
   guest_secret_hash: string | null;
+  webauthn_user_id: string | null;
+  deleted_at: string | null;
+};
+type PasskeyRow = {
+  id: string; // credential id, base64url
+  user_id: string;
+  public_key: Uint8Array;
+  counter: number;
+  transports: string | null; // JSON array
+  device_type: string | null;
+  backed_up: number | null;
+  name: string | null;
+  created_at: string;
+  last_used_at: string | null;
 };
 type Hashed = { salt: string; hash: string };
 
@@ -91,16 +118,16 @@ function validPassword(p: unknown): string {
   return p;
 }
 
-const publicUser = (u: UserRow): PublicUser => ({
-  id: u.id,
-  email: u.email,
-  isGuest: !!u.is_guest,
-  ...(u.is_admin ? { isAdmin: true } : {}),
-});
+// A password only signs anyone in together with an email.
+const canUsePassword = (u: UserRow) => !!(u.email && u.password_hash);
 
 export type AuthOptions = {
   adminBootstrapToken?: string; // lets the first admin claim the role
   publicUrl: string;
+  // What the browser must say it signed for: the RP ID is the site's domain,
+  // origins are the pages (scheme + host + port) allowed to ask.
+  passkey: { rpID: string; origins: string[] };
+  now?: () => Date; // tests
 };
 
 export function createAuth(
@@ -115,11 +142,18 @@ export function createAuth(
     if (limiter.limited(key, max))
       throw new HttpError(429, TOO_MANY, "rate_limited");
   };
+  const challenges = createChallenges(opts.now);
 
   // ── Storage helpers ───────────────────────────────────────────────────
 
+  // Includes deleted accounts (tombstones): their ids stay reserved.
   const userById = (id: string) =>
     db.stmt("SELECT * FROM users WHERE id = ?").get(id) as UserRow | undefined;
+  // Deleted accounts don't exist as far as signing in goes.
+  const liveUserById = (id: string) => {
+    const user = userById(id);
+    return user?.deleted_at ? undefined : user;
+  };
   // Anything that refers to this user id, even without a users row.
   const idInUse = (id: string) =>
     !!(
@@ -131,15 +165,38 @@ export function createAuth(
   const idTaken = () =>
     new HttpError(409, "That id is already in use.", "id_taken");
   const userByEmail = (email: string) =>
-    db.stmt("SELECT * FROM users WHERE email = ?").get(email) as
-      | UserRow
+    db
+      .stmt("SELECT * FROM users WHERE email = ? AND deleted_at IS NULL")
+      .get(email) as UserRow | undefined;
+  const passkeyById = (id: string) =>
+    db.stmt("SELECT * FROM passkeys WHERE id = ?").get(id) as
+      | PasskeyRow
       | undefined;
+  const passkeysOf = (userId: string) =>
+    db
+      .stmt("SELECT * FROM passkeys WHERE user_id = ? ORDER BY created_at, id")
+      .all(userId) as PasskeyRow[];
+  const passkeyCount = (userId: string) =>
+    (
+      db
+        .stmt("SELECT COUNT(*) AS n FROM passkeys WHERE user_id = ?")
+        .get(userId) as { n: number }
+    ).n;
+
+  const publicUser = (u: UserRow): PublicUser => ({
+    id: u.id,
+    email: u.email,
+    isGuest: !!u.is_guest,
+    ...(u.is_admin ? { isAdmin: true } : {}),
+    hasPassword: canUsePassword(u),
+    passkeyCount: passkeyCount(u.id),
+  });
 
   function userForToken(token: string): UserRow | undefined {
     if (!token) return undefined;
     return db
       .stmt(
-        "SELECT users.* FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token_hash = ?"
+        "SELECT users.* FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token_hash = ? AND users.deleted_at IS NULL"
       )
       .get(sha256(token)) as UserRow | undefined;
   }
@@ -192,17 +249,20 @@ export function createAuth(
   const action = (name: ActionName, args: object) =>
     ({ id: newActionId(), name, args } as Action);
 
-  // A guest leaving: their players become claimable again.
-  function releaseClaims(guestId: string): void {
-    const actor = { id: guestId, isGuest: true };
+  // A guest leaving, or an account being deleted: their players become
+  // claimable again. Throws if that can't be done.
+  function releaseClaims(user: UserRow): void {
+    const actor = { id: user.id, isGuest: !!user.is_guest };
     const steps = db
       .readState()
-      .where("players", "claimedBy", guestId)
+      .where("players", "claimedBy", user.id)
       .map((p) => ({
         action: action("unclaimPlayer", { playerId: p.id }),
         actor,
       }));
-    if (steps.length) sync.apply(newActionId(), steps);
+    if (!steps.length) return;
+    const result = sync.apply(newActionId(), steps);
+    if (!result.ok) throw new Error(result.error);
   }
 
   // ── Guest → account handoff ───────────────────────────────────────────
@@ -300,6 +360,70 @@ export function createAuth(
     }
   }
 
+  // A new session for a user who has just proved who they are. A guest token
+  // sent along hands that guest's player and games over to the user.
+  async function startSession(
+    user: UserRow,
+    guestToken: unknown
+  ): Promise<AuthResponse> {
+    const token = createSession(user.id);
+    if (typeof guestToken === "string") await handoff(guestToken, user);
+    return respond(user, token);
+  }
+
+  // ── Passkeys ──────────────────────────────────────────────────────────
+
+  const challengeGone = () =>
+    new HttpError(400, "That took too long. Try again.", "challenge_expired");
+  const passkeyFailed = (status: number) =>
+    new HttpError(status, "Couldn't verify that passkey.", "passkey_failed");
+  const unknownPasskey = () =>
+    new HttpError(401, "That passkey isn't recognised.", "unknown_passkey");
+  const tooManyPasskeys = () =>
+    new HttpError(
+      400,
+      `You can have up to ${MAX_PASSKEYS} passkeys. Remove one first.`,
+      "too_many_passkeys"
+    );
+  const exists = () =>
+    new HttpError(409, "That passkey is already registered.", "passkey_exists");
+
+  const asObject = (v: unknown) =>
+    typeof v === "object" && v !== null && !Array.isArray(v)
+      ? (v as Record<string, unknown>)
+      : undefined;
+  const parseTransports = (json: string | null): string[] | undefined => {
+    try {
+      const list = JSON.parse(json ?? "null");
+      return Array.isArray(list) ? list.map(String) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  // The random handle authenticators know this user by, made when first needed.
+  function webauthnHandle(user: UserRow): Buffer {
+    let handle = user.webauthn_user_id;
+    if (!handle) {
+      db.stmt(
+        "UPDATE users SET webauthn_user_id = ? WHERE id = ? AND webauthn_user_id IS NULL"
+      ).run(newToken(), user.id);
+      handle = userById(user.id)!.webauthn_user_id!;
+    }
+    return Buffer.from(handle, "base64url");
+  }
+
+  // What the passkey is labelled with in the phone's list.
+  function passkeyLabel(user: UserRow): string {
+    if (user.email) return user.email;
+    const player = db
+      .readState()
+      .where("players", "claimedBy", user.id)
+      .filter((p) => !p.mergedInto)
+      .sort((a, b) => (a.id < b.id ? -1 : 1))[0];
+    return player?.name || "Whist player";
+  }
+
   // ── Routes ────────────────────────────────────────────────────────────
 
   return {
@@ -328,6 +452,7 @@ export function createAuth(
         const existing = userById(id);
         if (
           existing?.is_guest &&
+          !existing.deleted_at &&
           secretHash &&
           existing.guest_secret_hash &&
           sameHash(existing.guest_secret_hash, secretHash)
@@ -406,10 +531,7 @@ export function createAuth(
       );
       if (!user || !stored || !ok)
         throw new HttpError(401, "Wrong email or password.", "bad_credentials");
-      const token = createSession(user.id);
-      if (typeof body.guestToken === "string")
-        await handoff(body.guestToken, user);
-      return respond(user, token);
+      return startSession(user, body.guestToken);
     },
 
     async logout(req: IncomingMessage) {
@@ -418,7 +540,7 @@ export function createAuth(
       const user = userForToken(token);
       if (user?.is_guest) {
         try {
-          releaseClaims(user.id);
+          releaseClaims(user);
         } catch (e) {
           console.error("Releasing a guest's players failed:", e);
         }
@@ -441,6 +563,224 @@ export function createAuth(
       const password = validPassword((await readJson(req)).password);
       setPassword(user.id, await hashPassword(password));
       deleteSessions(user.id, bearerToken(req)); // sign out everywhere else
+      return { ok: true };
+    },
+
+    // ── Passkeys ──
+
+    // Options for making a passkey for the signed-in user (account or guest).
+    // Discoverable, so signing in later needs no username.
+    async passkeyRegisterOptions(req: IncomingMessage, ip: string) {
+      const user = requireUser(req);
+      tooMany(`passkey-options:${ip}`, 60);
+      const existing = passkeysOf(user.id);
+      if (existing.length >= MAX_PASSKEYS) throw tooManyPasskeys();
+      const name = passkeyLabel(user);
+      const options = await generateRegistrationOptions({
+        rpName: RP_NAME,
+        rpID: opts.passkey.rpID,
+        userName: name,
+        userDisplayName: name,
+        userID: webauthnHandle(user),
+        excludeCredentials: existing.map((p) => ({
+          id: p.id,
+          transports: parseTransports(p.transports),
+        })),
+        authenticatorSelection: {
+          residentKey: "required",
+          userVerification: "preferred",
+        },
+      });
+      const challengeId = challenges.put(
+        "register",
+        options.challenge,
+        user.id
+      );
+      return { challengeId, options };
+    },
+
+    // Checks the new passkey and keeps it. A guest becomes a real account
+    // (same user id, so the same players), as when signing up by email.
+    async passkeyRegisterVerify(req: IncomingMessage, ip: string) {
+      const user = requireUser(req);
+      tooMany(`passkey-register:${ip}`, 30);
+      const body = await readJson(req);
+      const challenge = challenges.take(body.challengeId, "register", user.id);
+      if (!challenge) throw challengeGone();
+      const response = asObject(body.response);
+      if (!response) throw new HttpError(400, "Bad request.", "bad_request");
+      let verified;
+      try {
+        verified = await verifyRegistrationResponse({
+          response: response as unknown as RegistrationResponseJSON,
+          expectedChallenge: challenge,
+          expectedOrigin: opts.passkey.origins,
+          expectedRPID: opts.passkey.rpID,
+          requireUserVerification: false, // "preferred" when it was asked for
+        });
+      } catch {
+        throw passkeyFailed(400);
+      }
+      if (!verified.verified) throw passkeyFailed(400);
+      const { credential, credentialDeviceType, credentialBackedUp } =
+        verified.registrationInfo;
+      const name =
+        typeof body.name === "string" ? body.name.trim().slice(0, 40) : "";
+
+      const token = db.transaction(() => {
+        // Signed out, or deleted, while the browser was asking for the passkey.
+        const current = liveUserById(user.id);
+        if (!current) {
+          throw new HttpError(401, "Please sign in again.", "not_signed_in");
+        }
+        if (passkeyById(credential.id)) throw exists();
+        if (passkeyCount(current.id) >= MAX_PASSKEYS) throw tooManyPasskeys();
+        db.stmt(
+          "INSERT INTO passkeys (id, user_id, public_key, counter, transports, device_type, backed_up, name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run(
+          credential.id,
+          current.id,
+          credential.publicKey,
+          credential.counter,
+          credential.transports ? JSON.stringify(credential.transports) : null,
+          credentialDeviceType,
+          credentialBackedUp ? 1 : 0,
+          name || null,
+          new Date().toISOString()
+        );
+        if (!current.is_guest) return bearerToken(req);
+        db.stmt(
+          "UPDATE users SET is_guest = 0 WHERE id = ? AND is_guest = 1"
+        ).run(current.id);
+        // Same user, new session: the guest token is retired.
+        deleteSessions(current.id);
+        return createSession(current.id);
+      });
+      return respond(userById(user.id)!, token);
+    },
+
+    // Options for signing in with any passkey the device offers.
+    async passkeyLoginOptions(_req: IncomingMessage, ip: string) {
+      tooMany(`passkey-options:${ip}`, 60);
+      const options = await generateAuthenticationOptions({
+        rpID: opts.passkey.rpID,
+        userVerification: "preferred",
+      });
+      return {
+        challengeId: challenges.put("login", options.challenge, null),
+        options,
+      };
+    },
+
+    async passkeyLoginVerify(req: IncomingMessage, ip: string) {
+      const body = await readJson(req);
+      tooMany(`passkey-login:${ip}`, 30);
+      const challenge = challenges.take(body.challengeId, "login", null);
+      if (!challenge) throw challengeGone();
+      const response = asObject(body.response);
+      if (!response) throw new HttpError(400, "Bad request.", "bad_request");
+      const passkey =
+        typeof response.id === "string" ? passkeyById(response.id) : undefined;
+      const user = passkey && liveUserById(passkey.user_id);
+      if (!passkey || !user) throw unknownPasskey();
+      // The handle the authenticator holds must be this user's.
+      const handle = asObject(response.response)?.userHandle;
+      if (
+        typeof handle === "string" &&
+        user.webauthn_user_id &&
+        handle !== user.webauthn_user_id
+      ) {
+        throw passkeyFailed(401);
+      }
+      let verified;
+      try {
+        verified = await verifyAuthenticationResponse({
+          response: response as unknown as AuthenticationResponseJSON,
+          expectedChallenge: challenge,
+          expectedOrigin: opts.passkey.origins,
+          expectedRPID: opts.passkey.rpID,
+          requireUserVerification: false, // "preferred" when it was asked for
+          credential: {
+            id: passkey.id,
+            publicKey: new Uint8Array(passkey.public_key),
+            counter: passkey.counter,
+            transports: parseTransports(passkey.transports),
+          },
+        });
+      } catch {
+        throw passkeyFailed(401);
+      }
+      if (!verified.verified) throw passkeyFailed(401);
+      const { newCounter, credentialBackedUp } = verified.authenticationInfo;
+      // Deleted while the browser was checking it.
+      const used = db
+        .stmt(
+          "UPDATE passkeys SET counter = ?, backed_up = ?, last_used_at = ? WHERE id = ?"
+        )
+        .run(
+          newCounter,
+          credentialBackedUp ? 1 : 0,
+          new Date().toISOString(),
+          passkey.id
+        );
+      const current = liveUserById(user.id);
+      if (!used.changes || !current) throw unknownPasskey();
+      return startSession(current, body.guestToken);
+    },
+
+    // The signed-in account's passkeys (never their keys).
+    async passkeys(req: IncomingMessage) {
+      const user = requireUser(req);
+      return {
+        passkeys: passkeysOf(user.id).map((p) => ({
+          id: p.id,
+          name: p.name,
+          createdAt: p.created_at,
+          lastUsedAt: p.last_used_at,
+          deviceType: p.device_type,
+          backedUp: !!p.backed_up,
+        })),
+      };
+    },
+
+    // Removing a passkey is refused when it is the last way to sign in.
+    async deletePasskey(req: IncomingMessage, ip: string, id: string) {
+      const user = requireUser(req);
+      tooMany(`passkey-delete:${ip}`, 30);
+      const passkey = passkeyById(id);
+      if (!passkey || passkey.user_id !== user.id) {
+        throw new HttpError(404, "No such passkey.", "not_found");
+      }
+      if (!canUsePassword(user) && passkeyCount(user.id) < 2) {
+        throw new HttpError(
+          409,
+          "It's your only way to sign in. Add another passkey or a password first.",
+          "last_sign_in"
+        );
+      }
+      db.stmt("DELETE FROM passkeys WHERE id = ?").run(id);
+      return { ok: true };
+    },
+
+    // Deletes the signed-in account. The users row stays as a tombstone so the
+    // id is never handed out again; games, scores and players stay too, as
+    // other people played in them.
+    async deleteAccount(req: IncomingMessage, ip: string) {
+      const user = requireUser(req);
+      tooMany(`delete:${ip}`, 10);
+      if ((await readJson(req)).confirm !== "DELETE") {
+        throw new HttpError(400, "Type DELETE to confirm.", "confirm_required");
+      }
+      // No awaits from here: nothing can claim a player in between.
+      releaseClaims(user);
+      db.transaction(() => {
+        deleteSessions(user.id);
+        db.stmt("DELETE FROM passkeys WHERE user_id = ?").run(user.id);
+        db.stmt("DELETE FROM reset_tokens WHERE user_id = ?").run(user.id);
+        db.stmt(
+          "UPDATE users SET email = NULL, password_salt = NULL, password_hash = NULL, guest_secret_hash = NULL, webauthn_user_id = NULL, is_admin = 0, deleted_at = ? WHERE id = ?"
+        ).run(new Date().toISOString(), user.id);
+      });
       return { ok: true };
     },
 
@@ -491,7 +831,7 @@ export function createAuth(
       const find = () =>
         db
           .stmt(
-            "SELECT user_id FROM reset_tokens WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?"
+            "SELECT user_id FROM reset_tokens JOIN users ON users.id = reset_tokens.user_id WHERE token_hash = ? AND used_at IS NULL AND expires_at > ? AND users.deleted_at IS NULL"
           )
           .get(sha256(String(body.token ?? "")), Date.now()) as
           | { user_id: string }

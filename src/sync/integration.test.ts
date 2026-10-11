@@ -6,8 +6,10 @@ import path from "node:path";
 import { IDBFactory } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { startServer } from "../../server/src/app";
+import { createAuthenticator } from "../../server/test/authenticator";
 import { createSyncClient } from "./client";
 import type { ActionRejection, SyncClient } from "./client";
+import type { PasskeyApi } from "./passkeys";
 import { openStorage } from "./storage";
 
 // The engine against the real server (SQLite, SSE, rate limits and all).
@@ -43,7 +45,11 @@ afterEach(async () => {
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
-function newClient(storage = new IDBFactory(), realIds = false) {
+function newClient(
+  storage = new IDBFactory(),
+  realIds = false,
+  passkeys?: PasskeyApi
+) {
   const online = new Set<() => void>();
   const client = createSyncClient({
     // The real server serves from its root; nginx adds /contract-whist/api.
@@ -53,6 +59,7 @@ function newClient(storage = new IDBFactory(), realIds = false) {
         ? Promise.reject(new TypeError("Failed to fetch"))
         : fetch(input, init)) as typeof fetch,
     openStorage: () => openStorage(storage),
+    ...(passkeys ? { passkeys } : {}),
     uuid: realIds ? () => crypto.randomUUID() : () => `a-${++ids}`,
     backoff: { minMs: 10, maxMs: 50 },
     streamGraceMs: 50,
@@ -190,6 +197,59 @@ describe("against the real server", () => {
     expect(error.message).toBeTruthy();
     const back = await client.logIn("ann@example.com", "secret-pass-1");
     expect(back.id).toBe(guest.id);
+  });
+
+  it("creates an account with a passkey, signs in with it and deletes the account", async () => {
+    // The default config signs for https://joseffsmith.uk.
+    const device = createAuthenticator({
+      rpID: "joseffsmith.uk",
+      origin: "https://joseffsmith.uk",
+    });
+    const passkeys: PasskeyApi = {
+      create: async (options) => device.create(options) as never,
+      get: async (options) => device.get(options) as never,
+    };
+    const client = newClient(new IDBFactory(), true, passkeys);
+    await client.start();
+    const guest = await client.signInAsGuest();
+    await client.dispatch("createPlayer", {
+      playerId: "p1",
+      name: "Ann",
+      claim: true,
+    });
+    await synced(client);
+
+    const user = await client.registerPasskey("Test phone");
+    expect(user).toEqual({
+      id: guest.id,
+      email: null,
+      isGuest: false,
+      hasPassword: false,
+      passkeyCount: 1,
+    });
+    expect(await client.listPasskeys()).toMatchObject([{ name: "Test phone" }]);
+    await client.logOut();
+
+    // A new device with a fresh guest: the passkey signs in, and the guest's
+    // own player moves onto the account.
+    const phone = newClient(new IDBFactory(), true, passkeys);
+    await phone.start();
+    await phone.signInAsGuest();
+    await phone.dispatch("createPlayer", {
+      playerId: "p2",
+      name: "Guest Ann",
+      claim: true,
+    });
+    await synced(phone);
+    const back = await phone.logInWithPasskey();
+    expect(back).toMatchObject({ id: guest.id, passkeyCount: 1 });
+    await waitFor(() => phone.getView().players.get("p2")?.mergedInto === "p1");
+
+    await phone.deleteAccount();
+    expect(phone.getAuth().user).toBeNull();
+    await waitFor(() => !phone.getView().players.get("p1")?.claimedBy);
+    const gone = await phone.logInWithPasskey().catch((e) => e);
+    expect(gone.code).toBe("unknown_passkey");
   });
 
   const pull = async () =>
