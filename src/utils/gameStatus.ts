@@ -31,10 +31,13 @@ export const summarizeGame = (
   const numPlayers = players.length;
   const rs = [...rounds].sort((a, b) => a.roundNumber - b.roundNumber);
 
-  const isFinished = rs.length === DEALS.length && rs.every((r) =>
-    r.turns.length === numPlayers &&
-    r.turns.every((x) => x.score !== undefined && x.score !== null)
-  );
+  const isFinished =
+    rs.length === DEALS.length &&
+    rs.every(
+      (r) =>
+        r.turns.length === numPlayers &&
+        r.turns.every((x) => x.score !== undefined && x.score !== null)
+    );
 
   const unfinished = rs.find(
     (r) =>

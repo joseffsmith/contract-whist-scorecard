@@ -1,5 +1,3 @@
-import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { importSnapshot, openDb } from "../src/db";
 import { action, newGame, start, tempDir } from "./helpers";
@@ -126,6 +124,13 @@ describe("guest, signup, login, logout, me", () => {
       rounds: [],
       turns: [],
     });
+    for (const id of [creator, claimer]) {
+      expect(
+        db.stmt("SELECT is_guest FROM users WHERE id = ?").get(id)
+      ).toEqual({
+        is_guest: 0,
+      });
+    }
     db.close();
     const api = await start({ dataDir: dir });
     for (const id of [creator, claimer]) {
@@ -147,17 +152,25 @@ describe("guest, signup, login, logout, me", () => {
     const orphan = "33333333-3333-4333-8333-333333333333";
     const claimer = "44444444-4444-4444-8444-444444444444";
     const dir = tempDir();
-    openDb(dir).close();
+    const db = openDb(dir);
     // Put the database back as it was before the migration: rows naming users
     // that don't exist.
-    const raw = new DatabaseSync(path.join(dir, "whist.db"));
-    raw.exec(
-      `INSERT INTO games (id, "createdAt", "createdBy", version) VALUES ('g1', '2024-01-01T00:00:00.000Z', '${orphan}', 1);
-       INSERT INTO players (id, name, "claimedBy", version) VALUES ('p1', 'Ann', '${claimer}', 1);
-       ALTER TABLE users DROP COLUMN guest_secret_hash;
-       PRAGMA user_version = 2;`
-    );
-    raw.close();
+    for (const sql of [
+      `INSERT INTO games (id, "createdAt", "createdBy", version) VALUES ('g1', '2024-01-01T00:00:00.000Z', '${orphan}', 1)`,
+      `INSERT INTO players (id, name, "claimedBy", version) VALUES ('p1', 'Ann', '${claimer}', 1)`,
+      "ALTER TABLE users DROP COLUMN guest_secret_hash",
+      "PRAGMA user_version = 2",
+    ]) {
+      db.stmt(sql).run();
+    }
+    db.close();
+    const migrated = openDb(dir);
+    for (const id of [orphan, claimer]) {
+      expect(
+        migrated.stmt("SELECT is_guest, email FROM users WHERE id = ?").get(id)
+      ).toEqual({ is_guest: 0, email: null });
+    }
+    migrated.close();
     const api = await start({ dataDir: dir });
     for (const id of [orphan, claimer]) {
       expect((await api.post("/auth/guest", { id })).body.code).toBe(

@@ -228,13 +228,19 @@ export function createSyncClient(
     session: () => storage!.setSession(session),
   };
 
-  function save(domain: Domain, incremental: () => Promise<void>) {
+  // `incremental` writes just the change; if any of the domains is dirty
+  // (an earlier write failed) they are rewritten whole from memory instead.
+  function save(domains: Domain | Domain[], incremental: () => Promise<void>) {
+    const list = Array.isArray(domains) ? domains : [domains];
     return (writes = writes.then(async () => {
       try {
-        await (dirty.has(domain) ? repairs[domain]() : incremental());
-        dirty.delete(domain);
+        if (!list.some((d) => dirty.has(d))) await incremental();
+        else if (list.includes("session") && list.includes("pending")) {
+          await storage!.replaceSessionAndPending(session, pending);
+        } else for (const d of list) await repairs[d]();
+        list.forEach((d) => dirty.delete(d));
       } catch {
-        dirty.add(domain);
+        list.forEach((d) => dirty.add(d));
       }
       updateHealth();
     }));

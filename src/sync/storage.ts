@@ -25,6 +25,8 @@ export type Session = {
   token: string | null;
   user: PublicUser;
   provisional?: boolean;
+  // Proves to the server that we're the one who made a provisional id.
+  secret?: string;
 };
 
 export type PendingEntry = {
@@ -61,6 +63,11 @@ export interface SyncStorage {
   // Replaces the whole queue (used to repair after a failed write).
   replacePending(entries: PendingEntry[]): Promise<void>;
   setSession(session: Session | null): Promise<void>;
+  // Both in one transaction (switching guests moves the queue with the session).
+  replaceSessionAndPending(
+    session: Session | null,
+    entries: PendingEntry[]
+  ): Promise<void>;
 }
 
 const DB_NAME = "whist-sync";
@@ -118,6 +125,11 @@ export function createMemoryStorage(): SyncStorage {
     },
     async setSession(next) {
       session = next;
+    },
+    async replaceSessionAndPending(next, entries) {
+      session = next;
+      pending.clear();
+      for (const entry of entries) pending.set(entry.id, entry);
     },
   };
 }
@@ -295,6 +307,15 @@ function createIdbStorage(
     replacePending: (entries) =>
       withDb((db) =>
         transact(db, [PENDING], "readwrite", (tx) => {
+          tx.objectStore(PENDING).clear();
+          for (const entry of entries) tx.objectStore(PENDING).put(entry);
+        })
+      ),
+    replaceSessionAndPending: (session, entries) =>
+      withDb((db) =>
+        transact(db, [KV, PENDING], "readwrite", (tx) => {
+          if (session) tx.objectStore(KV).put(session, "session");
+          else tx.objectStore(KV).delete("session");
           tx.objectStore(PENDING).clear();
           for (const entry of entries) tx.objectStore(PENDING).put(entry);
         })

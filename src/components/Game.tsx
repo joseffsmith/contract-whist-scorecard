@@ -16,7 +16,7 @@ import {
 import { MoreMenu } from "./chrome/MoreMenu";
 import { InviteSheet } from "./InviteSheet";
 import { ThemeToggle } from "./chrome/ThemeToggle";
-import { autoFillZeroTricks } from "../utils/autoFillZeroTricks";
+import { autoFillTricks } from "../utils/autoFillTricks";
 import { getBidOptions } from "../utils/getBidOptions";
 import { getCurrentPlayerIdFromRound } from "../utils/getCurrentPlayerIdFromRound";
 import { getDealerIdx } from "../utils/getDealerIdx";
@@ -126,18 +126,22 @@ export const GameComp = () => {
       );
       const score = turn?.bid === tricks ? tricks + 10 : tricks;
       if (!(await act("setScore", { turnId: turn!.id, score }))) return;
-      // If that accounts for every card, the players still to score took no
-      // tricks: fill them in (in seat order after this player).
+      // The tricks entered so far may settle the rest of the round (all cards
+      // accounted for, or one player left): fill those in, in seat order
+      // after this player.
       const idx = players.findIndex((p) => p.id === currentPlayerId);
       const fromNext = [...players.slice(idx + 1), ...players.slice(0, idx)];
       const turns = fromNext.flatMap((p) => {
         const t = currentRound!.turns.find((tt) => tt.player?.id === p.id);
         return t ? [t] : [];
       });
-      const fills = autoFillZeroTricks(
-        [...turns, { ...turn!, score }],
-        DEALS[currentRoundIdx].num_cards
-      );
+      const fills =
+        turns.length === players.length - 1
+          ? autoFillTricks(
+              [...turns, { ...turn!, score }],
+              DEALS[currentRoundIdx].num_cards
+            )
+          : [];
       for (const fill of fills) {
         if (!(await act("setScore", fill))) return;
       }
