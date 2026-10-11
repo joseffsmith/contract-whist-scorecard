@@ -586,8 +586,12 @@ export function createSyncClient(
     for (const entry of pending) {
       if (entry.ackVersion !== undefined) continue;
       let size = sizes.get(entry);
-      if (size === undefined) sizes.set(entry, (size = actionBytes(entry.action)));
-      if (batch.length && (batch.length >= limit || bytes + size > deps.maxBatchBytes)) {
+      if (size === undefined)
+        sizes.set(entry, (size = actionBytes(entry.action)));
+      if (
+        batch.length &&
+        (batch.length >= limit || bytes + size > deps.maxBatchBytes)
+      ) {
         break;
       }
       batch.push(entry);
@@ -647,20 +651,20 @@ export function createSyncClient(
   // Handles a failed push request. Returns true when the loop can go straight
   // on (the batch was split or a hopeless action dropped).
   function pushRefused(error: unknown, batch: PendingEntry[], token: string) {
-    const status = error instanceof SyncError ? error.status : undefined;
-    if (status === 401) {
+    const code = error instanceof SyncError ? error.status : undefined;
+    if (code === 401) {
       // The server no longer knows this session (unless it has changed since
       // the request). Keep the queue; signing in again as the same user
       // resumes it.
       if (session?.token === token) setSession(null);
       return false;
     }
-    if (status === 413 || status === 400) {
+    if (code === 413 || code === 400) {
       if (batch.length > 1) {
         batchLimit = Math.max(1, Math.floor(batch.length / 2));
         return true;
       }
-      const tooLarge = status === 413;
+      const tooLarge = code === 413;
       dropPending((e) => e === batch[0]);
       rebuild();
       emitRejected({
@@ -740,12 +744,12 @@ export function createSyncClient(
     path: string,
     body: unknown,
     token?: string,
-    validate: ((json: any) => boolean) | undefined = isAuthResponse
+    validate: ((json: any) => boolean) | null = isAuthResponse
   ) {
     await begin();
     if (!deps.network.isOnline())
       throw new SyncError(OFFLINE_MESSAGE, "offline");
-    return transport.post<T>(path, body, token, validate);
+    return transport.post<T>(path, body, token, validate ?? undefined);
   }
 
   const adopt = (response: AuthResponse) => {
@@ -944,7 +948,7 @@ export function createSyncClient(
     async setPassword(password) {
       await begin();
       if (!session) throw new SyncError("Sign in first.", "not_signed_in");
-      await authRequest("/auth/password", { password }, session.token, undefined);
+      await authRequest("/auth/password", { password }, session.token, null);
     },
     async resetPassword(token, password) {
       return adopt(await authRequest("/auth/reset", { token, password }));
@@ -963,7 +967,7 @@ export function createSyncClient(
     async claimAdmin(token) {
       await begin();
       if (!session) throw new SyncError("Sign in first.", "not_signed_in");
-      await authRequest("/auth/claim-admin", { token }, session.token, undefined);
+      await authRequest("/auth/claim-admin", { token }, session.token, null);
     },
   };
 }

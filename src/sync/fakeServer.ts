@@ -50,6 +50,16 @@ export function createFakeServer() {
     loseNextPushResponse: false, // apply, then fail as if the reply was lost
     holdStream: false, // buffer stream events
     held: [] as string[],
+    maxPushBytes: Infinity, // bigger push bodies get 413
+    pushStatus: 0, // answer pushes with this status (e.g. 503) when set
+    serverErrors: 0, // next N push results are { ok: false, code: "server_error" } (not applied)
+    portal: false, // every answer is a 200 page of HTML, like a captive portal
+    rateLimited: false, // pulls answer 429
+    streamLimited: false, // streams answer 429
+    dropStreams: false, // streams end right after their first event
+    forceReset: false, // the next pull answers with a full snapshot
+    streamOpens: 0,
+    pullCount: 0,
 
     get version() {
       return version;
@@ -68,7 +78,7 @@ export function createFakeServer() {
       for (const op of ops) {
         if (op.op !== "put") continue;
         rowVersions.set(`${op.table}:${op.row.id}`, version);
-        ((changes.puts[op.table] ??= []) as unknown[]).push(op.row);
+        ((changes.puts[op.table] ??= []) as unknown[]).push(clean(op.row));
       }
       broadcast(changes);
     },
@@ -83,6 +93,33 @@ export function createFakeServer() {
       const token = `t-${++tokenCounter}`;
       tokens.set(token, user);
       return token;
+    },
+
+    // A copy of the database, to restore later (a server rolled back).
+    backup() {
+      return {
+        version,
+        rows: TABLES.map((t) => [t, [...data[t].entries()]] as const),
+        rowVersions: new Map(rowVersions),
+        tombstones: new Map(tombstones),
+        applied: new Map(applied),
+      };
+    },
+
+    restore(copy: ReturnType<typeof server.backup>) {
+      for (const [table, entries] of copy.rows) {
+        (data[table] as Map<string, unknown>).clear();
+        for (const [id, row] of entries)
+          (data[table] as Map<string, unknown>).set(id, row);
+      }
+      version = copy.version;
+      rowVersions.clear();
+      copy.rowVersions.forEach((v, k) => rowVersions.set(k, v));
+      tombstones.clear();
+      copy.tombstones.forEach((v, k) => tombstones.set(k, v));
+      applied.clear();
+      copy.applied.forEach((v, k) => applied.set(k, v));
+      broadcast(snapshotChangeSet());
     },
 
     forgetTokens() {
@@ -129,10 +166,23 @@ export function createFakeServer() {
   const fail = (status: number, error: string, code: string) =>
     json(status, { error, code });
 
-  function handle(path: string, url: URL, body: any, token?: string): Response {
+  function handle(
+    path: string,
+    url: URL,
+    body: any,
+    token?: string,
+    size = 0
+  ): Response {
     const user = token ? tokens.get(token) : undefined;
     switch (path) {
       case "/sync/pull":
+        server.pullCount += 1;
+        if (server.rateLimited)
+          return fail(429, "Too many requests. Slow down.", "rate_limited");
+        if (server.forceReset) {
+          server.forceReset = false;
+          return json(200, snapshotChangeSet());
+        }
         return json(200, changesSince(Number(url.searchParams.get("since"))));
       case "/sync/push": {
         if (!user) return fail(401, "Sign in to do that.", "not_signed_in");
@@ -197,6 +247,16 @@ export function createFakeServer() {
         };
         return json(200, { token: server.tokenFor(loggedIn), user: loggedIn });
       }
+      case "/auth/me":
+        return user
+          ? json(200, { user })
+          : fail(401, "Sign in to do that.", "not_signed_in");
+      case "/auth/claim-admin":
+        if (!user) return fail(401, "Sign in to do that.", "not_signed_in");
+        if (user.isGuest) return fail(403, "Create an account first.", "guest");
+        return body.token === "bootstrap"
+          ? json(200, { ok: true })
+          : fail(403, "Wrong token.", "forbidden");
       case "/auth/logout":
         if (token) tokens.delete(token);
         return json(200, { ok: true });
@@ -224,7 +284,7 @@ export function createFakeServer() {
       if (op.op === "put") {
         rowVersions.set(key, version);
         tombstones.delete(key);
-        ((changes.puts[op.table] ??= []) as unknown[]).push(op.row);
+        ((changes.puts[op.table] ??= []) as unknown[]).push(clean(op.row));
       } else {
         rowVersions.delete(key);
         tombstones.set(key, version);
@@ -237,12 +297,16 @@ export function createFakeServer() {
     return version;
   }
 
+  // The real server leaves out null fields.
+  const clean = <R extends object>(row: R): R =>
+    Object.fromEntries(Object.entries(row).filter(([, v]) => v != null)) as R;
+
   function snapshotChangeSet(): ChangeSet {
     const changes: ChangeSet = { version, puts: {}, deletes: {}, reset: true };
     for (const table of TABLES) {
       (changes.puts as Record<string, unknown[]>)[table] = [
         ...data[table].values(),
-      ];
+      ].map(clean);
     }
     return changes;
   }
@@ -253,7 +317,7 @@ export function createFakeServer() {
     for (const table of TABLES) {
       for (const row of data[table].values() as Iterable<Tables[TableName]>) {
         if ((rowVersions.get(`${table}:${row.id}`) ?? 0) > since) {
-          ((changes.puts[table] ??= []) as unknown[]).push(row);
+          ((changes.puts[table] ??= []) as unknown[]).push(clean(row));
         }
       }
     }
@@ -287,6 +351,7 @@ export function createFakeServer() {
         streams.add(handle);
         controller.enqueue(encoder.encode(": hello\n\n"));
         handle.send(`data: ${JSON.stringify(changesSince(since))}\n\n`);
+        if (server.dropStreams) handle.end();
         signal?.addEventListener("abort", () => {
           streams.delete(handle);
           try {

@@ -13,11 +13,13 @@ const changes = (
   ...partial,
 });
 
-const entry = (seq: number, ackVersion?: number): PendingEntry => ({
-  seq,
+const entry = (n: number, ackVersion?: number): PendingEntry => ({
+  id: `a${n}`,
+  at: 100 - n, // queue order is by (at, n), not by id
+  n,
   userId: "u1",
   isGuest: true,
-  action: { id: `a${seq}`, name: "claimPlayer", args: { playerId: "p1" } },
+  action: { id: `a${n}`, name: "claimPlayer", args: { playerId: "p1" } },
   ackVersion,
 });
 
@@ -87,16 +89,20 @@ describe.each([
       user: { id: "u1", email: null, isGuest: true },
     });
     let stored = await storage.load();
-    expect(stored.pending.map((e) => [e.seq, e.ackVersion])).toEqual([
-      [1, 7],
-      [2, undefined],
+    expect(stored.pending.map((e) => [e.id, e.ackVersion])).toEqual([
+      ["a2", undefined],
+      ["a1", 7],
     ]);
     expect(stored.session?.token).toBe("t");
 
-    await storage.deletePending([1]);
+    await storage.deletePending(["a1"]);
     await storage.setSession(null);
     stored = await storage.load();
-    expect(stored.pending.map((e) => e.seq)).toEqual([2]);
+    expect(stored.pending.map((e) => e.id)).toEqual(["a2"]);
+
+    await storage.replacePending([entry(3), entry(4)]);
+    stored = await storage.load();
+    expect(stored.pending.map((e) => e.id)).toEqual(["a4", "a3"]);
     expect(stored.session).toBeNull();
   });
 });

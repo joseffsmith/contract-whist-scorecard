@@ -65,7 +65,8 @@ const isPushResponse = (json: any) =>
   typeof json.version === "number" &&
   Array.isArray(json.results) &&
   json.results.every(
-    (r: any) => isObject(r) && typeof r.id === "string" && typeof r.ok === "boolean"
+    (r: any) =>
+      isObject(r) && typeof r.id === "string" && typeof r.ok === "boolean"
   );
 
 export const isAuthResponse = (json: any) =>
@@ -93,7 +94,11 @@ export function createTransport(options: TransportOptions): Transport {
   async function request<T>(
     method: string,
     path: string,
-    { body, token, validate }: {
+    {
+      body,
+      token,
+      validate,
+    }: {
       body?: unknown;
       token?: string;
       validate?: (json: any) => boolean;

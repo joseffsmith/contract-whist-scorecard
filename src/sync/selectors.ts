@@ -29,32 +29,62 @@ function groupBy<T>(rows: Iterable<T>, key: (row: T) => string) {
   return groups;
 }
 
+// Games whose rows are all the same objects as last time keep their old
+// result object, so memoised components don't re-render when only some other
+// game changed. Rows keep their identity from one view to the next.
+const gameCache = new WeakMap<GameRow, { rows: unknown[]; game: HomeGame }>();
+
 // Every game (deleted ones too; the UI filters `deletedAt`) with its seats,
 // rounds and turns, and each seat/turn's player when we have it.
 export function selectHomeGames(view: DataState): HomeGames {
   const cached = homeGamesCache.get(view);
   if (cached) return cached;
 
-  const withPlayer = <R extends { playerId: string }>(row: R) => {
-    const player = view.players.get(row.playerId);
-    return player ? { ...row, player } : row;
-  };
   const seats = groupBy(view.seats.values(), (seat) => seat.gameId);
   const rounds = groupBy(view.rounds.values(), (round) => round.gameId);
   const turns = groupBy(view.turns.values(), (turn) => turn.roundId);
 
-  const games = [...view.games.values()].map((game) => ({
-    ...game,
-    playersOrders: (seats.get(game.id) ?? [])
-      .sort((a, b) => a.orderNumber - b.orderNumber)
-      .map(withPlayer),
-    rounds: (rounds.get(game.id) ?? [])
-      .sort((a, b) => a.roundNumber - b.roundNumber)
-      .map((round) => ({
-        ...round,
-        turns: (turns.get(round.id) ?? []).map(withPlayer),
-      })),
-  }));
+  const games = [...view.games.values()].map((row) => {
+    const gameSeats = (seats.get(row.id) ?? []).sort(
+      (a, b) => a.orderNumber - b.orderNumber
+    );
+    const gameRounds = (rounds.get(row.id) ?? []).sort(
+      (a, b) => a.roundNumber - b.roundNumber
+    );
+    const roundTurns = gameRounds.map((round) => turns.get(round.id) ?? []);
+    // Every row this game's result is made of, in a fixed order.
+    const used: unknown[] = [];
+    const player = (playerId: string) => {
+      const found = view.players.get(playerId);
+      used.push(found);
+      return found;
+    };
+    const withPlayer = <R extends { playerId: string }>(r: R) => {
+      used.push(r);
+      const found = player(r.playerId);
+      return found ? { ...r, player: found } : r;
+    };
+    const result: HomeGame = {
+      ...row,
+      playersOrders: gameSeats.map(withPlayer),
+      rounds: gameRounds.map((round, i) => {
+        used.push(round);
+        return { ...round, turns: roundTurns[i].map(withPlayer) };
+      }),
+    };
+    used.push(row);
+
+    const before = gameCache.get(row);
+    if (
+      before &&
+      before.rows.length === used.length &&
+      before.rows.every((r, i) => r === used[i])
+    ) {
+      return before.game;
+    }
+    gameCache.set(row, { rows: used, game: result });
+    return result;
+  });
   const result = { games };
   homeGamesCache.set(view, result);
   return result;
