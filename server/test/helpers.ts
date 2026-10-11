@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { afterEach } from "vitest";
@@ -14,18 +15,27 @@ import type {
 } from "../../shared/types";
 
 type Running = Awaited<ReturnType<typeof startServer>>;
-const running: { server: Running; dir: string }[] = [];
+const running: { server: Running }[] = [];
+
+const temp: string[] = [];
 
 afterEach(async () => {
-  for (const { server, dir } of running.splice(0)) {
-    await server.close();
+  for (const { server } of running.splice(0)) await server.close();
+  for (const dir of temp.splice(0))
     fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
+
+// A temp directory that is removed after the test.
+export function tempDir(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "whist-test-"));
+  temp.push(dir);
+  return dir;
+}
 
 export type Api = ReturnType<typeof makeApi>;
 
-function makeApi(url: string, dir: string) {
+function makeApi(server: Running, dir: string) {
+  const url = server.url;
   async function call(
     method: string,
     route: string,
@@ -51,6 +61,8 @@ function makeApi(url: string, dir: string) {
   return {
     url,
     dir,
+    // Stops this server early (the data stays in `dir`, so it can be restarted).
+    close: () => server.close(),
     get: (route: string, token?: string) =>
       call("GET", route, undefined, token),
     post: (
@@ -77,10 +89,10 @@ function makeApi(url: string, dir: string) {
 }
 
 export async function start(opts: Partial<ServerOptions> = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "whist-test-"));
+  const dir = opts.dataDir ?? tempDir();
   const server = await startServer({ port: 0, dataDir: dir, ...opts });
-  running.push({ server, dir });
-  return makeApi(server.url, dir);
+  running.push({ server });
+  return makeApi(server, dir);
 }
 
 export function action<N extends ActionName>(
@@ -101,4 +113,22 @@ export function newGame(playerId: string = randomUUID()) {
     action("createGame", { gameId, roundIds, seatId, playerId }),
   ];
   return { actions, gameId, roundIds, seatId, playerId };
+}
+
+// Sends raw bytes to the server and returns the status line (for requests
+// that fetch() would never send).
+export async function rawRequest(
+  url: string,
+  request: string
+): Promise<string> {
+  const { port, hostname } = new URL(url);
+  const socket = net.connect(Number(port), hostname);
+  socket.write(request);
+  const chunks: Buffer[] = [];
+  for await (const chunk of socket) {
+    chunks.push(chunk);
+    if (Buffer.concat(chunks).includes("\r\n\r\n")) break;
+  }
+  socket.destroy();
+  return Buffer.concat(chunks).toString().split("\r\n")[0];
 }

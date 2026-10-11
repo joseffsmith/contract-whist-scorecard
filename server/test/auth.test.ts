@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { importSnapshot, openDb } from "../src/db";
-import { action, newGame, start } from "./helpers";
+import { action, newGame, start, tempDir } from "./helpers";
 
 describe("guest, signup, login, logout, me", () => {
   it("creates a guest whose token works on /auth/me", async () => {
@@ -80,7 +80,10 @@ describe("guest, signup, login, logout, me", () => {
       email: "g@example.com",
       isGuest: false,
     });
-    expect(signup.body.token).toBe(guest.token);
+    // A fresh session replaces the guest's: the old token stops working.
+    expect(signup.body.token).not.toBe(guest.token);
+    expect((await api.get("/auth/me", guest.token)).status).toBe(401);
+    expect((await api.get("/auth/me", signup.body.token)).status).toBe(200);
 
     const pull = await api.get("/sync/pull?since=0");
     expect(pull.body.puts.players[0]).toMatchObject({
@@ -194,17 +197,19 @@ describe("guest, signup, login, logout, me", () => {
 
 describe("admin reset links", () => {
   const tokenOf = (url: string) =>
-    url.replace("https://example.test/app/reset/", "");
+    url.replace("https://example.test/app/reset#", "");
   async function setup() {
     const api = await start({
-      
+      adminBootstrapToken: "bootstrap-secret",
       publicUrl: "https://example.test/app/",
     });
-    return {
-      api,
-      admin: await api.signup("admin@example.com"),
-      member: await api.signup("member@example.com"),
-    };
+    const admin = await api.signup("admin@example.com");
+    await api.post(
+      "/auth/claim-admin",
+      { token: "bootstrap-secret" },
+      admin.token
+    );
+    return { api, admin, member: await api.signup("member@example.com") };
   }
 
   it("only lets an admin make a link", async () => {
@@ -316,7 +321,7 @@ describe("admin reset links", () => {
   });
 
   it("treats an account without a password like any wrong login", async () => {
-    const dir = (await start()).dir + "-nopw";
+    const dir = tempDir();
     const db = openDb(dir);
     importSnapshot(db, {
       players: [],
