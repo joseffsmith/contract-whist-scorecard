@@ -12,6 +12,64 @@ describe("guest, signup, login, logout, me", () => {
     expect(me.body.user).toEqual(guest.user);
   });
 
+  it("creates a guest with the id the client chose", async () => {
+    const api = await start();
+    const id = "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b";
+    const res = await api.post("/auth/guest", { id });
+    expect(res.status).toBe(200);
+    expect(res.body.user).toEqual({ id, email: null, isGuest: true });
+    expect((await api.get("/auth/me", res.body.token)).body.user.id).toBe(id);
+    // It owns what it creates under that id.
+    const game = newGame();
+    const pushed = await api.push(res.body.token, ...game.actions);
+    expect(pushed.results.every((r) => r.ok)).toBe(true);
+    const pulled = (await api.get("/sync/pull")).body;
+    expect(pulled.puts.games[0].createdBy).toBe(id);
+  });
+
+  it("refuses a guest id that is already in use", async () => {
+    const api = await start();
+    const first = await api.guest();
+    const taken = await api.post("/auth/guest", { id: first.user.id });
+    expect([taken.status, taken.body.code]).toEqual([409, "id_taken"]);
+    const id = "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b";
+    expect((await api.post("/auth/guest", { id })).status).toBe(200);
+    expect((await api.post("/auth/guest", { id })).body.code).toBe("id_taken");
+    // Accounts' ids count too.
+    const signup = await api.signup("ann@example.com");
+    const again = await api.post("/auth/guest", { id: signup.user.id });
+    expect(again.body.code).toBe("id_taken");
+  });
+
+  it("refuses malformed guest ids", async () => {
+    const api = await start();
+    for (const id of [
+      "",
+      "x",
+      7,
+      null,
+      "3F2B8C1E-5D4A-4E6F-9A7B-1C2D3E4F5A6B", // upper case
+      "3f2b8c1e-5d4a-1e6f-9a7b-1c2d3e4f5a6b", // not v4
+      "3f2b8c1e-5d4a-4e6f-1a7b-1c2d3e4f5a6b", // bad variant
+      "3f2b8c1e5d4a4e6f9a7b1c2d3e4f5a6b",
+    ]) {
+      const res = await api.post("/auth/guest", { id });
+      expect([id, res.status, res.body.code]).toEqual([id, 400, "invalid_id"]);
+    }
+    expect((await api.post("/auth/guest", {})).status).toBe(200);
+  });
+
+  it("rate limits guest creation with or without an id", async () => {
+    const api = await start();
+    let last = 0;
+    for (let i = 0; i < 31; i++) {
+      last = (
+        await api.post("/auth/guest", i % 2 ? { id: crypto.randomUUID() } : {})
+      ).status;
+    }
+    expect(last).toBe(429);
+  });
+
   it("rejects /auth/me without or with a bad token", async () => {
     const api = await start();
     expect((await api.get("/auth/me")).status).toBe(401);

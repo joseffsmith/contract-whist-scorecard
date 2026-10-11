@@ -29,6 +29,7 @@ import {
   SyncError,
   createTransport,
   isAuthResponse,
+  isNetworkError,
 } from "./transport";
 import type { StreamHandle } from "./transport";
 
@@ -530,7 +531,7 @@ export function createSyncClient(
   // token counts as revoked; the queue is kept either way.
   async function checkSession() {
     const checked = session;
-    if (!checked) return;
+    if (!checked?.token) return;
     const myEpoch = epoch;
     try {
       const { user } = await transport.get<{ user?: PublicUser }>(
@@ -573,10 +574,11 @@ export function createSyncClient(
 
   const unacked = () =>
     pending.filter((entry) => entry.ackVersion === undefined);
+  const reachable = () => deps.network.isOnline() || status === "connected";
   const canPush = () =>
     running &&
     hydrated &&
-    !!session &&
+    !!session?.token &&
     (deps.network.isOnline() || status === "connected");
 
   // The oldest unacked actions, within the count and byte limits (always at
@@ -619,10 +621,19 @@ export function createSyncClient(
     pushing = true;
     const myEpoch = epoch;
     try {
+      if (session?.provisional && running && reachable()) {
+        // Get a real session first (the queue waits).
+        try {
+          await materialise();
+        } catch {
+          if (myEpoch === epoch) schedulePushRetry();
+          return;
+        }
+      }
       while (canPush() && myEpoch === epoch) {
         const batch = nextBatch();
         if (!batch.length) return;
-        const token = session!.token;
+        const token = session!.token!;
         let response: PushResponse;
         try {
           response = await transport.push(
@@ -740,6 +751,78 @@ export function createSyncClient(
       pushFailures = 0;
       void push();
     }
+  }
+
+  // Turns a provisional guest (made offline) into a real one. The server takes
+  // our id if it's free; if not we get a fresh guest and the queued actions are
+  // moved over to its id. Network errors propagate and nothing changes.
+  let materialising: Promise<void> | null = null;
+  function materialise(): Promise<void> {
+    return (materialising ??= doMaterialise().finally(() => {
+      materialising = null;
+    }));
+  }
+
+  async function doMaterialise() {
+    const provisional = session;
+    if (!provisional?.provisional) return;
+    let response: AuthResponse;
+    try {
+      response = await transport.post<AuthResponse>(
+        "/auth/guest",
+        { id: provisional.user.id },
+        undefined,
+        isAuthResponse
+      );
+    } catch (error) {
+      if (
+        !(error instanceof SyncError) ||
+        (error.status !== 409 && error.status !== 400)
+      ) {
+        throw error;
+      }
+      response = await transport.post<AuthResponse>(
+        "/auth/guest",
+        {},
+        undefined,
+        isAuthResponse
+      );
+    }
+    if (session !== provisional) return; // signed out or in meanwhile
+    if (response.user.id !== provisional.user.id) {
+      moveQueue(provisional.user.id, response.user.id);
+    }
+    setSession({ token: response.token, user: response.user });
+  }
+
+  // Re-attributes queued actions to another user id, including ids that
+  // actions carry in their arguments.
+  function moveQueue(from: string, to: string) {
+    for (const entry of pending) {
+      if (entry.userId !== from) continue;
+      entry.userId = to;
+      sizes.delete(entry);
+      const { action } = entry;
+      if (action.name === "importGame") {
+        const args = action.args as ActionArgs["importGame"];
+        if (args.game?.createdBy === from) {
+          entry.action = {
+            ...action,
+            args: { ...args, game: { ...args.game, createdBy: to } },
+          } as Action;
+        }
+      }
+    }
+    savePending(() => storage!.replacePending(pending));
+  }
+
+  // A real session, for things only the server can do.
+  async function ensureReal() {
+    await begin();
+    if (!session?.provisional) return;
+    if (!deps.network.isOnline())
+      throw new SyncError(OFFLINE_MESSAGE, "offline");
+    await materialise();
   }
 
   async function authRequest<T = AuthResponse>(
@@ -884,7 +967,7 @@ export function createSyncClient(
   }
 
   async function logIn(email: string, password: string) {
-    await begin();
+    await ensureReal();
     if (!deps.network.isOnline())
       throw new SyncError(OFFLINE_MESSAGE, "offline");
     const guest = session?.user.isGuest ? session : null;
@@ -898,7 +981,7 @@ export function createSyncClient(
       await authRequest("/auth/login", {
         email,
         password,
-        guestToken: guest?.token,
+        guestToken: guest?.token ?? undefined,
       })
     );
   }
@@ -925,12 +1008,30 @@ export function createSyncClient(
     getPendingCount: () => pending.length,
     async signInAsGuest() {
       await begin();
-      if (session) return session.user;
-      return adopt(await authRequest("/auth/guest", {}));
+      if (session) {
+        if (session.provisional && reachable())
+          await materialise().catch(() => {});
+        return session.user;
+      }
+      try {
+        return adopt(await authRequest("/auth/guest", {}));
+      } catch (error) {
+        if (!isNetworkError(error)) throw error;
+        // No signal on first use: carry on as a guest that exists only here
+        // until we can register it.
+        const user: PublicUser = {
+          id: deps.uuid(),
+          email: null,
+          isGuest: true,
+        };
+        setSession({ token: null, user, provisional: true });
+        return user;
+      }
     },
     async signUp(email, password) {
-      await begin();
-      const guestToken = session?.user.isGuest ? session.token : undefined;
+      await ensureReal();
+      const guestToken =
+        (session?.user.isGuest ? session.token : undefined) ?? undefined;
       return adopt(
         await authRequest("/auth/signup", { email, password }, guestToken)
       );
@@ -950,7 +1051,8 @@ export function createSyncClient(
     },
     async setPassword(password) {
       await begin();
-      if (!session) throw new SyncError("Sign in first.", "not_signed_in");
+      if (!session?.token)
+        throw new SyncError("Sign in first.", "not_signed_in");
       await authRequest("/auth/password", { password }, session.token, null);
     },
     async resetPassword(token, password) {
@@ -958,7 +1060,8 @@ export function createSyncClient(
     },
     async createResetLink(email) {
       await begin();
-      if (!session) throw new SyncError("Sign in first.", "not_signed_in");
+      if (!session?.token)
+        throw new SyncError("Sign in first.", "not_signed_in");
       const { url } = await authRequest<{ url: string }>(
         "/auth/reset-link",
         { email },
@@ -969,9 +1072,10 @@ export function createSyncClient(
     },
     async claimAdmin(token) {
       await begin();
-      if (!session) throw new SyncError("Sign in first.", "not_signed_in");
+      if (!session?.token)
+        throw new SyncError("Sign in first.", "not_signed_in");
       const claimedBy = session;
-      await authRequest("/auth/claim-admin", { token }, claimedBy.token, null);
+      await authRequest("/auth/claim-admin", { token }, claimedBy.token!, null);
       // Show the new role now: ask the server, or assume it if we can't.
       if (session?.token !== claimedBy.token) return;
       await checkSession();

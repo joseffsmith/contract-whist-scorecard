@@ -19,6 +19,9 @@ import type {
 // A tiny in-memory stand-in for the real server, speaking the SPEC'd HTTP
 // API through a stubbed `fetch`. For tests only.
 
+const UUID_V4 =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
 type Account = PublicUser & { password?: string };
 
 export function createFakeServer() {
@@ -35,6 +38,7 @@ export function createFakeServer() {
   }>();
   let tokenCounter = 0;
   let userCounter = 0;
+  const knownIds = new Set<string>();
 
   const server = {
     data,
@@ -58,6 +62,7 @@ export function createFakeServer() {
     streamLimited: false, // streams answer 429
     dropStreams: false, // streams end right after their first event
     forceReset: false, // the next pull answers with a full snapshot
+    takenIds: new Set<string>(), // guest ids the server pretends are in use
     streamOpens: 0,
     pullCount: 0,
 
@@ -242,7 +247,18 @@ export function createFakeServer() {
         return json(200, { results, version } satisfies PushResponse);
       }
       case "/auth/guest": {
-        const guest = { id: `u-${++userCounter}`, email: null, isGuest: true };
+        let id = `u-${++userCounter}`;
+        if (body?.id !== undefined) {
+          if (typeof body.id !== "string" || !UUID_V4.test(body.id)) {
+            return fail(400, "Bad request.", "invalid_id");
+          }
+          if (server.takenIds.has(body.id) || knownIds.has(body.id)) {
+            return fail(409, "That id is already in use.", "id_taken");
+          }
+          id = body.id;
+        }
+        knownIds.add(id);
+        const guest = { id, email: null, isGuest: true };
         return json(200, { token: server.tokenFor(guest), user: guest });
       }
       case "/auth/signup": {

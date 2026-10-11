@@ -19,7 +19,13 @@ import type {
 // Writes reject when they fail even after reopening the database once; the
 // engine decides what to do about that.
 
-export type Session = { token: string; user: PublicUser };
+// `provisional`: a guest made on this device while offline. It has no token
+// yet; the server is asked to accept its id when we're next online.
+export type Session = {
+  token: string | null;
+  user: PublicUser;
+  provisional?: boolean;
+};
 
 export type PendingEntry = {
   id: string; // the action's id

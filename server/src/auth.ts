@@ -20,6 +20,8 @@ import type { Limiter } from "./http";
 import { newActionId } from "./sync";
 import type { Step, Sync } from "./sync";
 
+const UUID_V4 =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const scrypt = promisify(scryptCb) as (
   password: string,
   salt: Buffer,
@@ -291,12 +293,29 @@ export function createAuth(
     requireUser,
     publicUser,
 
-    async guest(_req: IncomingMessage, ip: string) {
+    // A guest with a server-made id, or with the id the client made for its
+    // provisional guest while offline (a lowercase v4 uuid nobody uses yet).
+    async guest(req: IncomingMessage, ip: string) {
       tooMany(`guest:${ip}`, 30);
-      const id = randomUUID();
-      db.stmt(
-        "INSERT INTO users (id, is_guest, created_at) VALUES (?, 1, ?)"
-      ).run(id, new Date().toISOString());
+      const body = await readJson(req);
+      let id: string = randomUUID();
+      if (body.id !== undefined) {
+        if (typeof body.id !== "string" || !UUID_V4.test(body.id)) {
+          throw new HttpError(400, "Bad request.", "invalid_id");
+        }
+        id = body.id;
+      }
+      const taken = () =>
+        new HttpError(409, "That id is already in use.", "id_taken");
+      if (userById(id)) throw taken();
+      try {
+        db.stmt(
+          "INSERT INTO users (id, is_guest, created_at) VALUES (?, 1, ?)"
+        ).run(id, new Date().toISOString());
+      } catch (e) {
+        if (userById(id)) throw taken(); // lost a race for the same id
+        throw e;
+      }
       return respond(userById(id)!, createSession(id));
     },
 

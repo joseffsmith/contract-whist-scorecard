@@ -529,7 +529,9 @@ describe("auth", () => {
     const client = newClient();
     await client.start();
     goOffline();
-    const error = await client.signInAsGuest().catch((e) => e);
+    const error = await client
+      .signUp("a@example.com", "secret123")
+      .catch((e) => e);
     expect(error.code).toBe("offline");
     expect(error.message).toMatch(/offline/i);
   });
@@ -538,7 +540,9 @@ describe("auth", () => {
     const client = newClient();
     await client.start();
     server.offline = true; // the network claims to be up
-    const error = await client.signInAsGuest().catch((e) => e);
+    const error = await client
+      .signUp("a@example.com", "secret123")
+      .catch((e) => e);
     expect(error.code).toBe("network");
     expect(error.message).toMatch(/reach the server/i);
   });
@@ -1371,5 +1375,206 @@ describe("storage trouble", () => {
     goOnline();
     await synced(reloaded);
     expect(server.data.players.size).toBe(2);
+  });
+});
+
+// ── Provisional guests (first use with no signal) ───────────────────────
+
+const uuidDeps = () => {
+  let n = 0;
+  return {
+    uuid: () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`,
+  };
+};
+
+// A client that starts offline and plays as a guest, with some play queued.
+async function offlineGuest(withImport = false) {
+  goOffline();
+  const client = newClient({ deps: uuidDeps() });
+  await client.start();
+  const user = await client.signInAsGuest();
+  await client.dispatch("createPlayer", {
+    playerId: "p1",
+    name: "Ann",
+    claim: true,
+  });
+  await client.dispatch("createGame", createGameArgs("g1"));
+  await client.dispatch("placeBid", {
+    turnId: "t1",
+    roundId: "g1-r0",
+    playerId: "p1",
+    bid: 2,
+  });
+  if (withImport)
+    await client.dispatch("importGame", importArgs("old", user.id));
+  return { client, user };
+}
+
+describe("provisional guests", () => {
+  it("lets a first-time visitor with no signal play, across a reload", async () => {
+    const { client, user } = await offlineGuest();
+    expect(user).toMatchObject({ email: null, isGuest: true });
+    expect(user.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(client.getAuth()).toEqual({ isLoading: false, user });
+    expect(client.getPendingCount()).toBe(3);
+    expect(client.getView().players.get("p1")?.claimedBy).toBe(user.id);
+    expect(client.getView().games.get("g1")?.createdBy).toBe(user.id);
+    expect(server.requests.filter((r) => r.path === "/auth/guest")).toEqual([]);
+    await client.persisted();
+    client.stop();
+
+    const reloaded = newClient({ deps: uuidDeps() });
+    await reloaded.start();
+    expect(reloaded.getAuth().user).toEqual(user);
+    expect(reloaded.getPendingCount()).toBe(3);
+    expect(reloaded.getView().turns.get("t1")?.bid).toBe(2);
+    expect(server.data.games.size).toBe(0);
+  });
+
+  it("registers the same id once online and sends everything", async () => {
+    const { client, user } = await offlineGuest();
+    await client.persisted();
+    client.stop();
+    const reloaded = newClient({ deps: uuidDeps() });
+    await reloaded.start();
+
+    goOnline();
+    await synced(reloaded);
+    const register = server.requests.find((r) => r.path === "/auth/guest")!;
+    expect(register.body).toEqual({ id: user.id });
+    expect(reloaded.getAuth().user).toEqual(user);
+    expect(server.data.games.get("g1")?.createdBy).toBe(user.id);
+    expect(server.data.players.get("p1")?.claimedBy).toBe(user.id);
+    expect(server.data.turns.get("t1")?.bid).toBe(2);
+    // It is a normal guest now: its token works and it keeps playing.
+    await reloaded.dispatch("setScore", { turnId: "t1", score: 5 });
+    await synced(reloaded);
+    expect(server.data.turns.get("t1")?.score).toBe(5);
+    expect(
+      server.requests.filter((r) => r.path === "/auth/guest")
+    ).toHaveLength(1);
+  });
+
+  it("stays provisional through network errors and keeps trying", async () => {
+    const { client, user } = await offlineGuest();
+    // The browser thinks it's online but the server can't be reached.
+    networks[0].set(true);
+    await sleep(60);
+    expect(client.getAuth().user).toEqual(user);
+    expect(client.getPendingCount()).toBe(3);
+    server.offline = false;
+    await synced(client);
+    expect(server.data.games.get("g1")?.createdBy).toBe(user.id);
+  });
+
+  it("falls back to a fresh guest when the id is taken, moving the queue over", async () => {
+    const { client, user } = await offlineGuest(true);
+    server.takenIds.add(user.id);
+    goOnline();
+    await synced(client);
+    const fresh = client.getAuth().user!;
+    expect(fresh.id).not.toBe(user.id);
+    expect(fresh.isGuest).toBe(true);
+    expect(
+      server.requests.filter((r) => r.path === "/auth/guest").map((r) => r.body)
+    ).toEqual([{ id: user.id }, {}]);
+    // Everything landed under the new id, including the id inside importGame.
+    expect(server.data.games.get("g1")?.createdBy).toBe(fresh.id);
+    expect(server.data.games.get("old")?.createdBy).toBe(fresh.id);
+    expect(server.data.players.get("p1")?.claimedBy).toBe(fresh.id);
+    expect(server.log).toHaveLength(4);
+    expect(client.getView().games.get("old")?.createdBy).toBe(fresh.id);
+  });
+
+  it("treats an id the server finds malformed the same way", async () => {
+    goOffline();
+    const client = newClient(); // test ids like "a-1" aren't uuids
+    await client.start();
+    const user = await client.signInAsGuest();
+    await client.dispatch("createPlayer", {
+      playerId: "p1",
+      name: "Ann",
+      claim: true,
+    });
+    goOnline();
+    await synced(client);
+    expect(client.getAuth().user!.id).not.toBe(user.id);
+    expect(server.data.players.get("p1")?.claimedBy).toBe(
+      client.getAuth().user!.id
+    );
+  });
+
+  it("registers it first when logging in, then merges as a guest", async () => {
+    server.addAccount("ann@example.com", "secret123");
+    const { client, user } = await offlineGuest();
+    goOnline();
+    const account = await client.logIn("ann@example.com", "secret123");
+    expect(account.isGuest).toBe(false);
+    const paths = server.requests
+      .map((r) => r.path)
+      .filter(
+        (p) =>
+          (p !== "/auth/me" && p.startsWith("/auth/")) || p === "/sync/push"
+      );
+    expect(paths.slice(0, 3)).toEqual([
+      "/auth/guest",
+      "/sync/push",
+      "/auth/login",
+    ]);
+    const login = server.requests.find((r) => r.path === "/auth/login")!;
+    expect(typeof login.body.guestToken).toBe("string");
+    // The guest's play was saved under the guest before the switch.
+    expect(server.data.games.get("g1")?.createdBy).toBe(user.id);
+    expect(client.getPendingCount()).toBe(0);
+  });
+
+  it("registers it first when signing up, then upgrades it in place", async () => {
+    const { client, user } = await offlineGuest();
+    goOnline();
+    const account = await client.signUp("ann@example.com", "secret123");
+    expect(account).toEqual({
+      id: user.id,
+      email: "ann@example.com",
+      isGuest: false,
+    });
+    await synced(client);
+    expect(server.data.games.get("g1")?.createdBy).toBe(user.id);
+  });
+
+  it("can't log in or sign up without signal, and nothing is lost", async () => {
+    const { client } = await offlineGuest();
+    const error = await client
+      .logIn("ann@example.com", "secret123")
+      .catch((e) => e);
+    expect(error.code).toBe("offline");
+    expect(
+      (await client.signUp("a@example.com", "secret123").catch((e) => e)).code
+    ).toBe("offline");
+    expect(client.getPendingCount()).toBe(3);
+  });
+
+  it("reports queued actions if the provisional guest logs out", async () => {
+    const { client } = await offlineGuest();
+    const rejections = rejectionsOf(client);
+    await client.logOut();
+    expect(rejections.map((r) => r.code)).toEqual([
+      "signed_out",
+      "signed_out",
+      "signed_out",
+    ]);
+    expect(client.getAuth().user).toBeNull();
+    expect(client.getPendingCount()).toBe(0);
+  });
+
+  it("online first use still just asks the server for a guest", async () => {
+    const client = newClient({ deps: uuidDeps() });
+    await client.start();
+    const user = await client.signInAsGuest();
+    expect(
+      server.requests.filter((r) => r.path === "/auth/guest").map((r) => r.body)
+    ).toEqual([{}]);
+    expect(user.id).toMatch(/^u-/);
+    // And returns the same guest when asked again.
+    expect(await client.signInAsGuest()).toEqual(user);
   });
 });
