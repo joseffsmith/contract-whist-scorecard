@@ -43,7 +43,7 @@ afterEach(async () => {
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
-function newClient(storage = new IDBFactory()) {
+function newClient(storage = new IDBFactory(), realIds = false) {
   const online = new Set<() => void>();
   const client = createSyncClient({
     // The real server serves from its root; nginx adds /contract-whist/api.
@@ -53,7 +53,7 @@ function newClient(storage = new IDBFactory()) {
         ? Promise.reject(new TypeError("Failed to fetch"))
         : fetch(input, init)) as typeof fetch,
     openStorage: () => openStorage(storage),
-    uuid: () => `a-${++ids}`,
+    uuid: realIds ? () => crypto.randomUUID() : () => `a-${++ids}`,
     backoff: { minMs: 10, maxMs: 50 },
     streamGraceMs: 50,
     network: {
@@ -190,5 +190,119 @@ describe("against the real server", () => {
     expect(error.message).toBeTruthy();
     const back = await client.logIn("ann@example.com", "secret-pass-1");
     expect(back.id).toBe(guest.id);
+  });
+
+  const pull = async () =>
+    (await (await fetch(`${server.url}/sync/pull`)).json()) as {
+      puts: Record<string, any[]>;
+    };
+
+  const importArgs = (gameId: string, userId: string) => {
+    const players = Array.from({ length: 3 }, (_, i) => `${gameId}-p${i}`);
+    return {
+      game: {
+        id: gameId,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        createdBy: userId,
+      },
+      newPlayers: players.map((id) => ({ id, name: id })),
+      seats: players.map((playerId, i) => ({
+        id: `${gameId}-s${i}`,
+        gameId,
+        playerId,
+        orderNumber: i,
+      })),
+      rounds: roundIds(gameId).map((id, i) => ({ id, gameId, roundNumber: i })),
+      turns: [],
+    };
+  };
+
+  async function offlineFirstUse(storage: IDBFactory) {
+    down = true;
+    const client = newClient(storage, true);
+    await client.start();
+    const user = await client.signInAsGuest();
+    await client.dispatch("createPlayer", {
+      playerId: "p1",
+      name: "Ann",
+      claim: true,
+    });
+    await client.dispatch("createGame", {
+      gameId: "g1",
+      roundIds: roundIds("g1"),
+      seatId: "s1",
+      playerId: "p1",
+    });
+    await client.dispatch("placeBid", {
+      turnId: "t1",
+      roundId: "g1-r0",
+      playerId: "p1",
+      bid: 2,
+    });
+    await client.dispatch("importGame", importArgs("old", user.id));
+    await client.persisted();
+    client.stop();
+    return user;
+  }
+
+  it("plays offline from the first launch, then registers the same guest", async () => {
+    const storage = new IDBFactory();
+    const user = await offlineFirstUse(storage);
+
+    const reloaded = newClient(storage, true);
+    await reloaded.start();
+    expect(reloaded.getAuth().user).toEqual(user);
+    expect(reloaded.getPendingCount()).toBe(4);
+    reloaded.setDown(false);
+    await synced(reloaded);
+
+    expect(reloaded.getAuth().user).toEqual(user);
+    const { puts } = await pull();
+    expect(puts.games.map((g) => [g.id, g.createdBy]).sort()).toEqual([
+      ["g1", user.id],
+      ["old", user.id],
+    ]);
+    expect(puts.players.find((p) => p.id === "p1").claimedBy).toBe(user.id);
+  });
+
+  it("moves the queue to a fresh guest when the id was taken meanwhile", async () => {
+    const storage = new IDBFactory();
+    const user = await offlineFirstUse(storage);
+    // Someone else registers that id first.
+    const taken = await fetch(`${server.url}/auth/guest`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: user.id }),
+    });
+    expect(taken.status).toBe(200);
+
+    const reloaded = newClient(storage, true);
+    await reloaded.start();
+    reloaded.setDown(false);
+    await synced(reloaded);
+    const fresh = reloaded.getAuth().user!;
+    expect(fresh.id).not.toBe(user.id);
+    const { puts } = await pull();
+    expect(puts.games.map((g) => [g.id, g.createdBy]).sort()).toEqual([
+      ["g1", fresh.id],
+      ["old", fresh.id],
+    ]);
+    expect(puts.players.find((p) => p.id === "p1").claimedBy).toBe(fresh.id);
+  });
+
+  it("signs up from a provisional guest, keeping its id and play", async () => {
+    const storage = new IDBFactory();
+    const user = await offlineFirstUse(storage);
+    const reloaded = newClient(storage, true);
+    await reloaded.start();
+    reloaded.setDown(false);
+    const account = await reloaded.signUp("ann@example.com", "secret-pass-1");
+    expect(account).toMatchObject({
+      id: user.id,
+      email: "ann@example.com",
+      isGuest: false,
+    });
+    await synced(reloaded);
+    expect((await pull()).puts.games).toHaveLength(2);
   });
 });
