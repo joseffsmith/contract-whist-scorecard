@@ -107,6 +107,18 @@ const MIGRATIONS = [
   `
   CREATE INDEX games_createdBy ON games ("createdBy");
   `,
+  `
+  -- Guests made offline prove they own their client-chosen id with a secret.
+  ALTER TABLE users ADD COLUMN guest_secret_hash TEXT;
+  -- Imported rows name users (old InstantDB ids) that have no users row. Keep
+  -- those ids from being registered as guests: add placeholder users.
+  INSERT OR IGNORE INTO users (id, is_guest, created_at)
+    SELECT DISTINCT "createdBy", 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now') FROM games
+    WHERE "createdBy" IS NOT NULL AND "createdBy" != '';
+  INSERT OR IGNORE INTO users (id, is_guest, created_at)
+    SELECT DISTINCT "claimedBy", 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now') FROM players
+    WHERE "claimedBy" IS NOT NULL AND "claimedBy" != '';
+  `,
 ];
 
 function migrate(sql: DatabaseSync): void {
@@ -336,6 +348,18 @@ export function importSnapshot(db: Db, snapshot: Snapshot): void {
       db.stmt(
         "INSERT INTO users (id, email, is_guest, created_at) VALUES (?, ?, 0, ?)"
       ).run(u.id, u.email ? u.email.trim().toLowerCase() : null, now);
+    }
+    // Rows name creators and claimers (old Instant user ids) who may have no
+    // users row; reserve their ids so nobody can register as them.
+    for (const column of [
+      ["games", "createdBy"],
+      ["players", "claimedBy"],
+    ]) {
+      db.stmt(
+        `INSERT OR IGNORE INTO users (id, is_guest, created_at)
+         SELECT DISTINCT "${column[1]}", 0, ? FROM ${column[0]}
+         WHERE "${column[1]}" IS NOT NULL AND "${column[1]}" != ''`
+      ).run(now);
     }
     db.setVersion(1);
   });

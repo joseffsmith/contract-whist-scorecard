@@ -31,7 +31,8 @@ export type GuestGame = {
   deletedAt?: string;
 };
 
-const KEY = "guest-games-v1";
+export const GUEST_GAMES_KEY = "guest-games-v1";
+const KEY = GUEST_GAMES_KEY;
 
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
@@ -83,6 +84,12 @@ export const deleteGame = (id: string) => {
 };
 
 export const clearAll = () => save([]);
+
+// Really remove games (not just hide them), e.g. once they're safely uploaded.
+export const removeGames = (ids: string[]) => {
+  const gone = new Set(ids);
+  save(listGames().filter((g) => !gone.has(g.id)));
+};
 
 // ── Setup mutations ──
 

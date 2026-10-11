@@ -1,3 +1,5 @@
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { importSnapshot, openDb } from "../src/db";
 import { action, newGame, start, tempDir } from "./helpers";
@@ -62,12 +64,118 @@ describe("guest, signup, login, logout, me", () => {
   it("rate limits guest creation with or without an id", async () => {
     const api = await start();
     let last = 0;
-    for (let i = 0; i < 31; i++) {
+    for (let i = 0; i < 121; i++) {
       last = (
         await api.post("/auth/guest", i % 2 ? { id: crypto.randomUUID() } : {})
       ).status;
     }
     expect(last).toBe(429);
+  });
+
+  it("lets the same device register its guest id again with its secret", async () => {
+    const api = await start();
+    const id = "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b";
+    const secret = "s".repeat(43);
+    const first = await api.post("/auth/guest", { id, secret });
+    expect(first.status).toBe(200);
+    // A lost reply, or a second tab: same user, a new working token.
+    const again = await api.post("/auth/guest", { id, secret });
+    expect(again.status).toBe(200);
+    expect(again.body.user).toEqual(first.body.user);
+    expect(again.body.token).not.toBe(first.body.token);
+    expect((await api.get("/auth/me", again.body.token)).body.user.id).toBe(id);
+    // Anyone else knowing only the id cannot.
+    for (const body of [
+      { id },
+      { id, secret: "x".repeat(43) },
+      { id, secret: "short" },
+      { id, secret: 5 },
+    ]) {
+      const res = await api.post("/auth/guest", body);
+      expect([res.status, res.body.code]).toEqual([409, "id_taken"]);
+    }
+    // An id registered without a secret can never be claimed with one.
+    const bare = "4f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b";
+    await api.post("/auth/guest", { id: bare });
+    expect((await api.post("/auth/guest", { id: bare, secret })).status).toBe(
+      409
+    );
+  });
+
+  it("does not hand an upgraded account back to the secret", async () => {
+    const api = await start();
+    const id = "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b";
+    const secret = "s".repeat(43);
+    const guest = await api.post("/auth/guest", { id, secret });
+    await api.signup("ann@example.com", "password123", guest.body.token);
+    const again = await api.post("/auth/guest", { id, secret });
+    expect([again.status, again.body.code]).toEqual([409, "id_taken"]);
+  });
+
+  it("reserves the ids of imported creators and claimers", async () => {
+    const creator = "11111111-1111-4111-8111-111111111111";
+    const claimer = "22222222-2222-4222-8222-222222222222";
+    const dir = tempDir();
+    const db = openDb(dir);
+    importSnapshot(db, {
+      players: [{ id: "p1", name: "Ann", claimedBy: claimer }],
+      games: [
+        { id: "g1", createdAt: "2024-01-01T00:00:00.000Z", createdBy: creator },
+      ],
+      seats: [],
+      rounds: [],
+      turns: [],
+    });
+    db.close();
+    const api = await start({ dataDir: dir });
+    for (const id of [creator, claimer]) {
+      const res = await api.post("/auth/guest", { id });
+      expect([res.status, res.body.code]).toEqual([409, "id_taken"]);
+      const withSecret = await api.post("/auth/guest", {
+        id,
+        secret: "s".repeat(43),
+      });
+      expect(withSecret.status).toBe(409);
+    }
+    // They can't sign in either: no email, no password.
+    const login = await api.post("/auth/login", { email: "", password: "x" });
+    expect(login.status).not.toBe(200);
+    expect((await api.post("/auth/guest", {})).status).toBe(200);
+  });
+
+  it("reserves orphaned ids in a database imported before that was done", async () => {
+    const orphan = "33333333-3333-4333-8333-333333333333";
+    const claimer = "44444444-4444-4444-8444-444444444444";
+    const dir = tempDir();
+    openDb(dir).close();
+    // Put the database back as it was before the migration: rows naming users
+    // that don't exist.
+    const raw = new DatabaseSync(path.join(dir, "whist.db"));
+    raw.exec(
+      `INSERT INTO games (id, "createdAt", "createdBy", version) VALUES ('g1', '2024-01-01T00:00:00.000Z', '${orphan}', 1);
+       INSERT INTO players (id, name, "claimedBy", version) VALUES ('p1', 'Ann', '${claimer}', 1);
+       ALTER TABLE users DROP COLUMN guest_secret_hash;
+       PRAGMA user_version = 2;`
+    );
+    raw.close();
+    const api = await start({ dataDir: dir });
+    for (const id of [orphan, claimer]) {
+      expect((await api.post("/auth/guest", { id })).body.code).toBe(
+        "id_taken"
+      );
+    }
+  });
+
+  it("treats an id that actions were applied under as taken", async () => {
+    const dir = tempDir();
+    const id = "55555555-5555-4555-8555-555555555555";
+    const db = openDb(dir);
+    db.stmt(
+      "INSERT INTO applied_actions (id, user_id, version, at) VALUES ('a1', ?, 1, '2024-01-01T00:00:00.000Z')"
+    ).run(id);
+    db.close();
+    const api = await start({ dataDir: dir });
+    expect((await api.post("/auth/guest", { id })).body.code).toBe("id_taken");
   });
 
   it("rejects /auth/me without or with a bad token", async () => {

@@ -41,6 +41,7 @@ type UserRow = {
   is_admin: number;
   password_salt: string | null;
   password_hash: string | null;
+  guest_secret_hash: string | null;
 };
 type Hashed = { salt: string; hash: string };
 
@@ -65,6 +66,9 @@ async function checkPassword(
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+const GUESTS_PER_WINDOW = 120; // per IP per 15 minutes
+const sameHash = (a: string, b: string) =>
+  a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 const newToken = () => randomBytes(32).toString("base64url");
 const normEmail = (e: unknown) =>
@@ -116,6 +120,16 @@ export function createAuth(
 
   const userById = (id: string) =>
     db.stmt("SELECT * FROM users WHERE id = ?").get(id) as UserRow | undefined;
+  // Anything that refers to this user id, even without a users row.
+  const idInUse = (id: string) =>
+    !!(
+      userById(id) ||
+      db.stmt('SELECT 1 FROM games WHERE "createdBy" = ?').get(id) ||
+      db.stmt('SELECT 1 FROM players WHERE "claimedBy" = ?').get(id) ||
+      db.stmt("SELECT 1 FROM applied_actions WHERE user_id = ?").get(id)
+    );
+  const idTaken = () =>
+    new HttpError(409, "That id is already in use.", "id_taken");
   const userByEmail = (email: string) =>
     db.stmt("SELECT * FROM users WHERE email = ?").get(email) as
       | UserRow
@@ -294,26 +308,40 @@ export function createAuth(
     publicUser,
 
     // A guest with a server-made id, or with the id the client made for its
-    // provisional guest while offline (a lowercase v4 uuid nobody uses yet).
+    // provisional guest while offline (a lowercase v4 uuid). The client sends
+    // a random `secret` with it; repeating the request with the same id and
+    // secret (a lost reply, a second tab) gets a new session for the same
+    // guest. An id that anything already refers to is taken.
     async guest(req: IncomingMessage, ip: string) {
-      tooMany(`guest:${ip}`, 30);
+      tooMany(`guest:${ip}`, GUESTS_PER_WINDOW);
       const body = await readJson(req);
       let id: string = randomUUID();
+      let secretHash: string | null = null;
       if (body.id !== undefined) {
         if (typeof body.id !== "string" || !UUID_V4.test(body.id)) {
           throw new HttpError(400, "Bad request.", "invalid_id");
         }
         id = body.id;
+        if (typeof body.secret === "string" && body.secret.length >= 16) {
+          secretHash = sha256(body.secret.slice(0, 200));
+        }
+        const existing = userById(id);
+        if (
+          existing?.is_guest &&
+          secretHash &&
+          existing.guest_secret_hash &&
+          sameHash(existing.guest_secret_hash, secretHash)
+        ) {
+          return respond(existing, createSession(id));
+        }
+        if (existing || idInUse(id)) throw idTaken();
       }
-      const taken = () =>
-        new HttpError(409, "That id is already in use.", "id_taken");
-      if (userById(id)) throw taken();
       try {
         db.stmt(
-          "INSERT INTO users (id, is_guest, created_at) VALUES (?, 1, ?)"
-        ).run(id, new Date().toISOString());
+          "INSERT INTO users (id, is_guest, guest_secret_hash, created_at) VALUES (?, 1, ?, ?)"
+        ).run(id, secretHash, new Date().toISOString());
       } catch (e) {
-        if (userById(id)) throw taken(); // lost a race for the same id
+        if (userById(id)) throw idTaken(); // lost a race for the same id
         throw e;
       }
       return respond(userById(id)!, createSession(id));

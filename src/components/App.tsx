@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { Outlet, useLocation, useNavigate, matchPath } from "react-router-dom";
 import { DEALS } from "../constants";
 import { act, newId } from "../lib/dispatch";
+import { watchUploads } from "../guest/uploads";
 import { useMyPlayer } from "../players/account";
 import { sync, useAuth, useConnectionStatus, useStorageHealth } from "../sync";
 import { t } from "../theme/tokens";
@@ -29,11 +30,16 @@ export const App = () => {
   // Changes the server turned down after we'd already shown them locally.
   useEffect(
     () =>
-      sync.onActionRejected(({ error }) =>
-        enqueueSnackbar(error, { variant: "error" })
-      ),
+      sync.onActionRejected(({ action, error }) => {
+        // Uploads of phone-only games report their own errors (guest/uploads).
+        if (action.name === "importGame") return;
+        enqueueSnackbar(error, { variant: "error" });
+      }),
     []
   );
+
+  // Removes phone-only games once their upload is confirmed.
+  useEffect(() => watchUploads(), []);
 
   const { isLoading } = useAuth();
   const { user, player: myPlayer } = useMyPlayer();

@@ -1,11 +1,9 @@
 import { enqueueSnackbar } from "notistack";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import type { RoundRow, SeatRow, TurnRow } from "../../shared/types";
-import {
-  clearAll,
-  deleteGame as deleteGuestGame,
-  GuestGame,
-} from "../guest/guestStore";
+import { GuestGame, listGames, removeGames } from "../guest/guestStore";
+import { readUploads, recordUpload, useUploading } from "../guest/uploads";
 import { newId } from "../lib/dispatch";
 import {
   selectActivePlayers,
@@ -24,15 +22,27 @@ export const GuestMigrationDialog = ({
 }: {
   userId: string;
   games: GuestGame[];
-  onDone: () => void;
+  // Called once everything is queued, with local game id → new game id.
+  onDone: (uploaded: Record<string, string>) => void;
   // "Not now": leaves the games where they are.
   onClose?: () => void;
 }) => {
   const { view } = useSyncView();
   const [busy, setBusy] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const uploading = useUploading();
+  const offered = games.filter((g) => !uploading.has(g.id));
 
   const migrate = async () => {
     setBusy(true);
+    // Read again now: another tab may have uploaded or changed games since
+    // this screen was drawn.
+    const inFlight = readUploads();
+    const todo = listGames().filter((g) => !g.deletedAt && !inFlight[g.id]);
+    if (!todo.length) {
+      setBusy(false);
+      return onDone({});
+    }
     // Players matched by name (case-insensitive) onto existing ones; names
     // nobody has used yet become new players. Remembered across games so a
     // new name is only created once.
@@ -45,9 +55,9 @@ export const GuestMigrationDialog = ({
     for (const p of selectPlayersByClaim(view, userId)) {
       known.set(p.name.trim().toLowerCase(), p.id);
     }
-    const saved: GuestGame[] = [];
+    const uploaded: Record<string, string> = {};
     try {
-      for (const game of games) {
+      for (const game of todo) {
         const newPlayers: { id: string; name: string }[] = [];
         const mappedIds = game.players.map((gp) => {
           const key = gp.name.trim().toLowerCase();
@@ -101,29 +111,25 @@ export const GuestMigrationDialog = ({
           rounds,
           turns,
         });
-        saved.push(game);
+        // The local copy stays until the server confirms the new game
+        // (see guest/uploads), so a rejected upload loses nothing.
+        recordUpload(game.id, gameId);
+        uploaded[game.id] = gameId;
       }
-      clearAll();
-      enqueueSnackbar(
-        `Migrated ${games.length} guest game${games.length === 1 ? "" : "s"}`,
-        { variant: "success" }
-      );
-      onDone();
+      onDone(uploaded);
     } catch (err) {
       console.error(err);
-      // Don't offer the ones that did make it again.
-      saved.forEach((g) => deleteGuestGame(g.id));
-      enqueueSnackbar(
-        `Couldn't save every guest game: ${(err as Error).message}`,
-        { variant: "error" }
-      );
+      enqueueSnackbar(`Couldn't save every game: ${(err as Error).message}`, {
+        variant: "error",
+      });
       setBusy(false);
     }
   };
 
+  // Games already on their way up aren't discarded.
   const discard = () => {
-    clearAll();
-    onDone();
+    removeGames(offered.map((g) => g.id));
+    onDone({});
   };
 
   return (
