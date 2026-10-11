@@ -18,14 +18,36 @@ export type Challenge = {
   expires: number;
 };
 
+// Where spent tokens (their signatures) are remembered until they expire.
+// `add` is false if the signature was already there. The server keeps them in
+// the database, so a restart can't make a used token good again.
+export type SpentTokens = {
+  add(signature: string, expires: number, now: number): boolean;
+};
+
+export function memorySpentTokens(): SpentTokens {
+  // Oldest first.
+  const used = new Map<string, number>();
+  return {
+    add(signature, expires, now) {
+      for (const [sig, at] of used) {
+        if (at > now) break;
+        used.delete(sig);
+      }
+      if (used.has(signature)) return false;
+      used.set(signature, expires);
+      return true;
+    },
+  };
+}
+
 export function createChallenges(
   secret: Buffer,
-  now: () => Date = () => new Date()
+  now: () => Date = () => new Date(),
+  spent: SpentTokens = memorySpentTokens()
 ) {
   const sign = (body: string) =>
     createHmac("sha256", secret).update(body).digest("base64url");
-  // Spent tokens (their signatures), oldest first.
-  const used = new Map<string, number>();
 
   return {
     // A new random challenge and the token to hand to the client with it.
@@ -69,12 +91,8 @@ export function createChallenges(
         return undefined;
       }
       const at = now().getTime();
-      for (const [sig, expires] of used) {
-        if (expires > at) break;
-        used.delete(sig);
-      }
-      if (payload.expires <= at || used.has(signature)) return undefined;
-      used.set(signature, payload.expires);
+      if (payload.expires <= at || !spent.add(signature, payload.expires, at))
+        return undefined;
       return payload.kind === kind && payload.userId === userId
         ? payload
         : undefined;

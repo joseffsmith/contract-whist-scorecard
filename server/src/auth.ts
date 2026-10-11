@@ -155,7 +155,19 @@ export function createAuth(
       ).value,
       "hex"
     ),
-    opts.now
+    opts.now,
+    {
+      add(signature, expires, now) {
+        db.stmt("DELETE FROM used_challenges WHERE expires <= ?").run(now);
+        return (
+          db
+            .stmt(
+              "INSERT OR IGNORE INTO used_challenges (sig, expires) VALUES (?, ?)"
+            )
+            .run(signature, expires).changes === 1
+        );
+      },
+    }
   );
 
   // ── Storage helpers ───────────────────────────────────────────────────

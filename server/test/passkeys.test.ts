@@ -1189,6 +1189,26 @@ describe("stateless challenges", () => {
     expect(added.status).toBe(200);
   });
 
+  it("stays spent across a restart", async () => {
+    // Synced passkeys report counter 0, so only this stops a replay.
+    const dir = tempDir();
+    let api = await start({ dataDir: dir });
+    const device = phone();
+    await passkeyAccount(api, device);
+    const c = await fresh(api);
+    const response = device.get(c.options);
+    const send = () =>
+      api.post("/auth/passkey/login/verify", {
+        challengeId: c.challengeId,
+        response,
+      });
+    expect((await send()).status).toBe(200);
+    await api.close();
+
+    api = await start({ dataDir: dir });
+    expect((await send()).body.code).toBe("challenge_expired");
+  });
+
   it("keeps working for a crowd on one address", async () => {
     // Nothing is held per challenge, so many outstanding ones lose none.
     const api = await start();

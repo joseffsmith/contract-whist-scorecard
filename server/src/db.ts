@@ -142,6 +142,11 @@ const MIGRATIONS = [
   -- Server-made values that must survive restarts (the challenge signing key).
   CREATE TABLE settings (key TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL);
   `,
+  `
+  -- Passkey challenge tokens already used, until they expire (see challenges.ts).
+  CREATE TABLE used_challenges (sig TEXT NOT NULL PRIMARY KEY, expires INTEGER NOT NULL);
+  CREATE INDEX used_challenges_expires ON used_challenges (expires);
+  `,
 ];
 
 function migrate(sql: DatabaseSync): void {

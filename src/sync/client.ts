@@ -1243,7 +1243,14 @@ export function createSyncClient(
       }
       return done;
     } catch (error) {
-      if (error instanceof SyncError && error.status === 401) orphan();
+      // Any refusal (not a 5xx or lost connection: it may have been kept).
+      if (
+        error instanceof SyncError &&
+        error.status !== undefined &&
+        error.status >= 400 &&
+        error.status < 500
+      )
+        orphan();
       throw error;
     }
   }
