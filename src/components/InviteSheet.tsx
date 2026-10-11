@@ -1,11 +1,11 @@
 import { enqueueSnackbar } from "notistack";
 import { useIsOffline } from "../lib/offline";
+import { appUrl } from "../lib/paths";
 import { alpha, t } from "../theme/tokens";
 import { QrCode } from "./chrome/QrCode";
 import { Sheet } from "./chrome/Sheet";
 
-export const joinUrl = (gameId: string) =>
-  `${window.location.origin}${import.meta.env.BASE_URL}join/${gameId}`;
+export const joinUrl = (gameId: string) => appUrl(`join/${gameId}`);
 
 // Shows a QR code that others at the table scan to join this game from their
 // own phone — no sign-up needed.
