@@ -8,10 +8,12 @@ import {
 } from "./actions";
 import { ActionError } from "./types";
 import type {
+  Action,
   ActionArgs,
   ActionContext,
   ActionName,
   DataState,
+  ReadState,
   RowOp,
   TableName,
   Tables,
@@ -208,12 +210,32 @@ describe("applyAction general behaviour", () => {
     );
   });
 
-  it("never mutates the state it reads", () => {
-    const data = startedWorld();
+  it("never mutates the state it reads, for every action", () => {
+    const data = worldWithDan();
+    run(data, alice, "createPlayer", { playerId: "p5", name: "Eve" });
+    run(data, alice, "claimPlayer", { playerId: "p3" });
+    run(data, alice, "createGame", {
+      gameId: "g8",
+      roundIds: roundIds("g8"),
+      seatId: "s8",
+      playerId: "p5",
+    });
+    run(data, alice, "placeBid", {
+      turnId: "t1",
+      roundId: "g1r0",
+      playerId: "p1",
+      bid: 2,
+    });
     run(data, alice, "setScore", { turnId: "t1", score: 3 });
+    // p4 merged into p1 earlier, so undoMerge has something to do.
+    run(data, alice, "mergePlayers", { fromId: "p4", intoId: "p1" });
     // Freeze every row (and nested merge logs); any in-place write would throw.
     for (const table of Object.keys(data) as TableName[]) {
-      for (const r of data[table].values()) Object.freeze(r);
+      for (const r of data[table].values()) {
+        const log = (r as { mergeLog?: object | null }).mergeLog;
+        if (log) Object.freeze(log);
+        Object.freeze(r);
+      }
     }
     const before = snapshot(data);
     const state = memoryReadState(data);
@@ -221,16 +243,356 @@ describe("applyAction general behaviour", () => {
       ctx: ActionContext,
       name: N,
       args: ActionArgs[N]
-    ) => applyAction(state, { id: "x", name, args }, ctx);
-    act(alice, "claimPlayer", { playerId: "p3" });
+    ) => {
+      const ops = applyAction(state, { id: "x", name, args }, ctx);
+      expect(ops.length, name).toBeGreaterThan(0);
+    };
+    act(alice, "createPlayer", { playerId: "p6", name: "Fay", claim: true });
+    act(bob, "claimPlayer", { playerId: "p5" });
     act(alice, "unclaimPlayer", { playerId: "p1" });
+    act(alice, "createGame", {
+      gameId: "g9",
+      roundIds: roundIds("g9"),
+      seatId: "s9",
+      playerId: "p5",
+    });
     act(alice, "deleteGame", { gameId: "g1" });
+    act(alice, "addSeat", {
+      seatId: "s9",
+      gameId: "g1",
+      playerId: "p5",
+      orderNumber: 3,
+    });
+    act(alice, "removeSeat", { seatId: "s3" });
     act(alice, "reorderSeats", { gameId: "g1", seatIds: ["s3", "s2", "s1"] });
+    act(alice, "setInitialDealer", { gameId: "g8", playerId: "p5" });
+    act(alice, "placeBid", {
+      turnId: "t9",
+      roundId: "g1r1",
+      playerId: "p2",
+      bid: 1,
+    });
     act(alice, "setScore", { turnId: "t1", score: 5 });
     act(alice, "clearScore", { turnId: "t1" });
     act(alice, "deleteTurn", { turnId: "t1" });
-    act(alice, "mergePlayers", { fromId: "p4", intoId: "p1" });
+    act(alice, "mergePlayers", { fromId: "p5", intoId: "p3" });
+    act(alice, "undoMerge", { fromId: "p4" });
+    act(alice, "importGame", {
+      game: { id: "gi", createdAt: NOW, createdBy: "alice" },
+      newPlayers: [{ id: "n1", name: "New" }],
+      seats: [{ id: "is1", gameId: "gi", playerId: "n1", orderNumber: 0 }],
+      rounds: [{ id: "ir0", gameId: "gi", roundNumber: 0 }],
+      turns: [{ id: "it1", roundId: "ir0", playerId: "n1", bid: 1 }],
+    });
     expect(data).toEqual(before);
+  });
+
+  it("turns anything else thrown while reading the args into an ActionError", () => {
+    const state: ReadState = {
+      get: () => {
+        throw new TypeError("boom");
+      },
+      where: () => [],
+    };
+    const call = (action: unknown) => () =>
+      applyAction(state, action as Action, alice);
+    for (const action of [
+      { id: "x", name: "claimPlayer", args: { playerId: "p1" } },
+      { id: "x", name: "claimPlayer", args: null },
+      { id: "x", name: "claimPlayer" },
+      null,
+    ]) {
+      expect(call(action)).toThrow(ActionError);
+    }
+  });
+});
+
+describe("replaying actions", () => {
+  // Each step is applied, then applied again to the state it produced.
+  type Step = [ActionContext, ActionName, unknown];
+  const steps: Step[] = [
+    [alice, "createPlayer", { playerId: "p1", name: "A", claim: true }],
+    [alice, "createPlayer", { playerId: "p2", name: "B" }],
+    [alice, "createPlayer", { playerId: "p3", name: "C" }],
+    [alice, "createPlayer", { playerId: "p4", name: "D" }],
+    [bob, "claimPlayer", { playerId: "p3" }],
+    [bob, "unclaimPlayer", { playerId: "p3" }],
+    [
+      alice,
+      "createGame",
+      { gameId: "g1", roundIds: roundIds("g1"), seatId: "s1", playerId: "p1" },
+    ],
+    [
+      alice,
+      "addSeat",
+      { seatId: "s2", gameId: "g1", playerId: "p2", orderNumber: 1 },
+    ],
+    [
+      alice,
+      "addSeat",
+      { seatId: "s3", gameId: "g1", playerId: "p3", orderNumber: 2 },
+    ],
+    [alice, "reorderSeats", { gameId: "g1", seatIds: ["s3", "s1", "s2"] }],
+    [alice, "setInitialDealer", { gameId: "g1", playerId: "p2" }],
+    [
+      alice,
+      "placeBid",
+      { turnId: "t1", roundId: "g1r0", playerId: "p1", bid: 3 },
+    ],
+    [
+      alice,
+      "placeBid",
+      { turnId: "t2", roundId: "g1r0", playerId: "p2", bid: 1 },
+    ],
+    [alice, "setScore", { turnId: "t1", score: 5 }],
+    [alice, "clearScore", { turnId: "t1" }],
+    [alice, "deleteTurn", { turnId: "t2" }],
+    [alice, "removeSeat", { seatId: "s3" }],
+    [
+      alice,
+      "createGame",
+      { gameId: "g2", roundIds: roundIds("g2"), seatId: "s4", playerId: "p4" },
+    ],
+    [alice, "mergePlayers", { fromId: "p4", intoId: "p1" }],
+    [alice, "undoMerge", { fromId: "p4" }],
+    [alice, "deleteGame", { gameId: "g2" }],
+    [
+      alice,
+      "importGame",
+      {
+        game: { id: "gi", createdAt: NOW, createdBy: "alice" },
+        newPlayers: [{ id: "n1", name: "New" }],
+        seats: [{ id: "is1", gameId: "gi", playerId: "n1", orderNumber: 0 }],
+        rounds: [{ id: "ir0", gameId: "gi", roundNumber: 0 }],
+        turns: [{ id: "it1", roundId: "ir0", playerId: "n1", bid: 1 }],
+      },
+    ],
+  ];
+
+  it("covers every action", () => {
+    expect(new Set(steps.map((s) => s[1])).size).toBe(16);
+  });
+
+  it("applying an action twice is a no-op the second time", () => {
+    const data = createMemoryState();
+    for (const [ctx, name, args] of steps) {
+      const act = { id: `r${++actionCounter}`, name, args } as Action;
+      const ops = applyAction(memoryReadState(data), act, ctx);
+      expect(ops.length, `${name} first`).toBeGreaterThan(0);
+      applyOps(data, ops);
+      expect(
+        applyAction(memoryReadState(data), act, ctx),
+        `${name} replay`
+      ).toEqual([]);
+    }
+  });
+
+  it("claiming a player twice and re-adding a deleted turn id behave", () => {
+    const data = world();
+    run(data, bob, "claimPlayer", { playerId: "p3" });
+    expect(run(data, bob, "claimPlayer", { playerId: "p3" })).toEqual([]);
+  });
+});
+
+describe("determinism", () => {
+  // The same rows inserted in a different order must give identical ops.
+  function reversed(data: DataState): DataState {
+    const copy = createMemoryState();
+    for (const table of Object.keys(data) as TableName[]) {
+      for (const [id, value] of [...data[table]].reverse()) {
+        (copy[table] as Map<string, unknown>).set(id, value);
+      }
+    }
+    return copy;
+  }
+
+  function busyDan(): DataState {
+    const data = worldWithDan();
+    for (const n of ["3", "4", "5"]) {
+      run(data, alice, "createGame", {
+        gameId: `gx${n}`,
+        roundIds: roundIds(`gx${n}`),
+        seatId: `sx${n}`,
+        playerId: "p4",
+      });
+      run(data, alice, "setInitialDealer", {
+        gameId: `gx${n}`,
+        playerId: "p4",
+      });
+      run(data, alice, "placeBid", {
+        turnId: `tx${n}`,
+        roundId: `gx${n}r0`,
+        playerId: "p4",
+        bid: 1,
+      });
+    }
+    return data;
+  }
+
+  it("mergePlayers and undoMerge ops do not depend on insertion order", () => {
+    const a = busyDan();
+    const b = reversed(a);
+    const act = (
+      data: DataState,
+      name: "mergePlayers" | "undoMerge",
+      args: any
+    ) => applyAction(memoryReadState(data), { id: "x", name, args }, alice);
+    const mergeArgs = { fromId: "p4", intoId: "p1" };
+    const opsA = act(a, "mergePlayers", mergeArgs);
+    expect(opsA.length).toBeGreaterThan(8);
+    expect(act(b, "mergePlayers", mergeArgs)).toEqual(opsA);
+
+    applyOps(a, opsA);
+    applyOps(b, opsA);
+    const undoA = act(reversed(a), "undoMerge", { fromId: "p4" });
+    expect(act(a, "undoMerge", { fromId: "p4" })).toEqual(undoA);
+    expect(act(b, "undoMerge", { fromId: "p4" })).toEqual(undoA);
+  });
+
+  it("mergePlayers puts rows in id order", () => {
+    const ops = applyAction(
+      memoryReadState(reversed(busyDan())),
+      { id: "x", name: "mergePlayers", args: { fromId: "p4", intoId: "p1" } },
+      alice
+    );
+    const seatIds = ops.flatMap((op) =>
+      op.op === "put" && op.table === "seats" ? [op.row.id] : []
+    );
+    expect(seatIds).toEqual([...seatIds].sort());
+  });
+});
+
+describe("malformed arguments", () => {
+  const valid: { [N in ActionName]: ActionArgs[N] } = {
+    createPlayer: { playerId: "p5", name: "Eve", claim: true },
+    claimPlayer: { playerId: "p3" },
+    unclaimPlayer: { playerId: "p1" },
+    createGame: {
+      gameId: "g9",
+      roundIds: roundIds("g9"),
+      seatId: "s9",
+      playerId: "p1",
+    },
+    deleteGame: { gameId: "g1" },
+    addSeat: { seatId: "s9", gameId: "g1", playerId: "p5", orderNumber: 3 },
+    removeSeat: { seatId: "s3" },
+    reorderSeats: { gameId: "g1", seatIds: ["s3", "s2", "s1"] },
+    setInitialDealer: { gameId: "g5", playerId: "p6" },
+    placeBid: { turnId: "t9", roundId: "g1r1", playerId: "p2", bid: 1 },
+    setScore: { turnId: "t1", score: 4 },
+    clearScore: { turnId: "t1" },
+    deleteTurn: { turnId: "t1" },
+    mergePlayers: { fromId: "p5", intoId: "p3" },
+    undoMerge: { fromId: "p4" },
+    importGame: {
+      game: { id: "gi", createdAt: NOW, createdBy: "alice", deletedAt: null },
+      newPlayers: [{ id: "n1", name: "New" }],
+      seats: [{ id: "is1", gameId: "gi", playerId: "n1", orderNumber: 0 }],
+      rounds: [{ id: "ir0", gameId: "gi", roundNumber: 0 }],
+      turns: [{ id: "it1", roundId: "ir0", playerId: "n1", bid: 1, score: 2 }],
+    },
+  };
+  const junk: unknown[] = [
+    null,
+    undefined,
+    [],
+    [null],
+    123,
+    NaN,
+    Infinity,
+    {},
+    "",
+    true,
+    "x".repeat(101),
+  ];
+
+  // Every path into the args: top-level fields, and fields of nested objects
+  // and array elements.
+  function paths(
+    value: unknown,
+    prefix: (string | number)[] = []
+  ): (string | number)[][] {
+    if (value === null || typeof value !== "object") return [];
+    return Object.entries(value).flatMap(([key, child]) => {
+      const path = [...prefix, Array.isArray(value) ? Number(key) : key];
+      return [path, ...paths(child, path)];
+    });
+  }
+  function withValue(args: unknown, path: (string | number)[], value: unknown) {
+    const copy = structuredClone(args) as any;
+    let node = copy;
+    for (const key of path.slice(0, -1)) node = node[key];
+    node[path[path.length - 1]] = value;
+    return copy;
+  }
+
+  function sweepState(): DataState {
+    const data = startedWorld();
+    run(data, alice, "createPlayer", { playerId: "p5", name: "Eve" });
+    run(data, alice, "createPlayer", { playerId: "p6", name: "Fay" });
+    run(data, alice, "createGame", {
+      gameId: "g5",
+      roundIds: roundIds("g5"),
+      seatId: "s5",
+      playerId: "p6",
+    });
+    run(data, alice, "mergePlayers", { fromId: "p4", intoId: "p1" });
+    return data;
+  }
+
+  for (const name of Object.keys(valid) as ActionName[]) {
+    it(`${name} only ever throws ActionError`, () => {
+      const data = sweepState();
+      const state = memoryReadState(data);
+      const args = valid[name];
+      // The unmodified args are accepted.
+      expect(
+        applyAction(state, { id: "x", name, args } as Action, alice).length
+      ).toBeGreaterThanOrEqual(0);
+      let tried = 0;
+      for (const path of paths(args)) {
+        for (const value of junk) {
+          for (const ctx of [alice, anon]) {
+            tried++;
+            const action = {
+              id: "x",
+              name,
+              args: withValue(args, path, value),
+            };
+            try {
+              applyAction(state, action as Action, ctx);
+            } catch (error) {
+              expect(
+                error,
+                `${name} ${path.join(".")}=${String(value)}`
+              ).toBeInstanceOf(ActionError);
+            }
+          }
+        }
+      }
+      expect(tried).toBeGreaterThan(0);
+      for (const bad of junk) {
+        try {
+          applyAction(state, { id: "x", name, args: bad } as Action, alice);
+        } catch (error) {
+          expect(error).toBeInstanceOf(ActionError);
+        }
+      }
+    });
+  }
+
+  it("junk ids and counts are rejected as invalid, not accepted", () => {
+    const data = sweepState();
+    reject(data, alice, "claimPlayer", { playerId: null as any }, "invalid");
+    reject(data, alice, "claimPlayer", { playerId: {} as any }, "invalid");
+    reject(data, alice, "deleteGame", { gameId: ["g1"] as any }, "invalid");
+    reject(
+      data,
+      alice,
+      "claimPlayer",
+      { playerId: "x".repeat(101) },
+      "invalid"
+    );
   });
 });
 
@@ -367,7 +729,13 @@ describe("unclaimPlayer", () => {
   it("rejects anyone but the owner", () => {
     const data = world();
     reject(data, bob, "unclaimPlayer", { playerId: "p1" }, "forbidden");
-    reject(data, alice, "unclaimPlayer", { playerId: "p3" }, "forbidden");
+    reject(data, alice, "unclaimPlayer", { playerId: "p2" }, "forbidden");
+  });
+
+  it("does nothing for a player nobody has claimed", () => {
+    expect(run(world(), alice, "unclaimPlayer", { playerId: "p3" })).toEqual(
+      []
+    );
   });
 
   it("rejects unknown players and signed-out users", () => {
@@ -586,10 +954,13 @@ describe("removeSeat", () => {
     expect(data.seats.has("s3")).toBe(false);
   });
 
-  it("rejects non-creators, unknown seats and signed-out users", () => {
+  it("does nothing when the seat is already gone", () => {
+    expect(run(world(), alice, "removeSeat", { seatId: "nope" })).toEqual([]);
+  });
+
+  it("rejects non-creators and signed-out users", () => {
     const data = world();
     reject(data, bob, "removeSeat", { seatId: "s3" }, "forbidden");
-    reject(data, alice, "removeSeat", { seatId: "nope" }, "not_found");
     reject(data, anon, "removeSeat", { seatId: "s3" }, "not_signed_in");
   });
 
@@ -920,14 +1291,10 @@ describe("deleteTurn", () => {
     reject(data, anon, "deleteTurn", { turnId: "t1" }, "not_signed_in");
   });
 
-  it("rejects unknown turns", () => {
-    reject(
-      startedWorld(),
-      alice,
-      "deleteTurn",
-      { turnId: "nope" },
-      "not_found"
-    );
+  it("does nothing when the turn is already gone", () => {
+    expect(
+      run(startedWorld(), alice, "deleteTurn", { turnId: "nope" })
+    ).toEqual([]);
   });
 });
 
@@ -935,6 +1302,12 @@ describe("mergePlayers", () => {
   // p4 (Dan) is merged into p1 (Alice, claimed by alice). Dan has seat s4,
   // turn t4 and is initial dealer of g2; Alice is only in g1.
   const merge = { fromId: "p4", intoId: "p1" };
+
+  it("does nothing when the player was already merged into the target", () => {
+    const data = worldWithDan();
+    run(data, alice, "mergePlayers", merge);
+    expect(run(data, alice, "mergePlayers", merge)).toEqual([]);
+  });
 
   it("moves seats, turns and dealer games to the target and logs it", () => {
     const data = worldWithDan();
@@ -1017,7 +1390,13 @@ describe("mergePlayers", () => {
   it("rejects players that are already merged", () => {
     const data = worldWithDan();
     run(data, alice, "mergePlayers", merge);
-    reject(data, alice, "mergePlayers", merge, "merged");
+    reject(
+      data,
+      alice,
+      "mergePlayers",
+      { fromId: "p4", intoId: "p3" },
+      "merged"
+    );
     reject(
       data,
       alice,
@@ -1111,16 +1490,186 @@ describe("undoMerge", () => {
     expect(data).toEqual(before);
   });
 
-  it("moves logged rows back from whoever holds them now", () => {
+  it("only moves rows held by the merge target or its merge chain", () => {
     const data = mergeFixture();
     run(data, alice, "mergePlayers", merge);
-    // Alice's player was later merged away, so p3 now holds Dan's old rows.
+    // Dan's seat and turn were handed to someone off the chain since.
     seed(data, "seats", { ...row(data, "seats", "s4"), playerId: "p3" });
     seed(data, "turns", { ...row(data, "turns", "t4"), playerId: "p3" });
-    run(data, carol, "undoMerge", { fromId: "p4" });
-    expect(row(data, "seats", "s4").playerId).toBe("p4");
+    seed(data, "games", { ...row(data, "games", "g2"), initialDealerId: "p3" });
+    expect(run(data, carol, "undoMerge", { fromId: "p4" })).toHaveLength(1);
+    expect(row(data, "seats", "s4").playerId).toBe("p3");
+    expect(row(data, "turns", "t4").playerId).toBe("p3");
+    expect(row(data, "games", "g2").initialDealerId).toBe("p3");
+    expect(row(data, "players", "p4").mergedInto).toBeNull();
+  });
+
+  it("also moves turns added to the target after the merge", () => {
+    const data = mergeFixture();
+    run(data, alice, "placeBid", {
+      turnId: "t1",
+      roundId: "g1r0",
+      playerId: "p1",
+      bid: 1,
+    });
+    run(data, alice, "mergePlayers", merge);
+    // Alice (now holding Dan's seat in g2) bids in another round of g2.
+    run(data, alice, "placeBid", {
+      turnId: "t5",
+      roundId: "g2r1",
+      playerId: "p1",
+      bid: 2,
+    });
+    run(data, alice, "undoMerge", { fromId: "p4" });
+    expect(row(data, "turns", "t5").playerId).toBe("p4");
     expect(row(data, "turns", "t4").playerId).toBe("p4");
+    // Her own turn in a different game stays with her.
+    expect(row(data, "turns", "t1").playerId).toBe("p1");
+    expect(row(data, "seats", "s4").playerId).toBe("p4");
+  });
+
+  it("restores the dealer only where the target is still the dealer", () => {
+    const data = mergeFixture();
+    run(data, alice, "mergePlayers", merge);
+    run(data, alice, "undoMerge", { fromId: "p4" });
     expect(row(data, "games", "g2").initialDealerId).toBe("p4");
+  });
+
+  describe("chained merges", () => {
+    // Three players, each hosting their own game with a bid and as dealer.
+    function chain(): DataState {
+      const data = createMemoryState();
+      for (const [n, letter] of [
+        ["a", "A"],
+        ["b", "B"],
+        ["c", "C"],
+      ]) {
+        run(data, alice, "createPlayer", { playerId: `p${n}`, name: letter });
+        run(data, alice, "createGame", {
+          gameId: `g${n}`,
+          roundIds: roundIds(`g${n}`),
+          seatId: `s${n}`,
+          playerId: `p${n}`,
+        });
+        run(data, alice, "setInitialDealer", {
+          gameId: `g${n}`,
+          playerId: `p${n}`,
+        });
+        run(data, alice, "placeBid", {
+          turnId: `t${n}`,
+          roundId: `g${n}r0`,
+          playerId: `p${n}`,
+          bid: 1,
+        });
+      }
+      for (const id of ["pa", "pb", "pc"]) {
+        seed(data, "players", {
+          ...row(data, "players", id),
+          mergedInto: null,
+          mergedAt: null,
+          mergeLog: null,
+        });
+      }
+      return data;
+    }
+    const mergeAB = { fromId: "pa", intoId: "pb" };
+    const mergeBC = { fromId: "pb", intoId: "pc" };
+
+    it("undoing A then B leaves A's history with A", () => {
+      const data = chain();
+      const before = snapshot(data);
+      run(data, alice, "mergePlayers", mergeAB);
+      run(data, alice, "mergePlayers", mergeBC);
+      expect(row(data, "seats", "sa").playerId).toBe("pc");
+
+      run(data, alice, "undoMerge", { fromId: "pa" });
+      expect(row(data, "seats", "sa").playerId).toBe("pa");
+      expect(row(data, "turns", "ta").playerId).toBe("pa");
+      expect(row(data, "games", "ga").initialDealerId).toBe("pa");
+
+      run(data, alice, "undoMerge", { fromId: "pb" });
+      expect(row(data, "seats", "sa").playerId).toBe("pa");
+      expect(row(data, "turns", "ta").playerId).toBe("pa");
+      expect(row(data, "games", "ga").initialDealerId).toBe("pa");
+      expect(data).toEqual(before);
+    });
+
+    it("undoing B then A also restores everything", () => {
+      const data = chain();
+      const before = snapshot(data);
+      run(data, alice, "mergePlayers", mergeAB);
+      run(data, alice, "mergePlayers", mergeBC);
+
+      run(data, alice, "undoMerge", { fromId: "pb" });
+      // B's log covers A's rows too, so they return to B for now.
+      expect(row(data, "seats", "sa").playerId).toBe("pb");
+      run(data, alice, "undoMerge", { fromId: "pa" });
+      expect(row(data, "seats", "sa").playerId).toBe("pa");
+      expect(data).toEqual(before);
+    });
+
+    it("works when the merged players were claimed by other users", () => {
+      const data = chain();
+      // A was a guest's player, B belongs to bob, C to dave.
+      const claim = (id: string, userId: string) =>
+        seed(data, "players", {
+          ...row(data, "players", id),
+          claimedBy: userId,
+        });
+      claim("pa", "guest-a");
+      claim("pb", "bob");
+      claim("pc", "dave");
+      const before = snapshot(data);
+      const withInternal = (userId: string, allow: string) =>
+        ctxFor(userId, false, { allowClaimedFrom: allow });
+      run(data, withInternal("bob", "guest-a"), "mergePlayers", mergeAB);
+      run(data, withInternal("dave", "bob"), "mergePlayers", mergeBC);
+
+      // A is claimed, so only the owner of its target (B -> bob) may undo it.
+      reject(data, carol, "undoMerge", { fromId: "pa" }, "forbidden");
+      reject(data, alice, "undoMerge", { fromId: "pa" }, "forbidden");
+      run(data, bob, "undoMerge", { fromId: "pa" });
+      expect(row(data, "seats", "sa").playerId).toBe("pa");
+      expect(row(data, "turns", "tb").playerId).toBe("pc");
+
+      // B is claimed too: only dave (owner of C) may undo.
+      reject(data, bob, "undoMerge", { fromId: "pb" }, "forbidden");
+      run(data, ctxFor("dave", true), "undoMerge", { fromId: "pb" });
+      expect(row(data, "seats", "sa").playerId).toBe("pa");
+      expect(row(data, "seats", "sb").playerId).toBe("pb");
+      expect(data).toEqual(before);
+    });
+
+    it("stops following the chain at a cycle or a missing player", () => {
+      const data = chain();
+      run(data, alice, "mergePlayers", mergeAB);
+      seed(data, "players", {
+        ...row(data, "players", "pb"),
+        mergedInto: "pa",
+      });
+      run(data, alice, "undoMerge", { fromId: "pa" });
+      expect(row(data, "seats", "sa").playerId).toBe("pa");
+
+      const lone = chain();
+      run(lone, alice, "mergePlayers", mergeAB);
+      lone.players.delete("pb");
+      run(lone, alice, "undoMerge", { fromId: "pa" });
+      expect(row(lone, "seats", "sa").playerId).toBe("pa");
+    });
+  });
+
+  it("only the target's owner may undo when the player was claimed", () => {
+    const data = mergeFixture();
+    seed(data, "players", { ...row(data, "players", "p4"), claimedBy: "g1" });
+    run(
+      data,
+      ctxFor("alice", false, { allowClaimedFrom: "g1" }),
+      "mergePlayers",
+      merge
+    );
+    reject(data, carol, "undoMerge", { fromId: "p4" }, "forbidden");
+    run(data, alice, "undoMerge", { fromId: "p4" });
+    expect(row(data, "players", "p4").mergedInto).toBeNull();
   });
 
   it("skips logged rows that no longer exist", () => {
@@ -1166,9 +1715,14 @@ describe("undoMerge", () => {
     expect(row(data, "players", "p4").mergedInto).toBeNull();
   });
 
-  it("rejects players that weren't merged, unknown players and signed-out users", () => {
+  it("does nothing for a player that isn't merged", () => {
+    expect(run(mergeFixture(), alice, "undoMerge", { fromId: "p4" })).toEqual(
+      []
+    );
+  });
+
+  it("rejects unknown players and signed-out users", () => {
     const data = mergeFixture();
-    reject(data, alice, "undoMerge", { fromId: "p4" }, "invalid");
     reject(data, alice, "undoMerge", { fromId: "nope" }, "not_found");
     run(data, alice, "mergePlayers", merge);
     reject(data, anon, "undoMerge", { fromId: "p4" }, "not_signed_in");
@@ -1348,14 +1902,14 @@ describe("importGame", () => {
       alice,
       "importGame",
       change((p) => (p.turns[0].playerId = "nope")),
-      "not_found"
+      "invalid"
     );
     reject(
       data,
       alice,
       "importGame",
       change((p) => (p.game.initialDealerId = "nope")),
-      "not_found"
+      "invalid"
     );
   });
 
@@ -1457,5 +2011,238 @@ describe("importGame", () => {
       "invalid"
     );
     expect(data).toEqual(before);
+  });
+
+  it("rejects existing players that have been merged", () => {
+    const data = world();
+    seed(data, "players", { id: "p4", name: "Dan", mergedInto: "p3" });
+    reject(
+      data,
+      alice,
+      "importGame",
+      change((p) => (p.seats[1].playerId = "p4")),
+      "merged"
+    );
+  });
+
+  it("rejects turns and a dealer for players who aren't seated", () => {
+    const data = world();
+    reject(
+      data,
+      alice,
+      "importGame",
+      change((p) => {
+        p.newPlayers.push({ id: "n2", name: "Unseated" });
+        p.turns.push({ id: "it9", roundId: "ir1", playerId: "n2", bid: 1 });
+      }),
+      "invalid"
+    );
+    reject(
+      data,
+      alice,
+      "importGame",
+      change((p) => (p.turns[1].playerId = "p1")),
+      "invalid"
+    );
+    reject(
+      data,
+      alice,
+      "importGame",
+      change((p) => (p.game.initialDealerId = "p1")),
+      "invalid"
+    );
+  });
+
+  it("rejects a score without a bid", () => {
+    reject(
+      world(),
+      alice,
+      "importGame",
+      change((p) => (p.turns[1] = { ...p.turns[1], bid: null, score: 5 })),
+      "invalid"
+    );
+  });
+
+  it("validates the dates", () => {
+    const data = world();
+    const badDates = ["", "yesterday", "2026-13-45T99:99:99Z", "x".repeat(60)];
+    for (const bad of [...badDates, 12345, {}, null]) {
+      reject(
+        data,
+        alice,
+        "importGame",
+        change((p) => (p.game.createdAt = bad as string)),
+        "invalid"
+      );
+    }
+    for (const bad of [...badDates, 12345, {}]) {
+      reject(
+        data,
+        alice,
+        "importGame",
+        change((p) => (p.game.deletedAt = bad as string)),
+        "invalid"
+      );
+    }
+    run(
+      data,
+      alice,
+      "importGame",
+      change((p) => (p.game.deletedAt = "2026-02-02T10:00:00Z"))
+    );
+    expect(row(data, "games", "gi").deletedAt).toBe("2026-02-02T10:00:00Z");
+    const other = world();
+    run(
+      other,
+      alice,
+      "importGame",
+      change((p) => (p.game.deletedAt = null))
+    );
+    expect(row(other, "games", "gi").deletedAt).toBeUndefined();
+  });
+
+  it("rejects non-object elements and non-array fields", () => {
+    const data = world();
+    const nulls = (key: "newPlayers" | "seats" | "rounds" | "turns") =>
+      change((p) => ((p[key] as unknown[])[0] = null));
+    for (const key of ["newPlayers", "seats", "rounds", "turns"] as const) {
+      reject(data, alice, "importGame", nulls(key), "invalid");
+      reject(
+        data,
+        alice,
+        "importGame",
+        change((p) => ((p[key] as unknown[])[0] = 5)),
+        "invalid"
+      );
+      reject(
+        data,
+        alice,
+        "importGame",
+        change((p) => ((p as any)[key] = null)),
+        "invalid"
+      );
+      reject(
+        data,
+        alice,
+        "importGame",
+        change((p) => ((p as any)[key] = {})),
+        "invalid"
+      );
+    }
+    reject(
+      data,
+      alice,
+      "importGame",
+      change((p) => ((p as any).game = null)),
+      "invalid"
+    );
+    reject(
+      data,
+      alice,
+      "importGame",
+      change((p) => ((p as any).game = [])),
+      "invalid"
+    );
+  });
+
+  it("caps the size of the import", () => {
+    const data = world();
+    const manyPlayers = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ id: `m${i}`, name: `M${i}` }));
+    reject(
+      data,
+      alice,
+      "importGame",
+      change((p) => (p.newPlayers = manyPlayers(21))),
+      "invalid"
+    );
+    reject(
+      data,
+      alice,
+      "importGame",
+      change((p) => {
+        p.newPlayers = manyPlayers(21);
+        p.seats = p.newPlayers.map((n, i) => ({
+          id: `ms${i}`,
+          gameId: "gi",
+          playerId: n.id,
+          orderNumber: i,
+        }));
+      }),
+      "invalid"
+    );
+    reject(
+      data,
+      alice,
+      "importGame",
+      change((p) => {
+        p.rounds = Array.from({ length: 14 }, (_, i) => ({
+          id: `mr${i}`,
+          gameId: "gi",
+          roundNumber: i % 13,
+        }));
+      }),
+      "invalid"
+    );
+    // 2 rounds x 2 seats allows 4 turns, not 5.
+    reject(
+      data,
+      alice,
+      "importGame",
+      change((p) => {
+        p.turns.push(
+          { id: "x1", roundId: "ir1", playerId: "p2", bid: 1 },
+          { id: "x2", roundId: "ir1", playerId: "p2", bid: 1 }
+        );
+      }),
+      "invalid"
+    );
+    // The limits themselves are fine.
+    const full = change((p) => {
+      p.newPlayers = manyPlayers(20);
+      p.seats = p.newPlayers.map((n, i) => ({
+        id: `ms${i}`,
+        gameId: "gi",
+        playerId: n.id,
+        orderNumber: i,
+      }));
+      p.rounds = Array.from({ length: 13 }, (_, i) => ({
+        id: `mr${i}`,
+        gameId: "gi",
+        roundNumber: i,
+      }));
+      p.turns = [];
+      p.game.initialDealerId = "m0";
+    });
+    run(data, alice, "importGame", full);
+  });
+
+  it("caps id length at 100 characters", () => {
+    const data = world();
+    reject(
+      data,
+      alice,
+      "importGame",
+      change((p) => (p.game.id = "x".repeat(101))),
+      "invalid"
+    );
+    reject(
+      data,
+      alice,
+      "importGame",
+      change((p) => (p.newPlayers[0].id = "x".repeat(101))),
+      "invalid"
+    );
+    reject(
+      createMemoryState(),
+      alice,
+      "createPlayer",
+      { playerId: "x".repeat(101), name: "Long" },
+      "invalid"
+    );
+    run(createMemoryState(), alice, "createPlayer", {
+      playerId: "x".repeat(100),
+      name: "Long",
+    });
   });
 });
