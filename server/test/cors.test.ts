@@ -100,17 +100,31 @@ describe("CORS for the native apps", () => {
     expect(res.headers.get("access-control-allow-origin")).toBe(IOS);
   });
 
-  it("takes the allowed origins from CORS_ORIGINS when set", async () => {
+  it("adds the origins in CORS_ORIGINS to the app ones", async () => {
     const api = await start({
       corsOrigins: " http://localhost:5173 ,https://whist.test,",
     });
-    for (const origin of ["http://localhost:5173", "https://whist.test"]) {
+    for (const origin of [
+      "http://localhost:5173",
+      "https://whist.test",
+      IOS,
+      ANDROID,
+    ]) {
       const res = await preflight(api.url, origin);
       expect(res.status).toBe(204);
       expect(res.headers.get("access-control-allow-origin")).toBe(origin);
     }
-    // The setting replaces the built-in app origins.
-    expect((await preflight(api.url, IOS)).status).toBe(404);
+    expect((await preflight(api.url, "https://evil.example")).status).toBe(404);
+  });
+
+  it.each([
+    "https://whist.test/",
+    "https://whist.test/app",
+    "whist.test",
+    "*",
+    "https://ok.test, nope",
+  ])("refuses to start with CORS_ORIGINS=%s", async (corsOrigins) => {
+    await expect(start({ corsOrigins })).rejects.toThrow(/CORS_ORIGINS/);
   });
 
   it("runs the sync flow cross-origin with a Bearer token", async () => {

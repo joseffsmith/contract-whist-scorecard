@@ -1,4 +1,5 @@
 import "./index.css";
+import "./fonts.css";
 
 import { createRoot } from "react-dom/client";
 import { RouterProvider } from "react-router-dom";

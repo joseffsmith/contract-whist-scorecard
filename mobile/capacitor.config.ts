@@ -10,10 +10,9 @@ const config: CapacitorConfig = {
   // Dark felt, shown behind the page while it loads and when overscrolled.
   backgroundColor: "#0a2a21",
   ios: {
-    // Safe areas come from CSS env() (index.css); the page scrolls inside its
-    // own panels, so the WebView itself never needs to rubber-band.
+    // Safe areas come from CSS env() (index.css); rubber-banding is turned
+    // off there with overscroll-behavior.
     contentInset: "never",
-    scrollEnabled: false,
     allowsLinkPreview: false,
   },
   plugins: {
@@ -32,7 +31,6 @@ const config: CapacitorConfig = {
     },
     Keyboard: {
       resize: "native",
-      resizeOnFullScreen: true,
     },
   },
 };

@@ -14,7 +14,7 @@ export type ServerOptions = {
   port: number;
   dataDir: string;
   publicUrl?: string;
-  corsOrigins?: string; // comma-separated; default: the native apps (cors.ts)
+  corsOrigins?: string; // comma-separated, on top of the native apps (cors.ts)
   host?: string;
   adminBootstrapToken?: string; // POST /auth/claim-admin; the first admin only
   importToken?: string; // enables POST /admin/import (one-off migration)
@@ -41,9 +41,9 @@ const sameSecret = (a: string, b: string) =>
   );
 
 export async function startServer(opts: ServerOptions) {
+  const cors = createCors(opts.corsOrigins); // throws on a bad entry
   const db = openDb(opts.dataDir);
   const limiter = createLimiter();
-  const cors = createCors(opts.corsOrigins);
   const sync = createSync(db, limiter, opts);
   const auth = createAuth(db, sync, limiter, {
     adminBootstrapToken: opts.adminBootstrapToken || undefined,

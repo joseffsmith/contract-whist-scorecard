@@ -1,7 +1,8 @@
 # Native app plan (iOS + Android)
 
-Status: plan only. Nothing in `src/`, `server/` or `shared/` changes until a
-phase below starts. The app lives in this `mobile/` folder.
+Status: phase 2 (the Capacitor shell, CI builds, CORS, safe areas, haptics) is
+built; see `README.md` for how to build and ship it. Phases 1 and 3 to 6 are
+still to do. The app lives in this `mobile/` folder.
 
 ## What we want
 

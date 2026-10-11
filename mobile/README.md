@@ -69,7 +69,11 @@ npx cap open ios
 Every upload needs a build number higher than the last (Xcode, App target,
 General, Build). Builds expire after 90 days.
 
-**TestFlight from GitHub Actions** (optional; the Mac isn't needed after this)
+**TestFlight from GitHub Actions** (experimental: never run end to end)
+
+Make the first upload through Xcode on the Mac, as above; that also proves your
+App Store Connect record and signing work. The `testflight` job is a later
+convenience and may need adjusting the first time it runs.
 
 Run the app on your phone once first so the bundle id and your device are
 registered. Then, in App Store Connect, Users and Access, Integrations, App
@@ -87,8 +91,17 @@ Secrets and variables, Actions):
 
 Then Actions, Mobile, Run workflow. The `testflight` job is skipped when a
 secret is missing, and only runs when started by hand. It uses the workflow's
-run number as the build number, so once CI ships builds, stop uploading from
-Xcode (or the numbers collide).
+run number as the build number (and tells Xcode not to change it), so once CI
+ships builds, stop uploading from Xcode, or the numbers collide.
+
+If automatic signing fails on the runner (for example no certificate can be
+created), switch the job to manual signing: export an Apple Distribution
+certificate from Keychain Access as a `.p12`, download an App Store
+provisioning profile for `uk.joseffsmith.whist`, and store both (base64) with
+the `.p12` password as secrets. The job then imports them into a temporary
+keychain, installs the profile, archives with `CODE_SIGN_STYLE=Manual`, and
+exports with `signingStyle` manual and a `provisioningProfiles` entry in
+`ExportOptions.plist`. The API key is still used for the upload.
 
 ## Android
 
@@ -115,7 +128,10 @@ uploads as an artifact for sideloading.
    `.aab`. Under the Testers tab, make an email list and add yourself and your
    friends, then send them the opt-in link.
 
-Raise `versionCode` in `android/app/build.gradle` for every upload.
+Every upload needs a higher version code. It defaults to 1; set it with
+`./gradlew bundleRelease -PversionCode=2` (or `VERSION_CODE=2`), or from the
+Android Studio terminal. `-PversionName=1.1` sets the name. Never commit the
+keystore (`*.jks`, `*.keystore` and `keystore.properties` are ignored).
 
 ## After changing the web app
 
@@ -126,22 +142,26 @@ cd mobile && npx cap sync
 
 then run or archive again from Xcode or Android Studio. Nothing native changes
 unless you add a plugin (then `npm i` it in both `package.json` files and sync).
-CI does the same on every push to `main` that touches `src/` or `mobile/`.
+CI does the same (Android debug APK, iOS simulator build) on every pull request and push to `main` that touches `src/`, `shared/` or `mobile/`.
 
 ## Good to know
 
 - **Origins.** The WebView's origin is `capacitor://localhost` on iOS and
   `https://localhost` on Android (Capacitor's default `androidScheme` is
   `https` and the hostname `localhost`). The server allows exactly those in
-  `server/src/cors.ts`; set `CORS_ORIGINS` (comma-separated) on the server to
-  use a different list. Links shown or shared from the app (QR codes, invites)
+  `server/src/cors.ts`; set `CORS_ORIGINS` (comma-separated bare origins, such
+  as `http://localhost:5173`) on the server to allow more. Links shown or shared from the app (QR codes, invites)
   use `VITE_PUBLIC_URL`, so they open the website.
-- **Fonts.** The Google Fonts stylesheet is still loaded from the network, so
-  without signal the first launch falls back to system fonts. The web app has
-  the same gap on a cold cache.
+- **Fonts** are bundled (`src/fonts.css`), so the app looks the same offline.
+- **iPhone only.** The Xcode project targets iPhone (`TARGETED_DEVICE_FAMILY`
+  1), so App Store Connect needs no iPad screenshots.
+- **Android back button** closes an open sheet first (`src/lib/backStack.ts`),
+  then goes back, then leaves the app. Small pop-ups that aren't sheets (the
+  delete confirmation, the "more" menu) don't hook in yet.
 - **Icon and splash.** Edit `assets/make-sources.mjs` (or replace the PNGs),
   then `node assets/make-sources.mjs && npm run assets` and commit what changes
   under `ios/` and `android/`.
 - **Safe areas.** The page draws under the status bar and home indicator and
   pads itself with `env(safe-area-inset-*)` (only inside the app; see
-  `src/index.css`).
+  `src/index.css`). Rubber-banding is off with `overscroll-behavior`, not
+  `scrollEnabled`, because the login screens scroll the page itself.

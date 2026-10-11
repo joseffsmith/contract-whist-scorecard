@@ -55,7 +55,7 @@ export const UserLogin = () => {
   }
 
   return (
-    <Shell>
+    <Shell scroll>
       <AccountMovedBanner signedIn={false} />
       <LoginFrame
         title={user?.isGuest ? "Keep your games" : "Welcome back"}
@@ -506,7 +506,7 @@ export const LinkPlayerToMe = () => {
   };
 
   return (
-    <Shell>
+    <Shell scroll>
       <div style={{ flex: 1, padding: "60px 24px 24px" }}>
         <div
           style={{

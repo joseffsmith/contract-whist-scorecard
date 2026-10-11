@@ -8,15 +8,27 @@ const APP_ORIGINS = ["capacitor://localhost", "https://localhost"];
 
 const PREFLIGHT_MAX_AGE = 600;
 
-// `origins` (the CORS_ORIGINS variable: comma-separated) replaces the app
-// origins when set. Returns a handler to run first on every request: it
-// labels the response and answers a preflight itself (true = done).
+// An origin is scheme://host[:port]: no path, no trailing slash.
+const ORIGIN = /^[a-z][a-z0-9+.-]*:\/\/[^/\s?#@]+$/i;
+
+// `origins` (the CORS_ORIGINS variable: comma-separated) adds to the app
+// origins. Returns a handler to run first on every request: it labels the
+// response and answers a preflight itself (true = done). Throws on an entry
+// that isn't a bare origin, so a typo stops the server at startup instead of
+// quietly never matching.
 export function createCors(origins?: string) {
   const listed = (origins ?? "")
     .split(",")
     .map((o) => o.trim())
     .filter(Boolean);
-  const allowed = new Set(listed.length ? listed : APP_ORIGINS);
+  for (const origin of listed) {
+    if (!ORIGIN.test(origin)) {
+      throw new Error(
+        `CORS_ORIGINS: "${origin}" is not an origin like https://example.com (no path, no trailing slash).`
+      );
+    }
+  }
+  const allowed = new Set([...APP_ORIGINS, ...listed]);
 
   return (req: IncomingMessage, res: ServerResponse): boolean => {
     // The answer depends on who asks, so caches must not share it.

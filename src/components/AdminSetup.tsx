@@ -123,7 +123,7 @@ export const AdminSetup = () => {
   }
 
   return (
-    <Shell>
+    <Shell scroll>
       <LoginFrame title="Admin setup" subtitle="For whoever runs this app.">
         {body}
       </LoginFrame>

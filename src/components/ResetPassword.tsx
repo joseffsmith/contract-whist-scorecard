@@ -38,7 +38,7 @@ export const ResetPassword = () => {
   };
 
   return (
-    <Shell>
+    <Shell scroll>
       <LoginFrame
         title="New password"
         subtitle="Choose a password for your account."

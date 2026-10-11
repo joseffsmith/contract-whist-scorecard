@@ -133,7 +133,7 @@ export const GuestMigrationDialog = ({
   };
 
   return (
-    <Shell>
+    <Shell scroll>
       <div
         style={{
           flex: 1,

@@ -69,7 +69,10 @@ export const LocalGamesBanner = ({
         )}
       </div>
       {open && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 60 }}>
+        <div
+          className="safe-fixed"
+          style={{ position: "fixed", inset: 0, zIndex: 60 }}
+        >
           <GuestMigrationDialog
             userId={user.id}
             games={all}

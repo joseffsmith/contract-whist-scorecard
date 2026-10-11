@@ -25,8 +25,8 @@ const colors = {
 
 export const t = {
   ...colors,
-  font: '"Inter Tight", -apple-system, system-ui, sans-serif',
-  display: '"Fraunces", Georgia, serif',
+  font: '"Inter Tight Variable", "Inter Tight", -apple-system, system-ui, sans-serif',
+  display: '"Fraunces Variable", Fraunces, Georgia, serif',
   mono: '"JetBrains Mono", ui-monospace, monospace',
 } as const;
 
