@@ -100,7 +100,9 @@ export function watchUploads(): () => void {
     if (action.name !== "importGame") return;
     const gameId = (action.args as { game?: { id?: string } }).game?.id;
     const uploads = readUploads();
-    const localIds = Object.keys(uploads).filter((id) => uploads[id] === gameId);
+    const localIds = Object.keys(uploads).filter(
+      (id) => uploads[id] === gameId
+    );
     if (!localIds.length) return;
     forget(localIds);
     enqueueSnackbar(`Couldn't save a game from this phone: ${error}`, {

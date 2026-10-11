@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { newId } from "../lib/dispatch";
 import { alpha, goldButton, t } from "../theme/tokens";
+import { useGuestGames } from "../guest/useGuestGame";
 import { claimPlayer, useMyPlayer } from "../players/account";
 import { sync, useAuth } from "../sync";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
@@ -23,6 +24,7 @@ const HANDOFF_GRACE_MS = 1500;
 export const UserLogin = () => {
   const { user } = useAuth();
   const next = useNext();
+  const localGames = useGuestGames();
   const [settling, setSettling] = useState(false);
   // Set once "Play as guest" has been tapped: the guest then picks who they
   // are and goes on, instead of seeing the "add an email" form.
@@ -65,6 +67,23 @@ export const UserLogin = () => {
       >
         <PasswordStep onSignedIn={() => setSettling(true)} />
         {!user && <GuestEntry onStart={() => setPlayingAsGuest(true)} />}
+        {!user && localGames.length > 0 && (
+          <div
+            style={{
+              marginTop: 14,
+              fontSize: 12,
+              color: t.cream,
+              opacity: 0.6,
+              textAlign: "center",
+              lineHeight: 1.4,
+            }}
+          >
+            You have {localGames.length} game
+            {localGames.length === 1 ? "" : "s"} saved only on this phone — Play
+            as guest or sign in to save{" "}
+            {localGames.length === 1 ? "it" : "them"}.
+          </div>
+        )}
       </LoginFrame>
     </Shell>
   );

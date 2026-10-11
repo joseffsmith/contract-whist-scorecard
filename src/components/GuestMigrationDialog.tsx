@@ -179,7 +179,8 @@ export const GuestMigrationDialog = ({
           }}
         >
           Save {games.length === 1 ? "it" : "them"} so everyone can see{" "}
-          {games.length === 1 ? "it" : "them"}, or discard and start fresh.
+          {games.length === 1 ? "it" : "them"}. Players are matched to existing
+          players with the same name.
         </div>
 
         <div style={{ flex: 1, overflow: "auto", marginBottom: 16 }}>
@@ -218,8 +219,14 @@ export const GuestMigrationDialog = ({
                     {date}
                   </div>
                   <div style={{ fontSize: 10, color: t.cream, opacity: 0.5 }}>
-                    {g.players.length} player
-                    {g.players.length === 1 ? "" : "s"}
+                    {uploading.has(g.id) ? (
+                      <span style={{ color: t.gold, opacity: 1 }}>Saving…</span>
+                    ) : (
+                      <>
+                        {g.players.length} player
+                        {g.players.length === 1 ? "" : "s"}
+                      </>
+                    )}
                   </div>
                 </div>
                 <div
@@ -231,6 +238,18 @@ export const GuestMigrationDialog = ({
                 >
                   {g.players.map((p) => p.name).join(" · ") || "(empty)"}
                 </div>
+                <Link
+                  to={`/games/guest/${g.id}`}
+                  onClick={onClose}
+                  style={{
+                    display: "inline-block",
+                    marginTop: 6,
+                    fontSize: 12,
+                    color: t.gold,
+                  }}
+                >
+                  Open
+                </Link>
               </div>
             );
           })}
@@ -238,7 +257,7 @@ export const GuestMigrationDialog = ({
 
         <button
           onClick={migrate}
-          disabled={busy}
+          disabled={busy || offered.length === 0}
           style={{
             ...goldButton,
             width: "100%",
@@ -246,29 +265,76 @@ export const GuestMigrationDialog = ({
             borderRadius: 12,
             fontSize: 15,
             marginBottom: 8,
-            opacity: busy ? 0.5 : 1,
+            opacity: busy || offered.length === 0 ? 0.5 : 1,
           }}
         >
-          {busy ? "Saving…" : "Save games"}
+          {busy || offered.length === 0 ? "Saving…" : "Save games"}
         </button>
-        <button
-          onClick={discard}
-          disabled={busy}
-          style={{
-            width: "100%",
-            padding: "12px 0",
-            borderRadius: 12,
-            background: "transparent",
-            border: `1px solid ${alpha(t.cream, 0.13)}`,
-            color: t.cream,
-            opacity: 0.6,
-            fontSize: 13,
-            fontFamily: t.display,
-            fontWeight: 500,
-          }}
-        >
-          Discard local games
-        </button>
+        {confirmDiscard ? (
+          <div
+            style={{
+              padding: 12,
+              borderRadius: 12,
+              border: `1px solid ${alpha(t.red, 0.5)}`,
+              textAlign: "center",
+            }}
+          >
+            <div style={{ fontSize: 13, color: t.cream, marginBottom: 10 }}>
+              Delete {offered.length} game{offered.length === 1 ? "" : "s"} from
+              this phone for good?
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => setConfirmDiscard(false)}
+                style={{
+                  flex: 1,
+                  padding: "10px 0",
+                  borderRadius: 10,
+                  border: `1px solid ${alpha(t.gold, 0.4)}`,
+                  background: "transparent",
+                  color: t.cream,
+                  fontSize: 13,
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={discard}
+                style={{
+                  flex: 1,
+                  padding: "10px 0",
+                  borderRadius: 10,
+                  border: "none",
+                  background: t.red,
+                  color: t.cream,
+                  fontSize: 13,
+                  fontWeight: 600,
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConfirmDiscard(true)}
+            disabled={busy || offered.length === 0}
+            style={{
+              width: "100%",
+              padding: "12px 0",
+              borderRadius: 12,
+              background: "transparent",
+              border: `1px solid ${alpha(t.cream, 0.13)}`,
+              color: t.cream,
+              opacity: 0.6,
+              fontSize: 13,
+              fontFamily: t.display,
+              fontWeight: 500,
+            }}
+          >
+            Discard local games
+          </button>
+        )}
         {onClose && (
           <button
             onClick={onClose}

@@ -245,7 +245,13 @@ export const GuestGameComp = () => {
           </div>
         }
       />
-      <LocalGamesBanner />
+      <LocalGamesBanner
+        onSaved={(uploaded) => {
+          // Carry on with this game in its new, synced form.
+          const newId = uploaded[game.id];
+          if (newId) navigate(`/games/${newId}`);
+        }}
+      />
 
       {/* Hero */}
       <div
