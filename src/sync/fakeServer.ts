@@ -11,6 +11,7 @@ import type {
   PublicUser,
   PushResponse,
   PushResult,
+  RowOp,
   TableName,
   Tables,
 } from "../../shared/types";
@@ -33,6 +34,7 @@ export function createFakeServer() {
     end(error?: unknown): void;
   }>();
   let tokenCounter = 0;
+  let userCounter = 0;
 
   const server = {
     data,
@@ -53,8 +55,21 @@ export function createFakeServer() {
       return runAction(user, action);
     },
 
+    // Bulk-load rows as one version, bypassing the rules (for big fixtures).
+    seed(ops: RowOp[]) {
+      applyOps(data, ops);
+      version += 1;
+      const changes: ChangeSet = { version, puts: {}, deletes: {} };
+      for (const op of ops) {
+        if (op.op !== "put") continue;
+        rowVersions.set(`${op.table}:${op.row.id}`, version);
+        ((changes.puts[op.table] ??= []) as unknown[]).push(op.row);
+      }
+      broadcast(changes);
+    },
+
     addAccount(email: string, password: string, isGuest = false): PublicUser {
-      const account = { id: `u-${accounts.length + 1}`, email, isGuest, password };
+      const account = { id: `u-${++userCounter}`, email, isGuest, password };
       accounts.push(account);
       return { id: account.id, email, isGuest };
     },
@@ -128,8 +143,8 @@ export function createFakeServer() {
         return json(200, { results, version } satisfies PushResponse);
       }
       case "/auth/guest": {
-        const guest = server.addAccount(`guest-${accounts.length + 1}`, "", true);
-        return json(200, { token: server.tokenFor({ ...guest, email: null }), user: { ...guest, email: null } });
+        const guest = { id: `u-${++userCounter}`, email: null, isGuest: true };
+        return json(200, { token: server.tokenFor(guest), user: guest });
       }
       case "/auth/signup": {
         if (accounts.some((a) => a.email === body.email)) {
