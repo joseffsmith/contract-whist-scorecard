@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { db } from "../db";
 import { queryHomeGames } from "../queries";
 import { alpha, t } from "../theme/tokens";
@@ -144,6 +145,19 @@ export const Leaderboard = () => {
           </div>
         );
       })}
+      <Link
+        to="/players"
+        style={{
+          display: "block",
+          textAlign: "center",
+          padding: "14px 0 4px",
+          fontSize: 12,
+          color: t.gold,
+          opacity: 0.85,
+        }}
+      >
+        Players &amp; duplicates →
+      </Link>
     </div>
   );
 };

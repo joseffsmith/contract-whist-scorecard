@@ -1,13 +1,15 @@
-import { Navigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { db } from "../db";
 import { queryHomeGames, queryPlayersWithUserId } from "../queries";
 import { alpha, t } from "../theme/tokens";
 import { summarizeGame } from "../utils/gameStatus";
 import { ThemePicker } from "./chrome/ThemeToggle";
+import { AlsoYou } from "./AlsoYou";
 import { LinkPlayerToMe } from "./UserLogin";
 
 export const UserManager = () => {
   const { isLoading: isLoadingUser, user } = db.useAuth();
+  const nav = useNavigate();
 
   const { data: playerData, isLoading: isLoadingPlayer } = db.useQuery(
     user ? queryPlayersWithUserId(user.id) : null
@@ -58,7 +60,9 @@ export const UserManager = () => {
 
   const unlink = async () => {
     await db.transact([
-      db.tx.players[linkedPlayer.id].unlink({ $user: user.id }),
+      db.tx.players[linkedPlayer.id]
+        .unlink({ $user: user.id })
+        .update({ claimedBy: null }),
     ]);
   };
 
@@ -103,10 +107,35 @@ export const UserManager = () => {
             {linkedPlayer.name}
           </div>
           <div style={{ fontSize: 12, color: t.cream, opacity: 0.55 }}>
-            {user.email}
+            {user.email ?? "Guest · this phone only"}
           </div>
         </div>
       </div>
+
+      {user.isGuest && (
+        <div
+          style={{
+            padding: 14,
+            borderRadius: 12,
+            border: `1px solid ${alpha(t.gold, 0.33)}`,
+            marginBottom: 14,
+            fontSize: 13,
+            color: t.cream,
+            lineHeight: 1.45,
+          }}
+        >
+          This phone remembers you without an account.{" "}
+          <Link
+            to="/login?next=/user"
+            style={{ color: t.gold, fontWeight: 600 }}
+          >
+            Add your email
+          </Link>{" "}
+          to keep your games on any phone.
+        </div>
+      )}
+
+      <AlsoYou playerId={linkedPlayer.id} />
 
       <div
         style={{
@@ -166,8 +195,28 @@ export const UserManager = () => {
         <ThemePicker />
       </div>
 
-      <Row label="Unlink player" sub={linkedPlayer.name} onClick={unlink} />
-      <Row label="Sign out" onClick={logout} danger />
+      <Row
+        label="Players & duplicates"
+        sub="Find and merge players who are the same person"
+        onClick={() => nav("/players")}
+      />
+      <Row
+        label={user.isGuest ? `Not ${linkedPlayer.name}?` : "Unlink player"}
+        sub={
+          user.isGuest ? "Switch which player this phone is" : linkedPlayer.name
+        }
+        onClick={unlink}
+      />
+      <Row
+        label="Sign out"
+        sub={
+          user.isGuest
+            ? `This phone will forget it's ${linkedPlayer.name}`
+            : undefined
+        }
+        onClick={logout}
+        danger
+      />
     </div>
   );
 };

@@ -1,11 +1,6 @@
 import { id } from "@instantdb/react";
 import { enqueueSnackbar } from "notistack";
-import {
-  Outlet,
-  useLocation,
-  useNavigate,
-  matchPath,
-} from "react-router-dom";
+import { Outlet, useLocation, useNavigate, matchPath } from "react-router-dom";
 import { DEALS } from "../constants";
 import { db } from "../db";
 import { queryPlayersWithUserId } from "../queries";
@@ -13,6 +8,7 @@ import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
 import { OfflineBanner } from "./chrome/OfflineBanner";
 import { Shell } from "./chrome/Shell";
 import { RootHeader, RootTabId } from "./chrome/RootHeader";
+import { useAccountReconcile } from "../players/account";
 import { t } from "../theme/tokens";
 
 // Map a pathname to a root-tab id, or null if this is a deep (breadcrumb) route.
@@ -27,6 +23,7 @@ function matchRootTab(pathname: string): RootTabId | null {
 export const App = () => {
   const nav = useNavigate();
   const location = useLocation();
+  useAccountReconcile();
   const { isLoading, user, error } = db.useAuth();
   const status = db.useConnectionStatus();
   const connection =
@@ -102,7 +99,14 @@ export const App = () => {
           connection={connection}
         />
       )}
-      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
         <Outlet context={{ onDeal: createNewGame }} />
       </div>
     </Shell>

@@ -14,6 +14,7 @@ import {
   t,
 } from "../theme/tokens";
 import { MoreMenu } from "./chrome/MoreMenu";
+import { InviteSheet } from "./InviteSheet";
 import { ThemeToggle } from "./chrome/ThemeToggle";
 import { getBidOptions } from "../utils/getBidOptions";
 import { getCurrentPlayerIdFromRound } from "../utils/getCurrentPlayerIdFromRound";
@@ -27,6 +28,7 @@ export const GameComp = () => {
   const { gameId } = useParams<{ gameId: string }>();
   const navigate = useNavigate();
   const [isConfettiClosed, setIsClosed] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
 
   const { isLoading: isLoadingUser, user } = db.useAuth();
   const { isLoading, data } = db.useQuery(
@@ -233,6 +235,10 @@ export const GameComp = () => {
               <MoreMenu
                 items={[
                   {
+                    label: "Invite by QR code",
+                    onClick: () => setInviteOpen(true),
+                  },
+                  {
                     label: "Manage players",
                     onClick: () => navigate(`/games/${gameId}/manage`),
                   },
@@ -242,6 +248,10 @@ export const GameComp = () => {
           </div>
         }
       />
+
+      {inviteOpen && (
+        <InviteSheet gameId={gameId!} onClose={() => setInviteOpen(false)} />
+      )}
 
       {/* Hero */}
       <div

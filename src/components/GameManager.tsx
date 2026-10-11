@@ -30,12 +30,14 @@ import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
 import { getDealerIdx } from "../utils/getDealerIdx";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
 import { Crumb } from "./chrome/Crumb";
+import { InviteSheet } from "./InviteSheet";
 
 export const GameManager = () => {
   const { gameId } = useParams<{ gameId: string }>();
   const nav = useNavigate();
   const { user } = db.useAuth();
   const [addingOpen, setAddingOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
 
   const { isLoading, data } = db.useQuery(
     gameId ? queryGameData(gameId) : null
@@ -155,6 +157,10 @@ export const GameManager = () => {
                 setAddingOpen(false);
               }}
               excludedPlayerIds={playerOrdersInGame.map((p) => p.player?.id)}
+              contextPlayerIds={[
+                ...playerOrdersInGame.map((p) => p.player?.id),
+                playerUser?.players[0]?.id,
+              ]}
             />
             <button
               onClick={() => setAddingOpen(false)}
@@ -195,7 +201,27 @@ export const GameManager = () => {
             + Add player
           </button>
         )}
+        <button
+          onClick={() => setInviteOpen(true)}
+          style={{
+            padding: 12,
+            borderRadius: 10,
+            marginTop: 8,
+            border: `1px solid ${alpha(t.gold, 0.33)}`,
+            color: t.gold,
+            textAlign: "center",
+            fontSize: 13,
+            fontFamily: t.display,
+            background: alpha(t.gold, 0.06),
+            width: "100%",
+          }}
+        >
+          ▦ Let players join from their phones
+        </button>
       </div>
+      {inviteOpen && (
+        <InviteSheet gameId={gameId!} onClose={() => setInviteOpen(false)} />
+      )}
 
       <div
         style={{

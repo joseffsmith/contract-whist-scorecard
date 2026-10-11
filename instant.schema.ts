@@ -16,6 +16,13 @@ const _schema = i.schema({
     }),
     players: i.entity({
       name: i.string(),
+      // Mirrors the $user link. $users are only visible to themselves, so
+      // this is how other people can tell a player is someone's account.
+      claimedBy: i.string().optional(),
+      // Set when this player was merged into another (see players/merge.ts).
+      mergedInto: i.string().optional(),
+      mergedAt: i.string().optional(),
+      mergeLog: i.json().optional(),
     }),
     playersOrders: i.entity({
       orderNumber: i.number(),

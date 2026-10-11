@@ -7,6 +7,8 @@ import { GuestGameComp } from "./components/GuestGame";
 import { GuestGameManager } from "./components/GuestGameManager";
 import { Home } from "./components/Home";
 import { Leaderboard } from "./components/Leaderboard";
+import { JoinGame } from "./components/JoinGame";
+import { Players } from "./components/Players";
 import { UserLogin } from "./components/UserLogin";
 import { UserManager } from "./components/UserManager";
 
@@ -20,6 +22,8 @@ export const router = createBrowserRouter(
         { path: "/", element: <Home /> },
         { path: "/games", element: <GameList /> },
         { path: "/leaderboard", element: <Leaderboard /> },
+        { path: "/players", element: <Players /> },
+        { path: "/join/:gameId", element: <JoinGame /> },
         { path: "/user", element: <UserManager /> },
         { path: "/games/:gameId", element: <GameComp /> },
         { path: "/games/:gameId/manage", element: <GameManager /> },

@@ -1,7 +1,7 @@
 import { id } from "@instantdb/react";
 import { enqueueSnackbar } from "notistack";
 import { useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { db } from "../db";
 import {
   createGame as createGuestGame,
@@ -9,21 +9,32 @@ import {
 } from "../guest/guestStore";
 import { useGuestGames } from "../guest/useGuestGame";
 import { alpha, goldButton, t } from "../theme/tokens";
+import { claimPlayer, useAccountReconcile } from "../players/account";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
 import { GuestMigrationDialog } from "./GuestMigrationDialog";
 import { Shell } from "./chrome/Shell";
+
+// Where to go after signing in, e.g. /login?next=/join/abc.
+const useNext = () => {
+  const [params] = useSearchParams();
+  const next = params.get("next");
+  return next && next.startsWith("/") ? next : "/";
+};
 
 export const UserLogin = () => {
   const { user } = db.useAuth();
   const [sentEmail, setSentEmail] = useState("");
   const guestGames = useGuestGames();
+  const next = useNext();
+  const reconciling = useAccountReconcile();
 
   const { isLoading, data: playerUser } = db.useQuery(
     user ? { players: { $: { where: { $user: user.id } } } } : null
   );
 
-  if (user) {
-    if (isLoading) {
+  // Guests (joined by QR) see the email form so they can add an account.
+  if (user && !user.isGuest) {
+    if (isLoading || reconciling) {
       return (
         <Shell>
           <div style={{ padding: 20, opacity: 0.6 }}>Loading…</div>
@@ -45,12 +56,19 @@ export const UserLogin = () => {
       );
     }
     // signed in + linked + no guest games — redirect out of /login
-    return <Navigate to="/" replace />;
+    return <Navigate to={next} replace />;
   }
 
   return (
     <Shell>
-      <LoginFrame>
+      <LoginFrame
+        title={user?.isGuest ? "Keep your games" : "Welcome back"}
+        subtitle={
+          user?.isGuest
+            ? "Add your email to keep your player on any phone. No password needed."
+            : "Magic-code sign in. No password needed."
+        }
+      >
         {!sentEmail ? (
           <>
             <EmailStep onSent={setSentEmail} />
@@ -148,7 +166,15 @@ const GuestEntry = () => {
   );
 };
 
-const LoginFrame = ({ children }: { children: React.ReactNode }) => (
+const LoginFrame = ({
+  children,
+  title,
+  subtitle,
+}: {
+  children: React.ReactNode;
+  title: string;
+  subtitle: string;
+}) => (
   <div
     style={{
       flex: 1,
@@ -227,7 +253,7 @@ const LoginFrame = ({ children }: { children: React.ReactNode }) => (
         lineHeight: 1,
       }}
     >
-      Welcome back
+      {title}
     </div>
     <div
       style={{
@@ -238,7 +264,7 @@ const LoginFrame = ({ children }: { children: React.ReactNode }) => (
         marginTop: 10,
       }}
     >
-      Magic-code sign in. No password needed.
+      {subtitle}
     </div>
     <div style={{ marginTop: 28 }}>{children}</div>
   </div>
@@ -355,20 +381,16 @@ const EmailStep = ({ onSent }: { onSent: (email: string) => void }) => {
 
 const MagicCodeStep = ({ sentEmail }: { sentEmail: string }) => {
   const [code, setCode] = useState("");
-  const nav = useNavigate();
+  // Once signed in, UserLogin re-renders and takes it from there (linking a
+  // player, carrying over a guest player, then redirecting to ?next).
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    db.auth
-      .signInWithMagicCode({ email: sentEmail, code })
-      .catch((err) => {
-        enqueueSnackbar("Uh oh: " + (err?.body?.message ?? err), {
-          variant: "error",
-        });
-        setCode("");
-      })
-      .then(() => {
-        nav("/");
+    db.auth.signInWithMagicCode({ email: sentEmail, code }).catch((err) => {
+      enqueueSnackbar("Uh oh: " + (err?.body?.message ?? err), {
+        variant: "error",
       });
+      setCode("");
+    });
   };
   return (
     <form onSubmit={submit}>
@@ -398,19 +420,6 @@ const MagicCodeStep = ({ sentEmail }: { sentEmail: string }) => {
 
 export const LinkPlayerToMe = () => {
   const { user } = db.useAuth();
-  const { data } = db.useQuery({ players: { $user: {} } });
-  // Only exclude players that are already claimed by a user — not every
-  // player in the DB. `$user` may come back as an object or an array
-  // depending on instantdb's shape for has-one relations; handle both.
-  const excludedPlayerIds =
-    data?.players
-      .filter((p) => {
-        const u = (p as { $user?: unknown }).$user;
-        if (!u) return false;
-        if (Array.isArray(u)) return u.length > 0;
-        return true;
-      })
-      .map((p) => p.id) ?? [];
 
   const createPlayer = async (name: string) => {
     if (!user) throw new Error("No user");
@@ -419,13 +428,12 @@ export const LinkPlayerToMe = () => {
       return;
     }
     const playerId = id();
-    await db.transact([
-      db.tx.players[playerId].update({ name }).link({ $user: user.id }),
-    ]);
+    await db.transact([db.tx.players[playerId].update({ name })]);
+    await claimPlayer(playerId, user.id);
   };
   const choosePlayer = async (pid: string) => {
     if (!user) throw new Error("No user");
-    await db.transact([db.tx.players[pid].link({ $user: user.id })]);
+    await claimPlayer(pid, user.id);
   };
 
   return (
@@ -472,7 +480,8 @@ export const LinkPlayerToMe = () => {
         <ChoosePlayerOrCreate
           createPlayer={createPlayer}
           choosePlayer={choosePlayer}
-          excludedPlayerIds={excludedPlayerIds}
+          excludedPlayerIds={[]}
+          hideClaimed
         />
       </div>
     </Shell>
