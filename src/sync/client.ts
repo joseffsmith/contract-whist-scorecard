@@ -541,7 +541,8 @@ export function createSyncClient(
         user &&
         user.id === checked.user.id &&
         (user.email !== checked.user.email ||
-          user.isGuest !== checked.user.isGuest)
+          user.isGuest !== checked.user.isGuest ||
+          !!user.isAdmin !== !!checked.user.isAdmin)
       ) {
         session = { token: checked.token, user };
         saveSession(session);
@@ -967,7 +968,19 @@ export function createSyncClient(
     async claimAdmin(token) {
       await begin();
       if (!session) throw new SyncError("Sign in first.", "not_signed_in");
-      await authRequest("/auth/claim-admin", { token }, session.token, null);
+      const claimedBy = session;
+      await authRequest("/auth/claim-admin", { token }, claimedBy.token, null);
+      // Show the new role now: ask the server, or assume it if we can't.
+      if (session?.token !== claimedBy.token) return;
+      await checkSession();
+      if (session?.token === claimedBy.token && !session.user.isAdmin) {
+        session = {
+          token: session.token,
+          user: { ...session.user, isAdmin: true },
+        };
+        saveSession(session);
+        rebuild();
+      }
     },
   };
 }

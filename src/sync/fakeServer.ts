@@ -122,6 +122,15 @@ export function createFakeServer() {
       broadcast(snapshotChangeSet());
     },
 
+    makeAdmin(userId: string) {
+      for (const [token, u] of tokens) {
+        if (u.id === userId) tokens.set(token, { ...u, isAdmin: true });
+      }
+      for (const account of accounts) {
+        if (account.id === userId) account.isAdmin = true;
+      }
+    },
+
     forgetTokens() {
       tokens.clear();
     },
@@ -152,9 +161,19 @@ export function createFakeServer() {
       const auth = headers.get("authorization")?.replace(/^Bearer /, "");
       server.requests.push({ method, path, body, token: auth });
 
-      if (path === "/sync/stream")
+      if (server.portal) {
+        return new Response("<html>Please sign in to the wifi</html>", {
+          headers: { "content-type": "text/html" },
+        });
+      }
+      if (path === "/sync/stream") {
+        if (server.streamLimited) {
+          return fail(429, "Too many open connections.", "too_many_streams");
+        }
+        server.streamOpens += 1;
         return openStream(Number(url.searchParams.get("since")), init?.signal);
-      return handle(path, url, body, auth);
+      }
+      return handle(path, url, body, auth, String(init?.body ?? "").length);
     }) as typeof fetch,
   };
 
@@ -187,8 +206,21 @@ export function createFakeServer() {
       case "/sync/push": {
         if (!user) return fail(401, "Sign in to do that.", "not_signed_in");
         if (server.blockPush) return fail(503, "Busy", "unavailable");
+        if (server.pushStatus)
+          return fail(server.pushStatus, "Nope.", "bad_request");
+        if (size > server.maxPushBytes)
+          return fail(413, "Request too large.", "too_large");
         const results: PushResult[] = (body.actions as Action[]).map(
           (action) => {
+            if (server.serverErrors > 0) {
+              server.serverErrors -= 1;
+              return {
+                id: action.id,
+                ok: false as const,
+                error: "Something went wrong. Try again.",
+                code: "server_error",
+              };
+            }
             try {
               runAction(user, action);
               return { id: action.id, ok: true as const };
@@ -244,6 +276,7 @@ export function createFakeServer() {
           id: account.id,
           email: account.email,
           isGuest: false,
+          ...(account.isAdmin ? { isAdmin: true } : {}),
         };
         return json(200, { token: server.tokenFor(loggedIn), user: loggedIn });
       }
@@ -254,9 +287,10 @@ export function createFakeServer() {
       case "/auth/claim-admin":
         if (!user) return fail(401, "Sign in to do that.", "not_signed_in");
         if (user.isGuest) return fail(403, "Create an account first.", "guest");
-        return body.token === "bootstrap"
-          ? json(200, { ok: true })
-          : fail(403, "Wrong token.", "forbidden");
+        if (body.token !== "bootstrap")
+          return fail(403, "Wrong token.", "forbidden");
+        server.makeAdmin(user.id);
+        return json(200, { ok: true });
       case "/auth/logout":
         if (token) tokens.delete(token);
         return json(200, { ok: true });

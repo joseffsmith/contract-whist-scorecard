@@ -4,7 +4,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ActionError } from "../../shared/types";
 import type { RowOp } from "../../shared/types";
 import { createSyncClient } from "./client";
-import type { ActionRejection, NetworkSignal, SyncClient } from "./client";
+import type {
+  ActionRejection,
+  NetworkSignal,
+  SyncClient,
+  SyncDeps,
+} from "./client";
 import { createFakeServer } from "./fakeServer";
 import type { FakeServer } from "./fakeServer";
 import { selectHomeGames } from "./selectors";
@@ -47,7 +52,12 @@ let ids: number;
 // One "device": its own storage and network. Sharing `idb` between calls
 // simulates reloading the same browser.
 function newClient(
-  options: { storage?: IDBFactory; batchSize?: number; grace?: number } = {}
+  options: {
+    storage?: IDBFactory;
+    batchSize?: number;
+    grace?: number;
+    deps?: Partial<SyncDeps>;
+  } = {}
 ) {
   const network = createNetwork();
   network.set(!server.offline);
@@ -61,6 +71,8 @@ function newClient(
     streamGraceMs: options.grace ?? 20,
     batchSize: options.batchSize ?? 50,
     requestTimeoutMs: 1000,
+    healthyMs: 30,
+    ...options.deps,
   });
   clients.push(client);
   return client;
@@ -496,19 +508,6 @@ describe("auth", () => {
     expect(client.getPendingCount()).toBe(0);
   });
 
-  it("drops queued actions when a different user logs in", async () => {
-    server.addAccount("ann@example.com", "secret123");
-    const client = await signedInClient();
-    server.blockPush = true;
-    await client.dispatch("createPlayer", {
-      playerId: "p1",
-      name: "Guest Ann",
-    });
-    await client.logIn("ann@example.com", "secret123");
-    expect(client.getPendingCount()).toBe(0);
-    expect(client.getView().players.has("p1")).toBe(false);
-  });
-
   it("surfaces the server's message and code", async () => {
     const client = newClient();
     await client.start();
@@ -682,4 +681,695 @@ describe("scale", () => {
     await synced(client);
     expect(server.log).toHaveLength(78);
   }, 30_000);
+});
+
+// ── Hardening ───────────────────────────────────────────────────────────
+
+const rejectionsOf = (client: SyncClient) => {
+  const list: ActionRejection[] = [];
+  client.onActionRejected((r) => list.push(r));
+  return list;
+};
+
+function importArgs(gameId: string, userId: string) {
+  const playerIds = Array.from({ length: 6 }, (_, i) => `${gameId}-p${i}`);
+  return {
+    game: {
+      id: gameId,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      createdBy: userId,
+    },
+    newPlayers: playerIds.map((id) => ({ id, name: `Player ${id}` })),
+    seats: playerIds.map((playerId, i) => ({
+      id: `${gameId}-s${i}`,
+      gameId,
+      playerId,
+      orderNumber: i,
+    })),
+    rounds: ROUNDS.map((_, r) => ({
+      id: `${gameId}-r${r}`,
+      gameId,
+      roundNumber: r,
+    })),
+    turns: ROUNDS.flatMap((_, r) =>
+      playerIds.map((playerId, i) => ({
+        id: `${gameId}-r${r}-t${i}`,
+        roundId: `${gameId}-r${r}`,
+        playerId,
+        bid: 1,
+        score: 1,
+      }))
+    ),
+  };
+}
+
+const pushBodies = () =>
+  server.requests
+    .filter((r) => r.path === "/sync/push")
+    .map((r) => r.body.actions);
+
+describe("push batches", () => {
+  it("keeps each batch within the byte limit", async () => {
+    const client = await signedInClient({ deps: { maxBatchBytes: 700 } });
+    goOffline();
+    await waitFor(() => client.getStatus() === "offline");
+    for (let i = 1; i <= 8; i++) {
+      await client.dispatch("createPlayer", {
+        playerId: `p${i}`,
+        name: `Player ${i}`,
+      });
+    }
+    goOnline();
+    await synced(client);
+    const batches = pushBodies();
+    expect(batches.length).toBeGreaterThan(2);
+    for (const actions of batches) {
+      expect(actions.length === 1 || JSON.stringify(actions).length < 900).toBe(
+        true
+      );
+    }
+    expect(server.log).toEqual([
+      "a-1",
+      "a-2",
+      "a-3",
+      "a-4",
+      "a-5",
+      "a-6",
+      "a-7",
+      "a-8",
+    ]);
+  });
+
+  it("splits a batch the server calls too large, in order, until it fits", async () => {
+    const client = await signedInClient();
+    const userId = client.getAuth().user!.id;
+    server.maxPushBytes = 30_000;
+    goOffline();
+    await waitFor(() => client.getStatus() === "offline");
+    const rejections = rejectionsOf(client);
+    for (let i = 0; i < 12; i++) {
+      await client.dispatch("importGame", importArgs(`g${i}`, userId));
+    }
+    goOnline();
+    await synced(client);
+    expect(server.log).toHaveLength(12);
+    expect(server.log).toEqual(
+      Array.from({ length: 12 }, (_, i) => `a-${i + 1}`)
+    );
+    expect(server.data.games.size).toBe(12);
+    expect(rejections).toEqual([]);
+    expect(server.requests.some((r) => r.path === "/sync/push")).toBe(true);
+  });
+
+  it("drops a single action the server won't take, and carries on", async () => {
+    const client = await signedInClient();
+    const userId = client.getAuth().user!.id;
+    server.maxPushBytes = 3000;
+    goOffline();
+    await waitFor(() => client.getStatus() === "offline");
+    const rejections = rejectionsOf(client);
+    await client.dispatch("createPlayer", { playerId: "p1", name: "Ann" });
+    await client.dispatch("importGame", importArgs("big", userId));
+    await client.dispatch("createPlayer", { playerId: "p2", name: "Bob" });
+    goOnline();
+    await synced(client);
+    expect(rejections.map((r) => [r.action.name, r.code])).toEqual([
+      ["importGame", "too_large"],
+    ]);
+    expect(server.log).toEqual(["a-1", "a-3"]);
+    expect(client.getView().games.has("big")).toBe(false);
+  });
+
+  it("drops an action the server calls invalid once it is alone", async () => {
+    const client = await signedInClient();
+    server.pushStatus = 400;
+    const rejections = rejectionsOf(client);
+    await client.dispatch("createPlayer", { playerId: "p1", name: "Ann" });
+    await client.dispatch("createPlayer", { playerId: "p2", name: "Bob" });
+    await synced(client);
+    expect(rejections.map((r) => r.code)).toEqual(["invalid", "invalid"]);
+    expect(client.getView().players.size).toBe(0);
+  });
+
+  it("retries a server_error result without dropping or reordering", async () => {
+    const client = await signedInClient();
+    const rejections = rejectionsOf(client);
+    server.blockPush = true;
+    await client.dispatch("createPlayer", { playerId: "p1", name: "Ann" });
+    await client.dispatch("createGame", createGameArgs("g1"));
+    server.blockPush = false;
+    server.serverErrors = 2; // the first action fails twice; the game would be rejected
+    await synced(client);
+    expect(rejections).toEqual([]);
+    expect(server.log).toEqual(["a-1", "a-2"]);
+    expect(server.data.games.has("g1")).toBe(true);
+  });
+
+  it("treats a 200 page of HTML as no connection and keeps retrying", async () => {
+    const client = await signedInClient();
+    server.portal = true;
+    await client.dispatch("createPlayer", { playerId: "p1", name: "Ann" });
+    await sleep(60);
+    expect(client.getPendingCount()).toBe(1);
+    expect(client.getView().players.has("p1")).toBe(true);
+    server.portal = false;
+    await synced(client);
+    expect(server.data.players.has("p1")).toBe(true);
+  });
+
+  it("treats a wrong-shaped push answer as a failure and retries", async () => {
+    const client = newClient({
+      deps: {
+        fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+          const res = await server.fetch(input, init);
+          if (String(input).includes("/sync/push") && server.pushStatus === 0) {
+            return new Response("[]", { status: 200 });
+          }
+          return res;
+        }) as typeof fetch,
+      },
+    });
+    await client.start();
+    await client.signInAsGuest();
+    await client.dispatch("createPlayer", { playerId: "p1", name: "Ann" });
+    await sleep(40);
+    expect(client.getPendingCount()).toBe(1); // wrong-shaped answers aren't acks
+    expect(
+      server.requests.filter((r) => r.path === "/sync/push").length
+    ).toBeGreaterThan(1);
+  });
+});
+
+describe("snapshots and rollbacks", () => {
+  it("ignores a stale full snapshot that arrives after newer stream events", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let armed = false;
+    const client = await signedInClient({
+      grace: 10,
+      deps: {
+        fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+          const res = await server.fetch(input, init);
+          if (armed && String(input).includes("/sync/pull")) {
+            armed = false;
+            await gate; // the answer was made now, but arrives late
+          }
+          return res;
+        }) as typeof fetch,
+      },
+    });
+    await synced(client);
+    const other = server.addAccount("o@example.com", "pw");
+    server.holdStream = true;
+    server.forceReset = true;
+    armed = true;
+    await client.dispatch("createPlayer", { playerId: "p1", name: "Ann" });
+    await waitFor(() => !armed); // the catch-up pull is in flight
+    server.act(other, {
+      id: "o1",
+      name: "createPlayer",
+      args: { playerId: "p2", name: "Bob" },
+    });
+    server.act(other, {
+      id: "o2",
+      name: "createPlayer",
+      args: { playerId: "p3", name: "Cat" },
+    });
+    server.releaseStream();
+    await waitFor(() => client.getView().players.size === 3);
+
+    release();
+    await sleep(30);
+    expect([...client.getView().players.keys()].sort()).toEqual([
+      "p1",
+      "p2",
+      "p3",
+    ]);
+    await synced(client);
+  });
+
+  it("shares one pull between callers", async () => {
+    const client = await signedInClient({ grace: 5 });
+    await synced(client);
+    server.holdStream = true;
+    const before = server.pullCount;
+    for (let i = 0; i < 5; i++) {
+      await client.dispatch("createPlayer", {
+        playerId: `p${i}`,
+        name: `P${i}`,
+      });
+    }
+    await synced(client);
+    // Five acks wanted five catch-ups; they share pulls instead.
+    expect(server.pullCount - before).toBeLessThan(5);
+  });
+
+  it("follows a server that was restored from an older backup", async () => {
+    const first = await signedInClient();
+    await first.dispatch("createPlayer", { playerId: "p1", name: "Ann" });
+    await synced(first);
+    const backup = server.backup();
+    await first.dispatch("createPlayer", { playerId: "p2", name: "Bob" });
+    await synced(first);
+    await waitFor(() => first.getView().players.size === 2);
+    await first.persisted();
+    first.stop();
+
+    server.restore(backup); // version goes back from 2 to 1
+    const second = newClient();
+    await second.start();
+    await waitFor(() => second.getStatus() === "connected");
+    expect([...second.getView().players.keys()]).toEqual(["p1"]);
+    expect(second.getAuth().user).not.toBeNull();
+  });
+
+  it("re-sends acked actions the server lost in a rollback", async () => {
+    const client = await signedInClient({ grace: 400 });
+    await synced(client);
+    const backup = server.backup();
+    server.holdStream = true;
+    await client.dispatch("createPlayer", { playerId: "p1", name: "Ann" });
+    await waitFor(() => server.data.players.has("p1"));
+    await sleep(30);
+    expect(client.getPendingCount()).toBe(1); // acked, snapshot behind
+
+    server.held.length = 0; // the stream died before it delivered those
+    server.restore(backup); // the server forgets p1 and the action id
+    server.releaseStream();
+    await waitFor(() => server.data.players.has("p1"));
+    await synced(client);
+    expect(server.log.filter((id) => id === "a-1")).toHaveLength(2);
+    expect(client.getView().players.has("p1")).toBe(true);
+  });
+});
+
+describe("connection", () => {
+  it("backs off when the server rate limits", async () => {
+    server.rateLimited = true;
+    const client = newClient({ deps: { backoff: { minMs: 50, maxMs: 800 } } });
+    await client.start();
+    await sleep(300);
+    expect(server.pullCount).toBeLessThanOrEqual(2);
+    expect(server.pullCount).toBeGreaterThanOrEqual(1);
+    expect(client.getStatus()).toBe("offline");
+    server.rateLimited = false;
+    await waitFor(() => client.getStatus() === "connected", 3000);
+  });
+
+  it("stays connected and keeps syncing when only the stream is blocked", async () => {
+    server.streamLimited = true;
+    const other = server.addAccount("o@example.com", "pw");
+    const client = await signedInClient();
+    expect(client.getStatus()).toBe("connected");
+    server.act(other, {
+      id: "o1",
+      name: "createPlayer",
+      args: { playerId: "p9", name: "Zed" },
+    });
+    // No stream, so it arrives by polling.
+    await waitFor(() => client.getView().players.has("p9"));
+    await client.dispatch("createPlayer", { playerId: "p1", name: "Ann" });
+    await synced(client);
+    expect(server.data.players.has("p1")).toBe(true);
+    expect(client.getStatus()).toBe("connected");
+  });
+
+  it("keeps backing off when streams open but die straight away", async () => {
+    server.dropStreams = true;
+    const client = newClient({
+      deps: { backoff: { minMs: 30, maxMs: 500 }, healthyMs: 1000 },
+    });
+    await client.start();
+    await sleep(300);
+    // Delays of 30, 60, 120... mean about four opens, not ten.
+    expect(server.streamOpens).toBeLessThanOrEqual(5);
+    expect(server.streamOpens).toBeGreaterThanOrEqual(2);
+  });
+
+  it("keeps trying, slowly, when the browser says we're offline", async () => {
+    const client = newClient({ deps: { backoff: { minMs: 5, maxMs: 40 } } });
+    networks[networks.length - 1].set(false);
+    await client.start();
+    expect(client.getStatus()).toBe("offline");
+    // The browser is wrong: the server is reachable.
+    await waitFor(() => client.getStatus() === "connected");
+    expect(server.pullCount).toBeGreaterThan(0);
+  });
+
+  it("notices a revoked session and keeps the queue", async () => {
+    const client = await signedInClient();
+    server.blockPush = true;
+    await client.dispatch("createPlayer", { playerId: "p1", name: "Ann" });
+    server.forgetTokens();
+    networks[0].set(true); // reconnect, which checks the session
+    await waitFor(() => client.getAuth().user === null);
+    expect(client.getPendingCount()).toBe(1);
+    expect(client.getView().players.has("p1")).toBe(true);
+  });
+
+  it("does nothing after stop(), and start() picks up again", async () => {
+    const client = await signedInClient();
+    server.offline = true; // retry timers are running
+    client.stop();
+    await sleep(30);
+    const requests = server.requests.length;
+    const pulls = server.pullCount;
+    await sleep(80);
+    expect(server.requests.length).toBe(requests);
+    expect(server.pullCount).toBe(pulls);
+
+    server.offline = false;
+    await client.start();
+    await waitFor(() => client.getStatus() === "connected");
+    await client.dispatch("createPlayer", { playerId: "p1", name: "Ann" });
+    await synced(client);
+    expect(server.data.players.has("p1")).toBe(true);
+  });
+
+  it("is not loading when only queued changes are stored", async () => {
+    const first = await signedInClient();
+    goOffline();
+    await waitFor(() => first.getStatus() === "offline");
+    await first.dispatch("createPlayer", { playerId: "p1", name: "Ann" });
+    await first.persisted();
+    first.stop();
+
+    // Reload with a server that never answers.
+    const second = newClient({
+      deps: { fetch: (() => new Promise(() => {})) as unknown as typeof fetch },
+    });
+    await second.start();
+    expect(second.getStatus()).not.toBe("connected");
+    expect(second.getView().players.size).toBe(1);
+    expect(second.isLoading()).toBe(false);
+  });
+});
+
+describe("sessions", () => {
+  it("refuses to leave a guest session while its changes are unsynced", async () => {
+    server.addAccount("ann@example.com", "secret123");
+    const client = await signedInClient();
+    server.blockPush = true;
+    await client.dispatch("createPlayer", {
+      playerId: "p1",
+      name: "Guest Ann",
+    });
+    const error = await client
+      .logIn("ann@example.com", "secret123")
+      .catch((e) => e);
+    expect(error.code).toBe("unsynced");
+    expect(error.message).toBe(
+      "Couldn't sync your changes yet. Try again when you have signal."
+    );
+    expect(client.getAuth().user?.isGuest).toBe(true);
+    expect(client.getPendingCount()).toBe(1);
+    expect(client.getView().players.has("p1")).toBe(true);
+    expect(server.requests.some((r) => r.path === "/auth/login")).toBe(false);
+
+    server.blockPush = false;
+    const user = await client.logIn("ann@example.com", "secret123");
+    expect(user.isGuest).toBe(false);
+    expect(server.data.players.has("p1")).toBe(true);
+  });
+
+  it("reports queued actions dropped when a different user signs in", async () => {
+    server.addAccount("ann@example.com", "secret123");
+    server.addAccount("bob@example.com", "secret456");
+    const client = newClient();
+    await client.start();
+    await client.logIn("ann@example.com", "secret123");
+    await waitFor(() => client.getStatus() === "connected");
+    server.forgetTokens(); // the session is gone, the queue stays
+    const rejections = rejectionsOf(client);
+    await client.dispatch("createPlayer", { playerId: "p1", name: "Ann's" });
+    await waitFor(() => client.getAuth().user === null);
+    expect(client.getPendingCount()).toBe(1);
+
+    await client.logIn("bob@example.com", "secret456");
+    expect(client.getPendingCount()).toBe(0);
+    expect(rejections.map((r) => [r.action.id, r.code])).toEqual([
+      ["a-1", "signed_out"],
+    ]);
+    expect(client.getView().players.has("p1")).toBe(false);
+  });
+
+  it("reports queued actions dropped by logging out", async () => {
+    const client = await signedInClient();
+    server.blockPush = true;
+    await client.dispatch("createPlayer", { playerId: "p1", name: "Ann" });
+    const rejections = rejectionsOf(client);
+    await client.logOut();
+    expect(rejections.map((r) => r.code)).toEqual(["signed_out"]);
+  });
+
+  it("only clears the session on a 401 for the token that was sent", async () => {
+    server.addAccount("bob@example.com", "secret456");
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let held = 0;
+    const client = await signedInClient({
+      deps: {
+        fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+          if (String(input).includes("/sync/push")) {
+            held += 1;
+            await gate;
+          }
+          return server.fetch(input, init);
+        }) as typeof fetch,
+      },
+    });
+    await client.dispatch("createPlayer", { playerId: "p1", name: "Ann" });
+    await waitFor(() => held === 1); // in flight with the guest's token
+    server.forgetTokens();
+    await client.logOut();
+    await client.logIn("bob@example.com", "secret456");
+    expect(client.getAuth().user?.email).toBe("bob@example.com");
+
+    release();
+    await sleep(40);
+    expect(client.getAuth().user?.email).toBe("bob@example.com");
+  });
+
+  it("claims admin with the bootstrap token and shows it at once", async () => {
+    server.addAccount("ann@example.com", "secret123");
+    const client = newClient();
+    await client.start();
+    expect(await client.claimAdmin("bootstrap").catch((e) => e.code)).toBe(
+      "not_signed_in"
+    );
+    await client.logIn("ann@example.com", "secret123");
+    expect(client.getAuth().user?.isAdmin).toBeUndefined();
+    expect(await client.claimAdmin("nope").catch((e) => e.code)).toBe(
+      "forbidden"
+    );
+    expect(client.getAuth().user?.isAdmin).toBeUndefined();
+
+    await client.claimAdmin("bootstrap");
+    expect(client.getAuth().user?.isAdmin).toBe(true);
+    expect(
+      server.requests.filter((r) => r.path === "/auth/claim-admin")
+    ).toHaveLength(2);
+    // Saved with the session, so it survives a reload offline.
+    await client.persisted();
+    client.stop();
+    goOffline();
+    const reloaded = newClient();
+    await reloaded.start();
+    expect(reloaded.getAuth().user?.isAdmin).toBe(true);
+  });
+
+  it("picks up role changes made elsewhere when it reconnects", async () => {
+    server.addAccount("ann@example.com", "secret123");
+    const client = newClient();
+    await client.start();
+    const user = await client.logIn("ann@example.com", "secret123");
+    await waitFor(() => client.getStatus() === "connected");
+    expect(client.getAuth().user?.isAdmin).toBeUndefined();
+    server.makeAdmin(user.id);
+    networks[0].set(true); // reconnect, which re-reads the user
+    await waitFor(() => client.getAuth().user?.isAdmin === true);
+    expect(client.getAuth().user?.id).toBe(user.id);
+  });
+});
+
+// ── Storage trouble ─────────────────────────────────────────────────────
+
+// An IDBFactory we can break: opens fail while `broken`, and every database it
+// handed out can be closed behind the engine's back (as iOS does).
+function breakableIdb() {
+  const real = new IDBFactory();
+  const dbs: IDBDatabase[] = [];
+  const control = {
+    broken: false,
+    killConnections: () => dbs.forEach((db) => db.close()),
+    factory: {
+      open(name: string, version?: number) {
+        if (control.broken) throw new Error("IndexedDB is gone");
+        const request = real.open(name, version);
+        request.addEventListener("success", () => dbs.push(request.result));
+        return request;
+      },
+    } as unknown as IDBFactory,
+    real,
+  };
+  return control;
+}
+
+describe("storage trouble", () => {
+  it("reopens a connection that was killed and carries on", async () => {
+    const idbControl = breakableIdb();
+    const client = await signedInClient({
+      deps: { openStorage: () => openStorage(idbControl.factory) },
+    });
+    await synced(client);
+    expect(client.getStorageHealth()).toBe("ok");
+    idbControl.killConnections();
+    await client.dispatch("createPlayer", { playerId: "p1", name: "Ann" });
+    await client.persisted();
+    expect(client.getStorageHealth()).toBe("ok");
+    client.stop();
+
+    goOffline();
+    const reloaded = newClient({ storage: idbControl.real });
+    await reloaded.start();
+    expect(reloaded.getView().players.has("p1")).toBe(true);
+  });
+
+  it("reports failing storage, then repairs it from memory when it works again", async () => {
+    const idbControl = breakableIdb();
+    const client = await signedInClient({
+      deps: { openStorage: () => openStorage(idbControl.factory) },
+    });
+    await synced(client);
+    const healths: string[] = [];
+    client.subscribe(() => healths.push(client.getStorageHealth()));
+
+    server.blockPush = true; // keep the changes queued
+    idbControl.broken = true;
+    idbControl.killConnections();
+    await client.dispatch("createPlayer", { playerId: "p1", name: "Ann" });
+    expect(client.getStorageHealth()).toBe("failing");
+    expect(healths).toContain("failing");
+    // Still works for now.
+    expect(client.getView().players.has("p1")).toBe(true);
+
+    idbControl.broken = false;
+    await client.dispatch("createPlayer", { playerId: "p2", name: "Bob" });
+    // Other writes that failed meanwhile (session, snapshot) are repaired by
+    // the periodic retry.
+    await waitFor(() => client.getStorageHealth() === "ok");
+    await client.persisted();
+    client.stop();
+
+    // Both queued changes are on disk, though the first write had failed.
+    goOffline();
+    const reloaded = newClient({ storage: idbControl.real });
+    await reloaded.start();
+    expect(reloaded.getPendingCount()).toBe(2);
+    expect(reloaded.getAuth().user).not.toBeNull();
+  });
+
+  it("heals on its own after a failure", async () => {
+    const idbControl = breakableIdb();
+    const client = await signedInClient({
+      deps: { openStorage: () => openStorage(idbControl.factory) },
+    });
+    server.blockPush = true;
+    idbControl.broken = true;
+    idbControl.killConnections();
+    await client.dispatch("createPlayer", { playerId: "p1", name: "Ann" });
+    expect(client.getStorageHealth()).toBe("failing");
+    idbControl.broken = false;
+    await waitFor(() => client.getStorageHealth() === "ok");
+    await client.persisted();
+    const stored = await (await openStorage(idbControl.real)).load();
+    expect(stored.pending).toHaveLength(1);
+  });
+
+  it("falls back to memory when IndexedDB is missing, and says so", async () => {
+    const client = newClient({
+      deps: { openStorage: () => openStorage(null) },
+    });
+    await client.start();
+    expect(client.getStorageHealth()).toBe("memory");
+    await client.signInAsGuest();
+    await client.dispatch("createPlayer", { playerId: "p1", name: "Ann" });
+    await synced(client);
+    expect(server.data.players.has("p1")).toBe(true);
+  });
+
+  it("falls back to memory when opening storage hangs", async () => {
+    const hanging = { open: () => ({}) } as unknown as IDBFactory;
+    const client = newClient({
+      deps: { openStorage: () => openStorage(hanging, 30) },
+    });
+    await client.start();
+    expect(client.getStorageHealth()).toBe("memory");
+    expect(client.getAuth().isLoading).toBe(false);
+  });
+
+  it("falls back to memory when an injected openStorage never answers", async () => {
+    const client = newClient({
+      deps: { openStorage: () => new Promise(() => {}), storageTimeoutMs: 30 },
+    });
+    await client.start();
+    expect(client.getStorageHealth()).toBe("memory");
+  });
+
+  it("does not write over stored data it couldn't read", async () => {
+    const first = await signedInClient();
+    server.blockPush = true;
+    await first.dispatch("createPlayer", { playerId: "p1", name: "Ann" });
+    await first.persisted();
+    const original = await (await openStorage(idb)).load();
+    first.stop();
+
+    const second = newClient({
+      deps: {
+        openStorage: async () => ({
+          ...(await openStorage(idb)),
+          load: async () => {
+            throw new Error("can't read");
+          },
+        }),
+      },
+    });
+    await second.start();
+    expect(second.getStorageHealth()).toBe("memory");
+    expect(second.getAuth().user).toBeNull();
+    await second.signInAsGuest();
+    await second.dispatch("createPlayer", { playerId: "p2", name: "Bob" });
+    await second.persisted();
+
+    const after = await (await openStorage(idb)).load();
+    expect(after.session).toEqual(original.session);
+    expect(after.pending.map((e) => e.id)).toEqual(
+      original.pending.map((e) => e.id)
+    );
+  });
+
+  it("keeps queued actions from two tabs sharing one database", async () => {
+    const setup = await signedInClient();
+    await setup.persisted();
+    setup.stop();
+
+    goOffline();
+    // Both tabs load the same stored state before either has written.
+    const a = newClient({ deps: { now: () => 1000 } });
+    const b = newClient({ deps: { now: () => 1000 } });
+    await Promise.all([a.start(), b.start()]);
+    await a.dispatch("createPlayer", { playerId: "pa", name: "From A" });
+    await b.dispatch("createPlayer", { playerId: "pb", name: "From B" });
+    await Promise.all([a.persisted(), b.persisted()]);
+    a.stop();
+    b.stop();
+
+    const reloaded = newClient();
+    await reloaded.start();
+    expect(reloaded.getPendingCount()).toBe(2);
+    expect([...reloaded.getView().players.keys()].sort()).toEqual(["pa", "pb"]);
+    goOnline();
+    await synced(reloaded);
+    expect(server.data.players.size).toBe(2);
+  });
 });

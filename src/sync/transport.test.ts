@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChangeSet } from "../../shared/types";
-import { createSseParser, createTransport } from "./transport";
+import { createSseParser, createTransport, isAuthResponse } from "./transport";
 
 describe("createSseParser", () => {
   const parse = (chunks: string[]) => {
@@ -190,5 +190,85 @@ describe("requests", () => {
     expect(await hung.push([], "tok").catch((e) => e)).toMatchObject({
       code: "network",
     });
+  });
+
+  it("treats HTML or wrong-shaped answers to a good status as no connection", async () => {
+    const html = createTransport({
+      base: "/api",
+      fetch: (async () =>
+        new Response("<html>wifi login</html>", {
+          status: 200,
+        })) as typeof fetch,
+    });
+    expect(await html.pull(0).catch((e) => e)).toMatchObject({
+      code: "network",
+    });
+    expect(await html.push([], "tok").catch((e) => e)).toMatchObject({
+      code: "network",
+    });
+
+    const wrong = createTransport({
+      base: "/api",
+      fetch: (async () => new Response("[]", { status: 200 })) as typeof fetch,
+    });
+    expect(await wrong.pull(0).catch((e) => e)).toMatchObject({
+      code: "network",
+    });
+    const noToken = createTransport({
+      base: "/api",
+      fetch: (async () =>
+        new Response('{"user":{}}', { status: 200 })) as typeof fetch,
+    });
+    expect(
+      await noToken
+        .post("/auth/login", {}, undefined, isAuthResponse)
+        .catch((e) => e)
+    ).toMatchObject({ code: "network" });
+  });
+
+  it("fills in maps the server leaves out", async () => {
+    const transport = createTransport({
+      base: "/api",
+      fetch: (async () =>
+        new Response('{"version":3}', { status: 200 })) as typeof fetch,
+    });
+    expect(await transport.pull(0)).toEqual({
+      version: 3,
+      puts: {},
+      deletes: {},
+    });
+  });
+
+  it("keeps the status of a refusal, and times pulls out like other requests", async () => {
+    const refused = createTransport({
+      base: "/api",
+      fetch: (async () =>
+        new Response(
+          '{"error":"Too many requests. Slow down.","code":"rate_limited"}',
+          {
+            status: 429,
+          }
+        )) as typeof fetch,
+    });
+    expect(await refused.pull(0).catch((e) => e)).toMatchObject({
+      status: 429,
+      code: "rate_limited",
+    });
+
+    const hung = createTransport({
+      base: "/api",
+      requestTimeoutMs: 20,
+      fetch: ((_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) =>
+          init.signal?.addEventListener("abort", () =>
+            reject(new Error("aborted"))
+          )
+        )) as typeof fetch,
+    });
+    const started = Date.now();
+    expect(await hung.pull(0).catch((e) => e)).toMatchObject({
+      code: "network",
+    });
+    expect(Date.now() - started).toBeLessThan(1000);
   });
 });

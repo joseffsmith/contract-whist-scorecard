@@ -128,3 +128,52 @@ describe("player selectors", () => {
     ]);
   });
 });
+
+describe("sharing between views", () => {
+  const copy = (view: ReturnType<typeof fixture>["view"]) => ({
+    players: new Map(view.players),
+    games: new Map(view.games),
+    seats: new Map(view.seats),
+    rounds: new Map(view.rounds),
+    turns: new Map(view.turns),
+  });
+
+  it("reuses games whose rows didn't change", () => {
+    const { view } = fixture();
+    // A second game that stays the same.
+    view.games.set("g3", {
+      id: "g3",
+      createdAt: "2026-02-01T00:00:00.000Z",
+      createdBy: "u1",
+    });
+    view.rounds.set("g3r", { id: "g3r", gameId: "g3", roundNumber: 0 });
+    view.turns.set("g3t", {
+      id: "g3t",
+      roundId: "g3r",
+      playerId: "p1",
+      bid: 1,
+    });
+    const before = selectHomeGames(view);
+
+    const next = copy(view);
+    next.turns.set("t1", { ...view.turns.get("t1")!, score: 9 });
+    const after = selectHomeGames(next);
+    expect(after).not.toBe(before);
+    const byId = (r: typeof before, id: string) =>
+      r.games.find((g) => g.id === id);
+    expect(byId(after, "g3")).toBe(byId(before, "g3"));
+    expect(byId(after, "g2")).toBe(byId(before, "g2"));
+    expect(byId(after, "g1")).not.toBe(byId(before, "g1"));
+    expect(byId(after, "g1")!.rounds[0].turns[0].score).toBe(9);
+  });
+
+  it("rebuilds a game when a player it shows changes", () => {
+    const { view } = fixture();
+    const before = selectHomeGames(view);
+    const next = copy(view);
+    next.players.set("p1", { ...view.players.get("p1")!, name: "Annie" });
+    const after = selectHomeGames(next);
+    expect(after.games[0]).not.toBe(before.games[0]);
+    expect(after.games[0].playersOrders[0].player?.name).toBe("Annie");
+  });
+});
