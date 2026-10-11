@@ -179,8 +179,12 @@ function getTurn(state: ReadState, id: string): TurnRow {
   return turn;
 }
 
-function requireCreator(game: GameRow, userId: string): void {
-  if (game.createdBy !== userId) {
+function requireCreator(
+  game: GameRow,
+  userId: string,
+  ctx?: ActionContext
+): void {
+  if (game.createdBy !== userId && !ctx?.isAdmin) {
     throw new ActionError(
       "Only the person who created the game can do that.",
       "forbidden"
@@ -315,7 +319,7 @@ function deleteGame(
 ): RowOp[] {
   const userId = requireUser(ctx);
   const game = getGame(state, requireId(args.gameId, "game id"));
-  requireCreator(game, userId);
+  requireCreator(game, userId, ctx);
   if (game.deletedAt) return [];
   return [put("games", { ...game, deletedAt: ctx.now })];
 }
@@ -345,7 +349,7 @@ function addSeat(
     throw new ActionError("That seat id is already in use.", "conflict");
   }
   const player = getPlayer(state, playerId);
-  if (game.createdBy !== userId) {
+  if (game.createdBy !== userId && !ctx.isAdmin) {
     // Others may only seat a player they've claimed, before play begins.
     if (player.claimedBy !== userId) {
       throw new ActionError(
@@ -379,7 +383,7 @@ function removeSeat(
   const userId = requireUser(ctx);
   const seat = state.get("seats", requireId(args.seatId, "seat id"));
   if (!seat) return [];
-  requireCreator(getGame(state, seat.gameId), userId);
+  requireCreator(getGame(state, seat.gameId), userId, ctx);
   const hasTurns = state
     .where("turns", "playerId", seat.playerId)
     .some((turn) => {
@@ -400,7 +404,7 @@ function reorderSeats(
 ): RowOp[] {
   const userId = requireUser(ctx);
   const game = getGame(state, requireId(args.gameId, "game id"));
-  requireCreator(game, userId);
+  requireCreator(game, userId, ctx);
   const seats = state.where("seats", "gameId", game.id);
   const ids = args.seatIds;
   const sameSeats =
@@ -430,7 +434,7 @@ function setInitialDealer(
   const userId = requireUser(ctx);
   const game = getGame(state, requireId(args.gameId, "game id"));
   const playerId = requireId(args.playerId, "player id");
-  requireCreator(game, userId);
+  requireCreator(game, userId, ctx);
   if (game.initialDealerId === playerId) return [];
   if (gameStarted(state, game.id)) {
     throw new ActionError(
@@ -455,7 +459,7 @@ function placeBid(
   const playerId = requireId(args.playerId, "player id");
   const round = getRound(state, requireId(args.roundId, "round id"));
   const game = getGame(state, round.gameId);
-  requireCreator(game, userId);
+  requireCreator(game, userId, ctx);
 
   const turns = state
     .where("turns", "roundId", round.id)
@@ -499,7 +503,7 @@ function setScore(
 ): RowOp[] {
   const userId = requireUser(ctx);
   const turn = getTurn(state, requireId(args.turnId, "turn id"));
-  requireCreator(gameOfTurn(state, turn), userId);
+  requireCreator(gameOfTurn(state, turn), userId, ctx);
   if (turn.bid == null)
     throw new ActionError("Place a bid before entering a score.", "invalid");
   requireInt(
@@ -519,7 +523,7 @@ function clearScore(
 ): RowOp[] {
   const userId = requireUser(ctx);
   const turn = getTurn(state, requireId(args.turnId, "turn id"));
-  requireCreator(gameOfTurn(state, turn), userId);
+  requireCreator(gameOfTurn(state, turn), userId, ctx);
   if (turn.score == null) return [];
   return [put("turns", { ...turn, score: null })];
 }
@@ -532,7 +536,7 @@ function deleteTurn(
   const userId = requireUser(ctx);
   const turn = state.get("turns", requireId(args.turnId, "turn id"));
   if (!turn) return [];
-  requireCreator(gameOfTurn(state, turn), userId);
+  requireCreator(gameOfTurn(state, turn), userId, ctx);
   return [del("turns", turn.id)];
 }
 

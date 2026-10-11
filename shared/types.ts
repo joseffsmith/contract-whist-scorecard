@@ -143,6 +143,9 @@ export type Action<N extends ActionName = ActionName> = {
 export type ActionContext = {
   userId: string | null; // null = signed out (cannot write)
   isGuest: boolean;
+  // App admin: may manage any game (e.g. imported legacy games whose
+  // creators no longer exist). Set by the server from the session.
+  isAdmin?: boolean;
   now: string; // ISO timestamp to stamp createdAt/mergedAt etc.
   // Server-only: lets the guest → account handoff merge a player that is
   // claimed by the (former) guest user. Never set from client input.

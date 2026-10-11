@@ -2267,3 +2267,54 @@ describe("storage failures", () => {
     ).toThrow(StateError);
   });
 });
+
+describe("admin", () => {
+  it("lets the app admin manage a game someone else created", () => {
+    const data = createMemoryState();
+    applyOps(data, [
+      { op: "put", table: "players", row: { id: "p1", name: "A" } },
+      { op: "put", table: "players", row: { id: "p2", name: "B" } },
+      {
+        op: "put",
+        table: "games",
+        row: {
+          id: "g1",
+          createdAt: "2024-08-23T16:04:09.134Z",
+          createdBy: "legacy-import",
+        },
+      },
+      {
+        op: "put",
+        table: "seats",
+        row: { id: "s1", gameId: "g1", playerId: "p1", orderNumber: 0 },
+      },
+      {
+        op: "put",
+        table: "rounds",
+        row: { id: "r1", gameId: "g1", roundNumber: 0 },
+      },
+    ]);
+    const state = memoryReadState(data);
+    const action = {
+      id: "a1",
+      name: "addSeat" as const,
+      args: { seatId: "s2", gameId: "g1", playerId: "p2", orderNumber: 1 },
+    };
+    const base = {
+      userId: "u1",
+      isGuest: false,
+      now: "2026-10-11T00:00:00.000Z",
+    };
+    expect(() => applyAction(state, action, base)).toThrow(/created the game/);
+    expect(applyAction(state, action, { ...base, isAdmin: true })).toHaveLength(
+      1
+    );
+    const bid = {
+      id: "a2",
+      name: "placeBid" as const,
+      args: { turnId: "t1", roundId: "r1", playerId: "p1", bid: 1 },
+    };
+    expect(() => applyAction(state, bid, base)).toThrow(ActionError);
+    expect(applyAction(state, bid, { ...base, isAdmin: true })).toHaveLength(1);
+  });
+});
