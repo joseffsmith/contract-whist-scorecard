@@ -1,4 +1,6 @@
+import { useMemo } from "react";
 import { Link } from "react-router-dom";
+import { computeAwards } from "../stats/playerStats";
 import { selectHomeGames, useSyncView } from "../sync";
 import { alpha, t } from "../theme/tokens";
 import { summarizeGame } from "../utils/gameStatus";
@@ -14,6 +16,10 @@ type Row = {
 
 export const Leaderboard = () => {
   const { view, isLoading } = useSyncView();
+  const awards = useMemo(
+    () => computeAwards(selectHomeGames(view).games),
+    [view]
+  );
 
   if (isLoading) {
     return <div style={{ padding: 20, opacity: 0.6 }}>Loading…</div>;
@@ -62,6 +68,74 @@ export const Leaderboard = () => {
         All time · by wins
       </div>
 
+      {awards.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            overflowX: "auto",
+            margin: "0 -16px 12px",
+            padding: "0 16px 4px",
+            scrollSnapType: "x proximity",
+            scrollPaddingLeft: 16,
+          }}
+        >
+          {awards.map((a) => (
+            <Link
+              key={a.key}
+              to={`/stats/${a.playerId}`}
+              style={{
+                flex: "0 0 auto",
+                width: 132,
+                padding: "9px 12px",
+                borderRadius: 12,
+                background: alpha(t.shade, 0.22),
+                border: `1px solid ${alpha(t.gold, 0.13)}`,
+                scrollSnapAlign: "start",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 9,
+                  color: t.gold,
+                  letterSpacing: "0.14em",
+                  textTransform: "uppercase",
+                  fontWeight: 700,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {a.title}
+              </div>
+              <div
+                style={{
+                  fontFamily: t.display,
+                  fontSize: 15,
+                  color: t.cream,
+                  fontWeight: 600,
+                  marginTop: 3,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {a.name}
+              </div>
+              <div
+                style={{
+                  fontSize: 10,
+                  color: t.cream,
+                  opacity: 0.55,
+                  marginTop: 1,
+                  lineHeight: 1.3,
+                }}
+              >
+                {a.detail}
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+
       {rows.length === 0 && (
         <div style={{ opacity: 0.6, fontSize: 13 }}>No finished games yet.</div>
       )}
@@ -69,8 +143,9 @@ export const Leaderboard = () => {
       {rows.map((r, i) => {
         const avg = r.finished ? (r.totalScore / r.finished).toFixed(1) : "—";
         return (
-          <div
+          <Link
             key={r.id}
+            to={`/stats/${r.id}`}
             style={{
               padding: "12px 14px",
               borderRadius: 12,
@@ -141,7 +216,7 @@ export const Leaderboard = () => {
                 }}
               />
             </div>
-          </div>
+          </Link>
         );
       })}
       <Link
