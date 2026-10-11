@@ -15,6 +15,7 @@ import type {
   DataState,
   PublicUser,
   PushResponse,
+  TableName,
 } from "../../shared/types";
 import { BASE_PATH } from "../lib/paths";
 import { createMemoryStorage, openStorage } from "./storage";
@@ -53,6 +54,8 @@ export type SyncDeps = {
   openStorage: () => Promise<SyncStorage>;
   now: () => number;
   uuid: () => string;
+  // A random secret (32 bytes, base64url) for a provisional guest.
+  secret: () => string;
   network: NetworkSignal;
   apiBase: string;
   backoff: { minMs: number; maxMs: number };
@@ -79,6 +82,8 @@ export type SyncClient = {
   onActionRejected(callback: (rejection: ActionRejection) => void): () => void;
   subscribe(callback: () => void): () => void;
   getView(): DataState;
+  // True when the row is in the server's snapshot, not just the optimistic view.
+  isConfirmed(table: TableName, id: string): boolean;
   getStatus(): ConnectionStatus;
   getStorageHealth(): StorageHealth;
   getAuth(): AuthState;
@@ -113,6 +118,12 @@ const randomUuid = () => {
   )}-${h.slice(20)}`;
 };
 
+const randomSecret = () =>
+  btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
 const browserNetwork: NetworkSignal = {
   isOnline: () =>
     typeof navigator === "undefined" || navigator.onLine !== false,
@@ -138,6 +149,7 @@ function defaultDeps(): SyncDeps {
     openStorage: () => openStorage(),
     now: () => Date.now(),
     uuid: randomUuid,
+    secret: randomSecret,
     network: browserNetwork,
     apiBase: `${BASE_PATH}/api`,
     backoff: { minMs: 1000, maxMs: 30_000 },
@@ -526,6 +538,8 @@ export function createSyncClient(
     if (deps.network.isOnline()) {
       failures = 0;
       pushFailures = 0;
+      materialiseFailures = 0;
+      materialiseBlockedUntil = 0;
     } else {
       setStatus("offline");
     }
@@ -629,12 +643,7 @@ export function createSyncClient(
     try {
       if (session?.provisional && running && reachable()) {
         // Get a real session first (the queue waits).
-        try {
-          await materialise();
-        } catch {
-          if (myEpoch === epoch) schedulePushRetry();
-          return;
-        }
+        if (!(await tryMaterialise()) || myEpoch !== epoch) return;
       }
       while (canPush() && myEpoch === epoch) {
         const batch = nextBatch();
@@ -743,9 +752,15 @@ export function createSyncClient(
 
   // ── Session ─────────────────────────────────────────────────────────────
 
-  function setSession(next: Session | null) {
+  function setSession(next: Session | null, queueMoved = false) {
     session = next;
-    saveSession(next);
+    if (queueMoved) {
+      save(["session", "pending"], () =>
+        storage!.replaceSessionAndPending(next, pending)
+      );
+    } else {
+      saveSession(next);
+    }
     if (next) {
       dropPending((entry) => entry.userId !== next.user.id, {
         code: "signed_out",
@@ -776,14 +791,15 @@ export function createSyncClient(
     try {
       response = await transport.post<AuthResponse>(
         "/auth/guest",
-        { id: provisional.user.id },
+        { id: provisional.user.id, secret: provisional.secret },
         undefined,
         isAuthResponse
       );
     } catch (error) {
+      // Only a definite "that id isn't yours" gets a new identity.
       if (
         !(error instanceof SyncError) ||
-        (error.status !== 409 && error.status !== 400)
+        (error.code !== "id_taken" && error.code !== "invalid_id")
       ) {
         throw error;
       }
@@ -795,10 +811,34 @@ export function createSyncClient(
       );
     }
     if (session !== provisional) return; // signed out or in meanwhile
-    if (response.user.id !== provisional.user.id) {
-      moveQueue(provisional.user.id, response.user.id);
+    const moved = response.user.id !== provisional.user.id;
+    if (moved) moveQueue(provisional.user.id, response.user.id);
+    materialiseFailures = 0;
+    // The session and the moved queue are saved together.
+    setSession({ token: response.token, user: response.user }, moved);
+  }
+
+  // Backed-off attempts, for the background: a registration that fails waits
+  // before the next, however many actions are dispatched meanwhile. Resolves
+  // true once the guest is real.
+  let materialiseFailures = 0;
+  let materialiseBlockedUntil = 0;
+  let materialiseTimer: ReturnType<typeof setTimeout> | undefined;
+  async function tryMaterialise(): Promise<boolean> {
+    if (!session?.provisional) return true;
+    if (Date.now() < materialiseBlockedUntil) return false;
+    try {
+      await materialise();
+      return !session?.provisional;
+    } catch (error) {
+      const limited = error instanceof SyncError && error.status === 429;
+      materialiseFailures += limited ? 3 : 1;
+      const wait = delayFor(materialiseFailures);
+      materialiseBlockedUntil = Date.now() + wait;
+      clearTimeout(materialiseTimer);
+      materialiseTimer = setTimeout(() => void push(), wait);
+      return false;
     }
-    setSession({ token: response.token, user: response.user });
   }
 
   // Re-attributes queued actions to another user id, including ids that
@@ -819,7 +859,6 @@ export function createSyncClient(
         }
       }
     }
-    savePending(() => storage!.replacePending(pending));
   }
 
   // A real session, for things only the server can do.
@@ -928,6 +967,7 @@ export function createSyncClient(
     stopNetwork = () => {};
     clearTimeout(retryTimer);
     clearTimeout(pushTimer);
+    clearTimeout(materialiseTimer);
     clearTimeout(healthyTimer);
     clearTimeout(healTimer);
     healTimer = undefined;
@@ -1007,6 +1047,7 @@ export function createSyncClient(
       return () => listeners.delete(callback);
     },
     getView: () => view,
+    isConfirmed: (table, id) => snapshot[table].has(id),
     getStatus: () => status,
     getStorageHealth: () => health,
     getAuth: () => auth,
@@ -1015,24 +1056,30 @@ export function createSyncClient(
     async signInAsGuest() {
       await begin();
       if (session) {
-        if (session.provisional && reachable())
-          await materialise().catch(() => {});
+        if (session.provisional && reachable()) await tryMaterialise();
         return session.user;
       }
-      try {
-        return adopt(await authRequest("/auth/guest", {}));
-      } catch (error) {
-        if (!isNetworkError(error)) throw error;
-        // No signal on first use: carry on as a guest that exists only here
-        // until we can register it.
-        const user: PublicUser = {
-          id: deps.uuid(),
-          email: null,
-          isGuest: true,
-        };
-        setSession({ token: null, user, provisional: true });
-        return user;
+      // Known to be offline: don't wait for a request to fail.
+      if (status !== "offline") {
+        try {
+          return adopt(await authRequest("/auth/guest", {}));
+        } catch (error) {
+          const down =
+            error instanceof SyncError &&
+            (error.status === 429 || (error.status ?? 0) >= 500);
+          if (!isNetworkError(error) && !down) throw error;
+        }
       }
+      // No signal on first use: carry on as a guest that exists only here
+      // until we can register it.
+      const user: PublicUser = { id: deps.uuid(), email: null, isGuest: true };
+      setSession({
+        token: null,
+        user,
+        provisional: true,
+        secret: deps.secret(),
+      });
+      return user;
     },
     async signUp(email, password) {
       await ensureReal();
@@ -1098,4 +1145,5 @@ export function createSyncClient(
 }
 
 export const sync = createSyncClient();
+export const isConfirmed = sync.isConfirmed;
 if (typeof window !== "undefined") void sync.start();

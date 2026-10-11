@@ -1,4 +1,4 @@
-export { sync, createSyncClient } from "./client";
+export { sync, createSyncClient, isConfirmed } from "./client";
 export type {
   ActionRejection,
   AuthState,

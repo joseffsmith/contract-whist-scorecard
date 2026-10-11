@@ -39,6 +39,7 @@ export function createFakeServer() {
   let tokenCounter = 0;
   let userCounter = 0;
   const knownIds = new Set<string>();
+  const guestSecrets = new Map<string, string>();
 
   const server = {
     data,
@@ -62,6 +63,8 @@ export function createFakeServer() {
     streamLimited: false, // streams answer 429
     dropStreams: false, // streams end right after their first event
     forceReset: false, // the next pull answers with a full snapshot
+    guestFail: null as null | { status: number; code: string }, // /auth/guest answers this
+    loseNextGuestResponse: false, // register the guest, then fail like a lost reply
     takenIds: new Set<string>(), // guest ids the server pretends are in use
     streamOpens: 0,
     pullCount: 0,
@@ -90,6 +93,7 @@ export function createFakeServer() {
 
     addAccount(email: string, password: string, isGuest = false): PublicUser {
       const account = { id: `u-${++userCounter}`, email, isGuest, password };
+      knownIds.add(account.id);
       accounts.push(account);
       return { id: account.id, email, isGuest };
     },
@@ -247,19 +251,35 @@ export function createFakeServer() {
         return json(200, { results, version } satisfies PushResponse);
       }
       case "/auth/guest": {
+        if (server.guestFail) {
+          return fail(server.guestFail.status, "No.", server.guestFail.code);
+        }
         let id = `u-${++userCounter}`;
         if (body?.id !== undefined) {
           if (typeof body.id !== "string" || !UUID_V4.test(body.id)) {
             return fail(400, "Bad request.", "invalid_id");
           }
-          if (server.takenIds.has(body.id) || knownIds.has(body.id)) {
+          const mine =
+            typeof body.secret === "string" &&
+            guestSecrets.get(body.id) === body.secret;
+          if (
+            !mine &&
+            (server.takenIds.has(body.id) || knownIds.has(body.id))
+          ) {
             return fail(409, "That id is already in use.", "id_taken");
           }
           id = body.id;
+          if (typeof body.secret === "string")
+            guestSecrets.set(id, body.secret);
         }
         knownIds.add(id);
         const guest = { id, email: null, isGuest: true };
-        return json(200, { token: server.tokenFor(guest), user: guest });
+        const token = server.tokenFor(guest);
+        if (server.loseNextGuestResponse) {
+          server.loseNextGuestResponse = false;
+          throw new TypeError("Failed to fetch");
+        }
+        return json(200, { token, user: guest });
       }
       case "/auth/signup": {
         if (accounts.some((a) => a.email === body.email)) {

@@ -1441,7 +1441,7 @@ describe("provisional guests", () => {
     goOnline();
     await synced(reloaded);
     const register = server.requests.find((r) => r.path === "/auth/guest")!;
-    expect(register.body).toEqual({ id: user.id });
+    expect(register.body).toEqual({ id: user.id, secret: expect.any(String) });
     expect(reloaded.getAuth().user).toEqual(user);
     expect(server.data.games.get("g1")?.createdBy).toBe(user.id);
     expect(server.data.players.get("p1")?.claimedBy).toBe(user.id);
@@ -1477,7 +1477,7 @@ describe("provisional guests", () => {
     expect(fresh.isGuest).toBe(true);
     expect(
       server.requests.filter((r) => r.path === "/auth/guest").map((r) => r.body)
-    ).toEqual([{ id: user.id }, {}]);
+    ).toEqual([{ id: user.id, secret: expect.any(String) }, {}]);
     // Everything landed under the new id, including the id inside importGame.
     expect(server.data.games.get("g1")?.createdBy).toBe(fresh.id);
     expect(server.data.games.get("old")?.createdBy).toBe(fresh.id);
@@ -1576,5 +1576,199 @@ describe("provisional guests", () => {
     expect(user.id).toMatch(/^u-/);
     // And returns the same guest when asked again.
     expect(await client.signInAsGuest()).toEqual(user);
+  });
+});
+
+describe("provisional guests, hardened", () => {
+  const guestRequests = () =>
+    server.requests.filter((r) => r.path === "/auth/guest");
+
+  it("sends a random secret with the id", async () => {
+    const { client, user } = await offlineGuest();
+    goOnline();
+    await synced(client);
+    const [register] = guestRequests();
+    expect(register.body.id).toBe(user.id);
+    expect(register.body.secret).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  });
+
+  it("lets two tabs on one database register the same guest", async () => {
+    const { client, user } = await offlineGuest();
+    await client.persisted();
+    client.stop();
+    const a = newClient({ deps: uuidDeps() });
+    const b = newClient({ deps: uuidDeps() });
+    await Promise.all([a.start(), b.start()]);
+    goOnline();
+    await Promise.all([synced(a), synced(b)]);
+    expect(a.getAuth().user).toEqual(user);
+    expect(b.getAuth().user).toEqual(user);
+    expect(guestRequests().length).toBeGreaterThanOrEqual(2);
+    expect(guestRequests().every((r) => r.body.id === user.id)).toBe(true);
+    // Applied once, whichever tab got there first.
+    expect(server.log).toHaveLength(3);
+    expect(server.data.games.get("g1")?.createdBy).toBe(user.id);
+  });
+
+  it("registers fine on retry after the reply was lost", async () => {
+    const { client, user } = await offlineGuest();
+    server.loseNextGuestResponse = true;
+    goOnline();
+    await synced(client);
+    expect(client.getAuth().user).toEqual(user);
+    expect(guestRequests()).toHaveLength(2);
+    expect(server.data.games.get("g1")?.createdBy).toBe(user.id);
+  });
+
+  it("only starts over as someone else when the server says the id is taken", async () => {
+    const { client, user } = await offlineGuest();
+    server.guestFail = { status: 409, code: "conflict" };
+    goOnline();
+    await sleep(60);
+    expect(client.getAuth().user).toEqual(user);
+    expect(guestRequests().every((r) => r.body.id === user.id)).toBe(true);
+    server.guestFail = null;
+    await synced(client);
+    expect(client.getAuth().user).toEqual(user);
+  });
+
+  it("backs off registration instead of retrying on every dispatch", async () => {
+    const { client } = await offlineGuest();
+    server.guestFail = { status: 503, code: "server_error" };
+    goOnline();
+    for (let i = 0; i < 12; i++) {
+      await client.dispatch("createPlayer", {
+        playerId: `x${i}`,
+        name: `X${i}`,
+      });
+    }
+    await sleep(30);
+    expect(guestRequests().length).toBeLessThanOrEqual(3);
+    server.guestFail = null;
+    await synced(client);
+    expect(server.data.players.size).toBe(13);
+  });
+
+  it("moves the session and queue to a new guest in one write", async () => {
+    // Writes of the switch fail; what is on disk must still be the old, whole state.
+    let failSwitch = false;
+    const flaky = async () => {
+      const real = await openStorage(idb);
+      return {
+        ...real,
+        replaceSessionAndPending: async (
+          ...args: Parameters<typeof real.replaceSessionAndPending>
+        ) => {
+          if (failSwitch) throw new Error("disk says no");
+          return real.replaceSessionAndPending(...args);
+        },
+      };
+    };
+    const { client, user } = await offlineGuest(true);
+    await client.persisted();
+    client.stop();
+
+    server.takenIds.add(user.id);
+    server.blockPush = true; // nothing reaches the server under the new guest yet
+    const first = newClient({ deps: { ...uuidDeps(), openStorage: flaky } });
+    await first.start();
+    failSwitch = true;
+    goOnline();
+    await waitFor(() => first.getAuth().user?.id !== user.id);
+    await waitFor(() => first.getStorageHealth() === "failing");
+    first.stop();
+    failSwitch = false;
+
+    // Reloading finds the old identity with its whole queue, nothing dropped.
+    const rejections: ActionRejection[] = [];
+    const second = newClient({ deps: uuidDeps() });
+    second.onActionRejected((r) => rejections.push(r));
+    goOffline();
+    await second.start();
+    expect(second.getAuth().user).toEqual(user);
+    expect(second.getPendingCount()).toBe(4);
+    server.blockPush = false;
+    goOnline();
+    await synced(second);
+    const fresh = second.getAuth().user!;
+    expect(fresh.id).not.toBe(user.id);
+    expect(rejections).toEqual([]);
+    expect(server.data.games.get("old")?.createdBy).toBe(fresh.id);
+    expect(server.data.games.get("g1")?.createdBy).toBe(fresh.id);
+  });
+
+  it("goes provisional at once when already known to be offline", async () => {
+    server.offline = true; // the browser still says online
+    let guestCalls = 0;
+    const client = newClient({
+      deps: {
+        fetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+          if (String(input).includes("/auth/guest")) guestCalls += 1;
+          return server.fetch(input, init);
+        }) as typeof fetch,
+      },
+    });
+    await client.start();
+    await waitFor(() => client.getStatus() === "offline");
+    const user = await client.signInAsGuest();
+    expect(guestCalls).toBe(0);
+    await client.dispatch("createPlayer", {
+      playerId: "p1",
+      name: "Ann",
+      claim: true,
+    });
+    expect(client.getView().players.get("p1")?.claimedBy).toBe(user.id);
+    server.offline = false;
+    await synced(client);
+    expect(server.data.players.get("p1")?.claimedBy).toBe(
+      client.getAuth().user?.id
+    );
+  });
+
+  it("goes provisional when the server is rate limiting or failing", async () => {
+    for (const status of [429, 503]) {
+      server.guestFail = { status, code: "x" };
+      const client = newClient();
+      await client.start();
+      const user = await client.signInAsGuest();
+      expect(client.getAuth().user).toEqual(user);
+      expect(client.getPendingCount()).toBe(0);
+      server.guestFail = null;
+      await client.dispatch("createPlayer", {
+        playerId: `p${status}`,
+        name: "Ann",
+      });
+      await synced(client);
+      expect(server.data.players.has(`p${status}`)).toBe(true);
+      client.stop();
+    }
+  });
+
+  it("still reports other failures from the guest request", async () => {
+    server.guestFail = { status: 403, code: "forbidden" };
+    const client = newClient();
+    await client.start();
+    expect((await client.signInAsGuest().catch((e) => e)).code).toBe(
+      "forbidden"
+    );
+  });
+});
+
+describe("isConfirmed", () => {
+  it("tells server rows from optimistic ones", async () => {
+    const client = await signedInClient();
+    await synced(client);
+    goOffline();
+    await waitFor(() => client.getStatus() === "offline");
+    const notified: boolean[] = [];
+    client.subscribe(() => notified.push(client.isConfirmed("players", "p1")));
+    await client.dispatch("createPlayer", { playerId: "p1", name: "Ann" });
+    expect(client.getView().players.has("p1")).toBe(true);
+    expect(client.isConfirmed("players", "p1")).toBe(false);
+    goOnline();
+    await synced(client);
+    await waitFor(() => client.isConfirmed("players", "p1"));
+    expect(client.isConfirmed("players", "nope")).toBe(false);
+    expect(notified.at(-1)).toBe(true);
   });
 });
