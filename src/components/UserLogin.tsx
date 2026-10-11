@@ -3,9 +3,12 @@ import { enqueueSnackbar } from "notistack";
 import { useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { db } from "../db";
-import { createGame as createGuestGame, listGames as listGuestGames } from "../guest/guestStore";
+import {
+  createGame as createGuestGame,
+  listGames as listGuestGames,
+} from "../guest/guestStore";
 import { useGuestGames } from "../guest/useGuestGame";
-import { goldButton, t } from "../theme/tokens";
+import { alpha, goldButton, t } from "../theme/tokens";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
 import { GuestMigrationDialog } from "./GuestMigrationDialog";
 import { Shell } from "./chrome/Shell";
@@ -16,9 +19,7 @@ export const UserLogin = () => {
   const guestGames = useGuestGames();
 
   const { isLoading, data: playerUser } = db.useQuery(
-    user
-      ? { players: { $: { where: { $user: user.id } } } }
-      : null
+    user ? { players: { $: { where: { $user: user.id } } } } : null
   );
 
   if (user) {
@@ -70,13 +71,15 @@ const GuestEntry = () => {
     const games = listGuestGames().filter((g) => !g.deletedAt);
     const active = games.find((g) => {
       if (g.players.length < 2) return true; // still in setup
-      return g.rounds.some((r) =>
-        r.turns.length !== g.players.length ||
-        r.turns.some((t) => t.score === null)
+      return g.rounds.some(
+        (r) =>
+          r.turns.length !== g.players.length ||
+          r.turns.some((t) => t.score === null)
       );
     });
     if (active) {
-      const inSetup = active.players.length < 2 || active.initialDealerId === null;
+      const inSetup =
+        active.players.length < 2 || active.initialDealerId === null;
       nav(
         inSetup
           ? `/games/guest/${active.id}/manage`
@@ -90,9 +93,10 @@ const GuestEntry = () => {
   const games = listGuestGames().filter((g) => !g.deletedAt);
   const hasActive = games.some((g) => {
     if (g.players.length < 2) return true;
-    return g.rounds.some((r) =>
-      r.turns.length !== g.players.length ||
-      r.turns.some((t) => t.score === null)
+    return g.rounds.some(
+      (r) =>
+        r.turns.length !== g.players.length ||
+        r.turns.some((t) => t.score === null)
     );
   });
   return (
@@ -110,9 +114,9 @@ const GuestEntry = () => {
           marginBottom: 12,
         }}
       >
-        <div style={{ flex: 1, height: 1, background: `${t.gold}22` }} />
+        <div style={{ flex: 1, height: 1, background: alpha(t.gold, 0.13) }} />
         <span>or</span>
-        <div style={{ flex: 1, height: 1, background: `${t.gold}22` }} />
+        <div style={{ flex: 1, height: 1, background: alpha(t.gold, 0.13) }} />
       </div>
       <button
         onClick={resume}
@@ -120,7 +124,7 @@ const GuestEntry = () => {
           width: "100%",
           padding: "14px 0",
           borderRadius: 12,
-          border: `1px solid ${t.gold}66`,
+          border: `1px solid ${alpha(t.gold, 0.4)}`,
           background: "transparent",
           color: t.cream,
           fontFamily: t.display,
@@ -173,7 +177,7 @@ const LoginFrame = ({ children }: { children: React.ReactNode }) => (
             background: t.panel,
             borderRadius: 6,
             transform: "rotate(6deg)",
-            boxShadow: "0 4px 10px rgba(0,0,0,0.3)",
+            boxShadow: `0 4px 10px ${alpha(t.shade, 0.3)}`,
           }}
         />
         <div
@@ -186,7 +190,7 @@ const LoginFrame = ({ children }: { children: React.ReactNode }) => (
             background: t.cream,
             borderRadius: 6,
             transform: "rotate(-4deg)",
-            boxShadow: "0 4px 10px rgba(0,0,0,0.3)",
+            boxShadow: `0 4px 10px ${alpha(t.shade, 0.3)}`,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -261,8 +265,8 @@ const Field = ({
     style={{
       padding: 14,
       borderRadius: 10,
-      background: "rgba(0,0,0,0.3)",
-      border: `1px solid ${t.gold}44`,
+      background: alpha(t.shade, 0.3),
+      border: `1px solid ${alpha(t.gold, 0.27)}`,
     }}
   >
     <div

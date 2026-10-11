@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { db } from "../db";
 import { queryHomeGames } from "../queries";
-import { goldButton, t } from "../theme/tokens";
+import { alpha, goldButton, t } from "../theme/tokens";
 import { summarizeGame } from "../utils/gameStatus";
 
 export const GameList = () => {
@@ -78,8 +78,8 @@ export const GameList = () => {
               padding: "12px 14px",
               borderRadius: 12,
               marginBottom: 8,
-              background: "rgba(0,0,0,0.25)",
-              border: `1px solid ${t.gold}22`,
+              background: alpha(t.shade, 0.25),
+              border: `1px solid ${alpha(t.gold, 0.13)}`,
             }}
           >
             <div
@@ -117,9 +117,7 @@ export const GameList = () => {
                   <span style={{ opacity: 0.8 }}>In progress</span>
                 )}
               </Link>
-              <div
-                style={{ fontSize: 10, color: t.cream, opacity: 0.55 }}
-              >
+              <div style={{ fontSize: 10, color: t.cream, opacity: 0.55 }}>
                 {when}
               </div>
             </div>
@@ -163,7 +161,7 @@ export const GameList = () => {
                   onClick={() => setConfirmDelete(g.id)}
                   style={{
                     background: "transparent",
-                    border: `1px solid ${t.red}77`,
+                    border: `1px solid ${alpha(t.red, 0.47)}`,
                     color: t.red,
                     fontSize: 11,
                     padding: "5px 10px",
@@ -201,7 +199,7 @@ const ConfirmDialog = ({
     style={{
       position: "fixed",
       inset: 0,
-      background: "rgba(0,0,0,0.6)",
+      background: alpha(t.shade, 0.6),
       backdropFilter: "blur(4px)",
       display: "flex",
       alignItems: "center",
@@ -220,7 +218,7 @@ const ConfirmDialog = ({
         borderRadius: 14,
         background: `linear-gradient(180deg, ${t.panel}, ${t.panelDk})`,
         color: t.ink,
-        boxShadow: "0 20px 50px rgba(0,0,0,0.5)",
+        boxShadow: `0 20px 50px ${alpha(t.shade, 0.5)}`,
       }}
     >
       <div
@@ -243,7 +241,7 @@ const ConfirmDialog = ({
             flex: 1,
             padding: "12px 0",
             borderRadius: 10,
-            border: `1px solid ${t.ink}33`,
+            border: `1px solid ${alpha(t.ink, 0.2)}`,
             background: "transparent",
             color: t.ink,
             fontFamily: t.display,

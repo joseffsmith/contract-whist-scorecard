@@ -2,7 +2,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { DEALS } from "../constants";
 import { db } from "../db";
 import { queryHomeGames } from "../queries";
-import { goldButton, suitColor, t } from "../theme/tokens";
+import { alpha, goldButton, suitColor, t } from "../theme/tokens";
 import { summarizeGame } from "../utils/gameStatus";
 
 export const Home = () => {
@@ -54,10 +54,7 @@ export const Home = () => {
         >
           Recent games
         </div>
-        <Link
-          to="/games"
-          style={{ fontSize: 11, color: t.gold, opacity: 0.8 }}
-        >
+        <Link to="/games" style={{ fontSize: 11, color: t.gold, opacity: 0.8 }}>
           See all →
         </Link>
       </div>
@@ -90,8 +87,8 @@ export const Home = () => {
               padding: "10px 12px",
               borderRadius: 10,
               marginBottom: 6,
-              background: "rgba(0,0,0,0.22)",
-              border: `1px solid ${t.gold}22`,
+              background: alpha(t.shade, 0.22),
+              border: `1px solid ${alpha(t.gold, 0.13)}`,
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
@@ -157,7 +154,7 @@ const EmptyActive = () => (
     style={{
       padding: "20px 16px",
       borderRadius: 14,
-      border: `1px dashed ${t.gold}55`,
+      border: `1px dashed ${alpha(t.gold, 0.33)}`,
       color: t.gold,
       textAlign: "center",
       fontFamily: t.display,
@@ -192,9 +189,11 @@ const ContinueCard = ({
         borderRadius: 16,
         background: `linear-gradient(180deg, ${t.panel}, ${t.panelDk})`,
         color: t.ink,
-        boxShadow:
-          "0 14px 36px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.55)",
-        border: `1px solid ${t.gold}77`,
+        boxShadow: `0 14px 36px ${alpha(
+          t.shade,
+          0.4
+        )}, inset 0 1px 0 rgba(255,255,255,0.55)`,
+        border: `1px solid ${alpha(t.gold, 0.47)}`,
         position: "relative",
         overflow: "hidden",
         cursor: "pointer",
@@ -206,7 +205,7 @@ const ContinueCard = ({
           right: -24,
           top: -20,
           fontSize: 140,
-          color: `${sColor}22`,
+          color: alpha(sColor === t.cream ? t.ink : sColor, 0.13),
           lineHeight: 1,
         }}
       >
@@ -248,7 +247,7 @@ const ContinueCard = ({
           gap: 6,
           marginTop: 12,
           paddingTop: 12,
-          borderTop: `1px solid ${t.goldDk}33`,
+          borderTop: `1px solid ${alpha(t.goldDk, 0.2)}`,
         }}
       >
         {summary.totals.map((p, i) => (

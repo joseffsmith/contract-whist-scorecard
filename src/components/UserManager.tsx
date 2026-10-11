@@ -1,8 +1,9 @@
 import { Navigate } from "react-router-dom";
 import { db } from "../db";
 import { queryHomeGames, queryPlayersWithUserId } from "../queries";
-import { t } from "../theme/tokens";
+import { alpha, t } from "../theme/tokens";
 import { summarizeGame } from "../utils/gameStatus";
+import { ThemePicker } from "./chrome/ThemeToggle";
 import { LinkPlayerToMe } from "./UserLogin";
 
 export const UserManager = () => {
@@ -78,8 +79,8 @@ export const UserManager = () => {
             width: 56,
             height: 56,
             borderRadius: 28,
-            background: t.gold,
-            color: t.feltDk,
+            background: t.goldFill,
+            color: t.onGold,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -111,8 +112,8 @@ export const UserManager = () => {
         style={{
           padding: 14,
           borderRadius: 12,
-          background: "rgba(0,0,0,0.25)",
-          border: `1px solid ${t.gold}22`,
+          background: alpha(t.shade, 0.25),
+          border: `1px solid ${alpha(t.gold, 0.13)}`,
           marginBottom: 14,
         }}
       >
@@ -139,6 +140,30 @@ export const UserManager = () => {
           <Stat label="Wins" value={String(wins)} />
           <Stat label="Avg" value={avg} />
         </div>
+      </div>
+
+      <div
+        style={{
+          padding: 14,
+          borderRadius: 12,
+          background: alpha(t.shade, 0.25),
+          border: `1px solid ${alpha(t.gold, 0.13)}`,
+          marginBottom: 14,
+        }}
+      >
+        <div
+          style={{
+            fontSize: 10,
+            color: t.gold,
+            letterSpacing: "0.2em",
+            textTransform: "uppercase",
+            fontWeight: 700,
+            marginBottom: 10,
+          }}
+        >
+          Appearance
+        </div>
+        <ThemePicker />
       </div>
 
       <Row label="Unlink player" sub={linkedPlayer.name} onClick={unlink} />
@@ -193,8 +218,8 @@ const Row = ({
       padding: "14px",
       borderRadius: 10,
       marginBottom: 6,
-      background: "rgba(0,0,0,0.22)",
-      border: `1px solid ${t.gold}22`,
+      background: alpha(t.shade, 0.22),
+      border: `1px solid ${alpha(t.gold, 0.13)}`,
       display: "flex",
       justifyContent: "space-between",
       alignItems: "center",

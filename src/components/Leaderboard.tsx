@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { queryHomeGames } from "../queries";
-import { t } from "../theme/tokens";
+import { alpha, t } from "../theme/tokens";
 import { summarizeGame } from "../utils/gameStatus";
 
 type Row = {
@@ -75,8 +75,10 @@ export const Leaderboard = () => {
               padding: "12px 14px",
               borderRadius: 12,
               marginBottom: 6,
-              background: i === 0 ? `${t.gold}15` : "rgba(0,0,0,0.22)",
-              border: `1px solid ${i === 0 ? t.gold + "55" : t.gold + "22"}`,
+              background: i === 0 ? alpha(t.gold, 0.08) : alpha(t.shade, 0.22),
+              border: `1px solid ${
+                i === 0 ? alpha(t.gold, 0.33) : alpha(t.gold, 0.13)
+              }`,
               display: "flex",
               alignItems: "center",
               gap: 12,
@@ -87,9 +89,9 @@ export const Leaderboard = () => {
                 width: 28,
                 height: 28,
                 borderRadius: 14,
-                background: i === 0 ? t.gold : "transparent",
-                border: i === 0 ? "none" : `1px solid ${t.gold}44`,
-                color: i === 0 ? t.feltDk : t.gold,
+                background: i === 0 ? t.goldFill : "transparent",
+                border: i === 0 ? "none" : `1px solid ${alpha(t.gold, 0.27)}`,
+                color: i === 0 ? t.onGold : t.gold,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -127,7 +129,7 @@ export const Leaderboard = () => {
                 width: 80,
                 height: 6,
                 borderRadius: 3,
-                background: "rgba(0,0,0,0.3)",
+                background: alpha(t.shade, 0.3),
                 overflow: "hidden",
               }}
             >
@@ -135,7 +137,7 @@ export const Leaderboard = () => {
                 style={{
                   width: `${(r.wins / max) * 100}%`,
                   height: "100%",
-                  background: i === 0 ? t.gold : t.gold + "88",
+                  background: i === 0 ? t.goldFill : alpha(t.gold, 0.53),
                 }}
               />
             </div>

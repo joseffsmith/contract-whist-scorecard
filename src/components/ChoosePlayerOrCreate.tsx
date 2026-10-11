@@ -2,7 +2,7 @@ import { enqueueSnackbar } from "notistack";
 import { useMemo, useState } from "react";
 import { db } from "../db";
 import { queryAllPlayers } from "../queries";
-import { t } from "../theme/tokens";
+import { alpha, t } from "../theme/tokens";
 
 export const ChoosePlayerOrCreate = ({
   createPlayer,
@@ -61,8 +61,8 @@ export const ChoosePlayerOrCreate = ({
           gap: 8,
           padding: 10,
           borderRadius: 10,
-          background: "rgba(0,0,0,0.25)",
-          border: `1px solid ${t.gold}33`,
+          background: alpha(t.shade, 0.25),
+          border: `1px solid ${alpha(t.gold, 0.2)}`,
         }}
       >
         <input
@@ -107,7 +107,7 @@ export const ChoosePlayerOrCreate = ({
             marginTop: 6,
             borderRadius: 10,
             overflow: "hidden",
-            border: `1px solid ${t.gold}22`,
+            border: `1px solid ${alpha(t.gold, 0.13)}`,
           }}
         >
           {options.map((o) => (
@@ -116,8 +116,8 @@ export const ChoosePlayerOrCreate = ({
               onClick={() => pick(o.id)}
               style={{
                 padding: "10px 12px",
-                background: "rgba(0,0,0,0.3)",
-                borderBottom: `1px solid ${t.gold}15`,
+                background: alpha(t.shade, 0.3),
+                borderBottom: `1px solid ${alpha(t.gold, 0.08)}`,
                 cursor: "pointer",
                 fontSize: 14,
                 color: t.cream,

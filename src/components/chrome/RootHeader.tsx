@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
-import { goldButton, t } from "../../theme/tokens";
+import { alpha, goldButton, t } from "../../theme/tokens";
+import { ThemeToggle } from "./ThemeToggle";
 
 const TABS = [
   { id: "home", label: "Home", to: "/" },
@@ -17,7 +18,12 @@ export const RootHeader = ({
 }: {
   activeTab: RootTabId;
   onDeal: () => void;
-  connection: "connected" | "authenticating" | "closed" | "errored" | "unexpected state";
+  connection:
+    | "connected"
+    | "authenticating"
+    | "closed"
+    | "errored"
+    | "unexpected state";
 }) => {
   const dotColor =
     connection === "connected"
@@ -44,7 +50,7 @@ export const RootHeader = ({
               height: 30,
               borderRadius: 8,
               background: t.feltDk,
-              border: `1px solid ${t.gold}66`,
+              border: `1px solid ${alpha(t.gold, 0.4)}`,
               color: t.gold,
               display: "flex",
               alignItems: "center",
@@ -80,24 +86,27 @@ export const RootHeader = ({
             Whist
           </div>
         </div>
-        <button
-          onClick={onDeal}
-          style={{
-            ...goldButton,
-            borderRadius: 20,
-            padding: "8px 14px",
-            fontSize: 13,
-          }}
-        >
-          + Deal
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <ThemeToggle size={32} />
+          <button
+            onClick={onDeal}
+            style={{
+              ...goldButton,
+              borderRadius: 20,
+              padding: "8px 14px",
+              fontSize: 13,
+            }}
+          >
+            + Deal
+          </button>
+        </div>
       </div>
       <div
         style={{
           display: "flex",
           gap: 4,
           padding: "4px 12px 0",
-          borderBottom: `1px solid ${t.gold}22`,
+          borderBottom: `1px solid ${alpha(t.gold, 0.13)}`,
         }}
       >
         {TABS.map((tab) => {

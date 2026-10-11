@@ -24,7 +24,7 @@ import {
   queryPlayersWithUserId,
   queryTurnsForGame,
 } from "../queries";
-import { goldButton, t } from "../theme/tokens";
+import { alpha, goldButton, t } from "../theme/tokens";
 import { Player, PlayersOrdersWithPlayers } from "../types";
 import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
 import { getDealerIdx } from "../utils/getDealerIdx";
@@ -163,7 +163,7 @@ export const GameManager = () => {
                 width: "100%",
                 padding: "10px",
                 borderRadius: 8,
-                border: `1px solid ${t.gold}33`,
+                border: `1px solid ${alpha(t.gold, 0.2)}`,
                 background: "transparent",
                 color: t.gold,
                 fontSize: 12,
@@ -183,7 +183,7 @@ export const GameManager = () => {
               padding: 12,
               borderRadius: 10,
               marginTop: 8,
-              border: `1px dashed ${t.gold}55`,
+              border: `1px dashed ${alpha(t.gold, 0.33)}`,
               color: t.gold,
               textAlign: "center",
               fontSize: 13,
@@ -197,7 +197,12 @@ export const GameManager = () => {
         )}
       </div>
 
-      <div style={{ padding: "10px 16px 14px", borderTop: `1px solid ${t.gold}22` }}>
+      <div
+        style={{
+          padding: "10px 16px 14px",
+          borderTop: `1px solid ${alpha(t.gold, 0.13)}`,
+        }}
+      >
         <button
           disabled={playerOrdersInGame.length < 2}
           onClick={() => nav(`/games/${gameId}`)}
@@ -274,8 +279,10 @@ const PlayerRow = ({
         padding: "12px 14px",
         borderRadius: 10,
         marginBottom: 6,
-        background: isDealer ? `${t.gold}18` : "rgba(0,0,0,0.22)",
-        border: `1px solid ${isDealer ? t.gold + "55" : t.gold + "22"}`,
+        background: isDealer ? alpha(t.gold, 0.09) : alpha(t.shade, 0.22),
+        border: `1px solid ${
+          isDealer ? alpha(t.gold, 0.33) : alpha(t.gold, 0.13)
+        }`,
         display: "flex",
         alignItems: "center",
         gap: 12,
@@ -285,7 +292,7 @@ const PlayerRow = ({
         {...listeners}
         {...attributes}
         style={{
-          color: t.gold + "99",
+          color: alpha(t.gold, 0.6),
           fontSize: 16,
           letterSpacing: "-0.1em",
           cursor: "grab",
@@ -300,7 +307,7 @@ const PlayerRow = ({
           height: 32,
           borderRadius: 16,
           background: t.feltDk,
-          border: `1px solid ${t.gold}44`,
+          border: `1px solid ${alpha(t.gold, 0.27)}`,
           color: t.gold,
           display: "flex",
           alignItems: "center",

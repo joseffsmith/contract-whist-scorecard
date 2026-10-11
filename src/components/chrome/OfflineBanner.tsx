@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { t } from "../../theme/tokens";
+import { alpha, t } from "../../theme/tokens";
 
 type Connection =
   | "connected"
@@ -46,8 +46,8 @@ export const OfflineBanner = ({ connection }: { connection: Connection }) => {
           justifyContent: "center",
           gap: 8,
           padding: "5px 12px",
-          background: "rgba(0,0,0,0.45)",
-          borderBottom: `1px solid ${t.gold}22`,
+          background: alpha(t.shade, 0.45),
+          borderBottom: `1px solid ${alpha(t.gold, 0.13)}`,
           fontSize: 11,
           color: t.cream,
           opacity: 0.75,
@@ -66,7 +66,9 @@ export const OfflineBanner = ({ connection }: { connection: Connection }) => {
           }}
         />
         <span style={{ fontWeight: 500 }}>Offline</span>
-        <span style={{ opacity: 0.55, textTransform: "none", letterSpacing: 0 }}>
+        <span
+          style={{ opacity: 0.55, textTransform: "none", letterSpacing: 0 }}
+        >
           — changes will sync when you reconnect
         </span>
       </div>

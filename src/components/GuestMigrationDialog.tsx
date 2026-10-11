@@ -4,7 +4,7 @@ import { useState } from "react";
 import { db } from "../db";
 import { clearAll, GuestGame } from "../guest/guestStore";
 import { queryAllPlayers } from "../queries";
-import { goldButton, t } from "../theme/tokens";
+import { alpha, goldButton, t } from "../theme/tokens";
 import { Shell } from "./chrome/Shell";
 
 type Player = { id: string; name: string };
@@ -40,14 +40,11 @@ export const GuestMigrationDialog = ({
       for (const game of games) {
         // Build a name→cloud-player-id map for this game's players.
         const mappedIds = game.players.map((gp) => findOrMint(gp.name, txs));
-        const initialDealerCloudId =
-          game.initialDealerId
-            ? mappedIds[
-                game.players.findIndex(
-                  (p) => p.id === game.initialDealerId
-                )
-              ] ?? null
-            : null;
+        const initialDealerCloudId = game.initialDealerId
+          ? mappedIds[
+              game.players.findIndex((p) => p.id === game.initialDealerId)
+            ] ?? null
+          : null;
 
         const newGameId = id();
         txs.push(
@@ -75,9 +72,7 @@ export const GuestMigrationDialog = ({
           );
           for (const turn of round.turns) {
             const cloudPlayerId =
-              mappedIds[
-                game.players.findIndex((p) => p.id === turn.playerId)
-              ];
+              mappedIds[game.players.findIndex((p) => p.id === turn.playerId)];
             if (!cloudPlayerId) continue;
             const payload: { bid?: number; score?: number } = {};
             if (turn.bid !== null) payload.bid = turn.bid;
@@ -174,8 +169,8 @@ export const GuestMigrationDialog = ({
                   padding: "12px 14px",
                   borderRadius: 10,
                   marginBottom: 6,
-                  background: "rgba(0,0,0,0.25)",
-                  border: `1px solid ${t.gold}22`,
+                  background: alpha(t.shade, 0.25),
+                  border: `1px solid ${alpha(t.gold, 0.13)}`,
                 }}
               >
                 <div
@@ -238,7 +233,7 @@ export const GuestMigrationDialog = ({
             padding: "12px 0",
             borderRadius: 12,
             background: "transparent",
-            border: `1px solid ${t.cream}22`,
+            border: `1px solid ${alpha(t.cream, 0.13)}`,
             color: t.cream,
             opacity: 0.6,
             fontSize: 13,

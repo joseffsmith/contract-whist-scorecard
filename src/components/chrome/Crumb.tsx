@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { t } from "../../theme/tokens";
+import { alpha, t } from "../../theme/tokens";
 
 export type CrumbPart = { label: ReactNode; to?: string };
 
@@ -22,7 +22,7 @@ export const Crumb = ({
         display: "flex",
         alignItems: "center",
         gap: 8,
-        borderBottom: `1px solid ${t.gold}33`,
+        borderBottom: `1px solid ${alpha(t.gold, 0.2)}`,
         flexShrink: 0,
       }}
     >
@@ -33,7 +33,7 @@ export const Crumb = ({
           width: 28,
           height: 28,
           borderRadius: 14,
-          border: `1px solid ${t.gold}55`,
+          border: `1px solid ${alpha(t.gold, 0.33)}`,
           color: t.gold,
           background: "transparent",
           display: "flex",

@@ -1,3 +1,35 @@
+/* Theme palette — read via the `t` tokens in src/theme/tokens.ts. */
+:root {
+  color-scheme: dark;
+  --wh-felt: #0f3a2e;
+  --wh-felt-dk: #0a2a21;
+  --wh-panel: #f4ecd9;
+  --wh-panel-dk: #e5d9bc;
+  --wh-ink: #151310;
+  --wh-ink2: #4a4238;
+  --wh-cream: #f6ebcf;
+  --wh-red: #c83a2a;
+  --wh-gold: #c8a24a;
+  --wh-gold-dk: #8a6a24;
+  --wh-gold-fill: #c8a24a;
+  --wh-on-gold: #0a2a21;
+  --wh-pos: #6fbf6a;
+  --wh-shade: #000000;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --wh-felt: #f8f2e3;
+  --wh-felt-dk: #ece2c8;
+  --wh-panel: #fffdf7;
+  --wh-panel-dk: #f3ead4;
+  --wh-cream: #1b2b24;
+  --wh-red: #b3311f;
+  --wh-gold: #86651c;
+  --wh-pos: #2e7d32;
+  --wh-shade: #a08a5a;
+}
+
 html,
 body,
 #root {
@@ -7,12 +39,16 @@ body,
 }
 
 html {
-  background: #0a2a21;
+  background: var(--wh-felt-dk);
 }
 
 body {
-  background: radial-gradient(ellipse at top, #0f3a2e 0%, #0a2a21 100%);
-  color: #f6ebcf;
+  background: radial-gradient(
+    ellipse at top,
+    var(--wh-felt) 0%,
+    var(--wh-felt-dk) 100%
+  );
+  color: var(--wh-cream);
   font-family: "Inter Tight", -apple-system, BlinkMacSystemFont, "Segoe UI",
     system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;

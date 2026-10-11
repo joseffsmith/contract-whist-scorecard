@@ -5,7 +5,8 @@ import { useNavigate, useParams } from "react-router-dom";
 import { DEALS } from "../constants";
 import { db } from "../db";
 import { queryGameData } from "../queries";
-import { goldButton, suitColor, t } from "../theme/tokens";
+import { alpha, goldButton, suitColor, t } from "../theme/tokens";
+import { ThemeToggle } from "./chrome/ThemeToggle";
 import { getBidOptions } from "../utils/getBidOptions";
 import { getCurrentPlayerIdFromRound } from "../utils/getCurrentPlayerIdFromRound";
 import { getDealerIdx } from "../utils/getDealerIdx";
@@ -199,7 +200,7 @@ export const GameComp = () => {
                 style={{
                   fontSize: 10,
                   color: t.gold,
-                  border: `1px solid ${t.gold}55`,
+                  border: `1px solid ${alpha(t.gold, 0.33)}`,
                   padding: "4px 8px",
                   borderRadius: 14,
                   letterSpacing: "0.08em",
@@ -210,6 +211,7 @@ export const GameComp = () => {
                 Undo
               </button>
             )}
+            <ThemeToggle size={26} />
             <button
               onClick={() => setMoreOpen((v) => !v)}
               aria-label="More"
@@ -217,7 +219,7 @@ export const GameComp = () => {
                 width: 26,
                 height: 26,
                 borderRadius: 13,
-                border: `1px solid ${t.gold}55`,
+                border: `1px solid ${alpha(t.gold, 0.33)}`,
                 color: t.gold,
                 background: "transparent",
                 display: "flex",
@@ -237,8 +239,8 @@ export const GameComp = () => {
                   padding: 4,
                   borderRadius: 8,
                   background: t.feltDk,
-                  border: `1px solid ${t.gold}55`,
-                  boxShadow: "0 10px 20px rgba(0,0,0,0.5)",
+                  border: `1px solid ${alpha(t.gold, 0.33)}`,
+                  boxShadow: `0 10px 20px ${alpha(t.shade, 0.5)}`,
                   minWidth: 140,
                   zIndex: 10,
                 }}
@@ -271,8 +273,10 @@ export const GameComp = () => {
           borderRadius: 12,
           background: `linear-gradient(180deg, ${t.panel}, ${t.panelDk})`,
           color: t.ink,
-          boxShadow:
-            "0 10px 30px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.5)",
+          boxShadow: `0 10px 30px ${alpha(
+            t.shade,
+            0.35
+          )}, inset 0 1px 0 rgba(255,255,255,0.5)`,
           position: "relative",
           overflow: "hidden",
           flexShrink: 0,
@@ -284,7 +288,7 @@ export const GameComp = () => {
             right: -20,
             top: -20,
             fontSize: 130,
-            color: `${sColor === t.cream ? t.feltDk : sColor}22`,
+            color: alpha(sColor === t.cream ? t.ink : sColor, 0.13),
             lineHeight: 1,
             fontWeight: 700,
           }}
@@ -346,8 +350,8 @@ export const GameComp = () => {
                 padding: "6px 4px",
                 borderRadius: 8,
                 textAlign: "center",
-                background: isTurn ? `${t.gold}22` : "transparent",
-                border: `1px solid ${isTurn ? t.gold : t.gold + "22"}`,
+                background: isTurn ? alpha(t.gold, 0.13) : "transparent",
+                border: `1px solid ${isTurn ? t.gold : alpha(t.gold, 0.13)}`,
               }}
             >
               <div style={{ fontSize: 10, color: t.cream, opacity: 0.8 }}>
@@ -382,7 +386,7 @@ export const GameComp = () => {
           style={{
             borderRadius: 10,
             overflow: "hidden",
-            border: `1px solid ${t.gold}22`,
+            border: `1px solid ${alpha(t.gold, 0.13)}`,
           }}
         >
           {DEALS.map((deal, rIdx) => {
@@ -398,9 +402,9 @@ export const GameComp = () => {
                     gridTemplateColumns: `40px repeat(${players.length}, 1fr)`,
                     borderBottom:
                       rIdx < DEALS.length - 1
-                        ? `1px solid ${t.gold}15`
+                        ? `1px solid ${alpha(t.gold, 0.08)}`
                         : "none",
-                    background: isCurrent ? `${t.gold}15` : "transparent",
+                    background: isCurrent ? alpha(t.gold, 0.08) : "transparent",
                     minHeight: 32,
                   }}
                 >
@@ -411,7 +415,7 @@ export const GameComp = () => {
                       fontSize: 12,
                       color: isCurrent ? t.gold : t.cream,
                       opacity: isPast ? 0.5 : 1,
-                      borderRight: `1px solid ${t.gold}15`,
+                      borderRight: `1px solid ${alpha(t.gold, 0.08)}`,
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
@@ -443,7 +447,7 @@ export const GameComp = () => {
                         style={{
                           borderRight:
                             pIdx < players.length - 1
-                              ? `1px solid ${t.gold}10`
+                              ? `1px solid ${alpha(t.gold, 0.06)}`
                               : "none",
                           display: "flex",
                           alignItems: "center",
@@ -475,18 +479,21 @@ export const GameComp = () => {
                         {turn?.bid !== null && turn?.bid !== undefined ? (
                           <span>
                             <span style={{ opacity: 0.55 }}>{turn.bid}</span>
-                            {turn.score !== null && turn.score !== undefined && (
-                              <>
-                                <span style={{ opacity: 0.4, margin: "0 2px" }}>
-                                  ·
-                                </span>
-                                <span style={{ fontWeight: made ? 700 : 500 }}>
-                                  {turn.score > 10
-                                    ? turn.score
-                                    : turn.score}
-                                </span>
-                              </>
-                            )}
+                            {turn.score !== null &&
+                              turn.score !== undefined && (
+                                <>
+                                  <span
+                                    style={{ opacity: 0.4, margin: "0 2px" }}
+                                  >
+                                    ·
+                                  </span>
+                                  <span
+                                    style={{ fontWeight: made ? 700 : 500 }}
+                                  >
+                                    {turn.score > 10 ? turn.score : turn.score}
+                                  </span>
+                                </>
+                              )}
                           </span>
                         ) : active && stage === "bid" ? (
                           <span style={{ opacity: 0.8 }}>•</span>
@@ -508,8 +515,8 @@ export const GameComp = () => {
         <div
           style={{
             padding: "12px 16px 14px",
-            borderTop: `1px solid ${t.gold}33`,
-            background: "rgba(0,0,0,0.3)",
+            borderTop: `1px solid ${alpha(t.gold, 0.2)}`,
+            background: alpha(t.shade, 0.3),
             flexShrink: 0,
           }}
         >
@@ -564,19 +571,22 @@ export const GameComp = () => {
                   padding: "14px 0",
                   borderRadius: 10,
                   border: `1.5px solid ${
-                    opt.disabled ? t.gold + "30" : t.gold
+                    opt.disabled ? alpha(t.gold, 0.19) : t.gold
                   }`,
                   background: opt.disabled
                     ? "transparent"
-                    : `linear-gradient(180deg, ${t.gold} 0%, ${t.goldDk} 100%)`,
-                  color: opt.disabled ? t.gold + "80" : t.feltDk,
+                    : `linear-gradient(180deg, ${t.goldFill} 0%, ${t.goldDk} 100%)`,
+                  color: opt.disabled ? alpha(t.gold, 0.5) : t.onGold,
                   fontFamily: t.display,
                   fontSize: `clamp(16px, 5.5vw, 22px)`,
                   fontWeight: 600,
                   textDecoration: opt.disabled ? "line-through" : "none",
                   boxShadow: opt.disabled
                     ? "none"
-                    : "0 4px 12px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.3)",
+                    : `0 4px 12px ${alpha(
+                        t.shade,
+                        0.3
+                      )}, inset 0 1px 0 rgba(255,255,255,0.3)`,
                 }}
               >
                 {opt.number}
@@ -615,7 +625,7 @@ const WinScreen = ({
               style={{
                 fontSize: 10,
                 color: t.gold,
-                border: `1px solid ${t.gold}55`,
+                border: `1px solid ${alpha(t.gold, 0.33)}`,
                 padding: "4px 8px",
                 borderRadius: 14,
                 letterSpacing: "0.08em",
@@ -670,7 +680,9 @@ const WinScreen = ({
         >
           {winner.score}
         </div>
-        <div style={{ fontSize: 12, color: t.cream, opacity: 0.6, marginTop: 4 }}>
+        <div
+          style={{ fontSize: 12, color: t.cream, opacity: 0.6, marginTop: 4 }}
+        >
           {numRounds} rounds
         </div>
 
@@ -682,9 +694,11 @@ const WinScreen = ({
                 padding: "12px 14px",
                 borderRadius: 10,
                 marginBottom: 6,
-                background: p.isWinner ? `${t.gold}18` : "rgba(0,0,0,0.22)",
+                background: p.isWinner
+                  ? alpha(t.gold, 0.09)
+                  : alpha(t.shade, 0.22),
                 border: `1px solid ${
-                  p.isWinner ? t.gold + "55" : t.gold + "22"
+                  p.isWinner ? alpha(t.gold, 0.33) : alpha(t.gold, 0.13)
                 }`,
                 display: "flex",
                 alignItems: "center",
@@ -696,9 +710,11 @@ const WinScreen = ({
                   width: 26,
                   height: 26,
                   borderRadius: 13,
-                  background: p.isWinner ? t.gold : "transparent",
-                  border: p.isWinner ? "none" : `1px solid ${t.gold}44`,
-                  color: p.isWinner ? t.feltDk : t.gold,
+                  background: p.isWinner ? t.goldFill : "transparent",
+                  border: p.isWinner
+                    ? "none"
+                    : `1px solid ${alpha(t.gold, 0.27)}`,
+                  color: p.isWinner ? t.onGold : t.gold,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -737,7 +753,7 @@ const WinScreen = ({
       <div
         style={{
           padding: "10px 16px 14px",
-          borderTop: `1px solid ${t.gold}22`,
+          borderTop: `1px solid ${alpha(t.gold, 0.13)}`,
           display: "flex",
           gap: 8,
           flexShrink: 0,
@@ -750,7 +766,7 @@ const WinScreen = ({
             padding: "12px",
             borderRadius: 12,
             textAlign: "center",
-            border: `1px solid ${t.gold}55`,
+            border: `1px solid ${alpha(t.gold, 0.33)}`,
             color: t.gold,
             background: "transparent",
             fontFamily: t.display,

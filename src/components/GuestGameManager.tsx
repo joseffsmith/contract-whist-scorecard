@@ -24,7 +24,7 @@ import {
   setInitialDealer,
 } from "../guest/guestStore";
 import { useGuestGame } from "../guest/useGuestGame";
-import { goldButton, t } from "../theme/tokens";
+import { alpha, goldButton, t } from "../theme/tokens";
 import { getDealerIdx } from "../utils/getDealerIdx";
 import { Crumb } from "./chrome/Crumb";
 
@@ -44,7 +44,9 @@ export const GuestGameManager = () => {
   if (!game) {
     return (
       <>
-        <Crumb trail={[{ label: "Guest", to: "/login" }, { label: "New game" }]} />
+        <Crumb
+          trail={[{ label: "Guest", to: "/login" }, { label: "New game" }]}
+        />
         <div style={{ padding: 20, opacity: 0.6 }}>Game not found.</div>
       </>
     );
@@ -118,8 +120,8 @@ export const GuestGameManager = () => {
             gap: 8,
             padding: 10,
             borderRadius: 10,
-            background: "rgba(0,0,0,0.25)",
-            border: `1px dashed ${t.gold}55`,
+            background: alpha(t.shade, 0.25),
+            border: `1px dashed ${alpha(t.gold, 0.33)}`,
             marginTop: 8,
           }}
         >
@@ -166,7 +168,7 @@ export const GuestGameManager = () => {
       <div
         style={{
           padding: "10px 16px 14px",
-          borderTop: `1px solid ${t.gold}22`,
+          borderTop: `1px solid ${alpha(t.gold, 0.13)}`,
         }}
       >
         <button
@@ -222,8 +224,10 @@ const PlayerRow = ({
         padding: "12px 14px",
         borderRadius: 10,
         marginBottom: 6,
-        background: isDealer ? `${t.gold}18` : "rgba(0,0,0,0.22)",
-        border: `1px solid ${isDealer ? t.gold + "55" : t.gold + "22"}`,
+        background: isDealer ? alpha(t.gold, 0.09) : alpha(t.shade, 0.22),
+        border: `1px solid ${
+          isDealer ? alpha(t.gold, 0.33) : alpha(t.gold, 0.13)
+        }`,
         display: "flex",
         alignItems: "center",
         gap: 12,
@@ -233,7 +237,7 @@ const PlayerRow = ({
         {...listeners}
         {...attributes}
         style={{
-          color: t.gold + "99",
+          color: alpha(t.gold, 0.6),
           fontSize: 16,
           letterSpacing: "-0.1em",
           cursor: "grab",
@@ -248,7 +252,7 @@ const PlayerRow = ({
           height: 32,
           borderRadius: 16,
           background: t.feltDk,
-          border: `1px solid ${t.gold}44`,
+          border: `1px solid ${alpha(t.gold, 0.27)}`,
           color: t.gold,
           display: "flex",
           alignItems: "center",
