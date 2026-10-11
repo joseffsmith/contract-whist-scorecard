@@ -67,3 +67,18 @@ export const suitColor = (suit: string): string => {
   if (suit === "🚫" || suit === "NT") return t.gold;
   return t.cream;
 };
+
+// Font size that grows with the viewport width, clamped to [min, max] px.
+export const fluid = (min: number, vw: number, max: number): string =>
+  `clamp(${min}px, ${vw}vw, ${max}px)`;
+
+// Font size that tracks the width of one of `n` equal columns spanning the
+// viewport minus `reservedPx`, so text fits whatever the player count.
+export const perColumn = (
+  n: number,
+  reservedPx: number,
+  divisor: number,
+  min: number,
+  max: number
+): string =>
+  `clamp(${min}px, calc((100vw - ${reservedPx}px) / ${n * divisor}), ${max}px)`;

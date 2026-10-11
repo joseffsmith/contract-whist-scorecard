@@ -10,12 +10,22 @@ import {
   setScore,
 } from "../guest/guestStore";
 import { useGuestGame } from "../guest/useGuestGame";
-import { alpha, goldButton, suitColor, t } from "../theme/tokens";
+import {
+  alpha,
+  fluid,
+  goldButton,
+  perColumn,
+  suitColor,
+  t,
+} from "../theme/tokens";
 import { ThemeToggle } from "./chrome/ThemeToggle";
 import { getBidOptions } from "../utils/getBidOptions";
 import { getCurrentPlayerIdFromRound } from "../utils/getCurrentPlayerIdFromRound";
 import { getDealerIdx } from "../utils/getDealerIdx";
 import { Crumb } from "./chrome/Crumb";
+
+// Width of the round label column in the scorecard grid.
+const ROUND_COL = "clamp(40px, 11vw, 52px)";
 
 export const GuestGameComp = () => {
   const { gameId } = useParams<{ gameId: string }>();
@@ -179,6 +189,13 @@ export const GuestGameComp = () => {
     );
   }
 
+  // Text scales with each player column's width: bigger on wide phones and
+  // with fewer players, never smaller than before.
+  const chipGutters = 32 + 6 * (numPlayers - 1);
+  const chipName = perColumn(numPlayers, chipGutters, 7, 10, 13);
+  const chipScore = perColumn(numPlayers, chipGutters, 4, 16, 22);
+  const cellFont = perColumn(numPlayers, 32 + 52, 4.4, 12, 17);
+
   const currentDeal = DEALS[currentRoundIdx];
   const sColor = suitColor(currentDeal?.suit ?? "");
   const currentPlayer = players.find((p) => p.id === currentPlayerId);
@@ -258,7 +275,7 @@ export const GuestGameComp = () => {
         </div>
         <div
           style={{
-            fontSize: 10,
+            fontSize: fluid(10, 2.7, 12),
             color: t.goldDk,
             letterSpacing: "0.18em",
             textTransform: "uppercase",
@@ -270,7 +287,7 @@ export const GuestGameComp = () => {
         <div
           style={{
             fontFamily: t.display,
-            fontSize: 28,
+            fontSize: fluid(28, 7.6, 34),
             fontWeight: 600,
             color: t.ink,
             marginTop: 2,
@@ -279,7 +296,9 @@ export const GuestGameComp = () => {
         >
           {currentPlayer?.name ?? "—"}
         </div>
-        <div style={{ fontSize: 12, color: t.ink2, marginTop: 4 }}>
+        <div
+          style={{ fontSize: fluid(12, 3.2, 14), color: t.ink2, marginTop: 4 }}
+        >
           {dealer ? `${dealer.name} dealt` : ""} ·{" "}
           {stage === "bid"
             ? `${bidsIn} of ${numPlayers} bid`
@@ -311,13 +330,19 @@ export const GuestGameComp = () => {
                 border: `1px solid ${isTurn ? t.gold : alpha(t.gold, 0.13)}`,
               }}
             >
-              <div style={{ fontSize: 10, color: t.cream, opacity: 0.8 }}>
+              <div
+                style={{
+                  fontSize: chipName,
+                  color: t.cream,
+                  opacity: 0.8,
+                }}
+              >
                 {p.name}
               </div>
               <div
                 style={{
                   fontFamily: t.mono,
-                  fontSize: 16,
+                  fontSize: chipScore,
                   fontWeight: 600,
                   marginTop: 1,
                   color: isLead ? t.gold : t.cream,
@@ -337,13 +362,19 @@ export const GuestGameComp = () => {
           overflow: "auto",
           padding: "10px 16px 10px",
           minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
         }}
       >
+        {/* Rows stretch to fill the free height on tall phones. */}
         <div
           style={{
             borderRadius: 10,
             overflow: "hidden",
             border: `1px solid ${alpha(t.gold, 0.13)}`,
+            flex: "1 0 auto",
+            display: "flex",
+            flexDirection: "column",
           }}
         >
           {DEALS.map((deal, rIdx) => {
@@ -356,20 +387,21 @@ export const GuestGameComp = () => {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: `40px repeat(${numPlayers}, 1fr)`,
+                    gridTemplateColumns: `${ROUND_COL} repeat(${numPlayers}, minmax(0, 1fr))`,
                     borderBottom:
                       rIdx < DEALS.length - 1
                         ? `1px solid ${alpha(t.gold, 0.08)}`
                         : "none",
                     background: isCurrent ? alpha(t.gold, 0.08) : "transparent",
                     minHeight: 32,
+                    flex: "1 0 auto",
                   }}
                 >
                   <div
                     style={{
                       padding: "5px 6px",
                       fontFamily: t.mono,
-                      fontSize: 12,
+                      fontSize: fluid(12, 3.4, 15),
                       color: isCurrent ? t.gold : t.cream,
                       opacity: isPast ? 0.5 : 1,
                       borderRight: `1px solid ${alpha(t.gold, 0.08)}`,
@@ -383,7 +415,10 @@ export const GuestGameComp = () => {
                     <span
                       style={{
                         color: sc,
-                        fontSize: deal.suit === "🚫" ? 10 : 13,
+                        fontSize:
+                          deal.suit === "🚫"
+                            ? fluid(10, 2.8, 12)
+                            : fluid(13, 3.6, 16),
                       }}
                     >
                       {deal.suit === "🚫" ? "NT" : deal.suit}
@@ -410,7 +445,7 @@ export const GuestGameComp = () => {
                           alignItems: "center",
                           justifyContent: "center",
                           fontFamily: t.mono,
-                          fontSize: 12,
+                          fontSize: cellFont,
                           color: made
                             ? t.pos
                             : isPast
@@ -479,7 +514,7 @@ export const GuestGameComp = () => {
         >
           <div
             style={{
-              fontSize: 10,
+              fontSize: fluid(10, 2.7, 12),
               color: t.gold,
               letterSpacing: "0.18em",
               textTransform: "uppercase",
@@ -497,7 +532,7 @@ export const GuestGameComp = () => {
           {stage === "bid" && bidOptions.some((o) => o.disabled) && (
             <div
               style={{
-                fontSize: 10,
+                fontSize: fluid(10, 2.7, 12),
                 color: t.cream,
                 opacity: 0.45,
                 textAlign: "center",
@@ -525,7 +560,7 @@ export const GuestGameComp = () => {
                 }
                 style={{
                   minWidth: 0,
-                  padding: "14px 0",
+                  padding: "clamp(14px, 2.2vh, 20px) 0",
                   borderRadius: 10,
                   border: `1.5px solid ${
                     opt.disabled ? alpha(t.gold, 0.19) : t.gold
