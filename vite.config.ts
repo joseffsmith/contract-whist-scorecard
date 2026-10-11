@@ -2,6 +2,11 @@ import reactRefresh from "@vitejs/plugin-react-refresh";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
+const apiProxy = {
+  target: "http://127.0.0.1:3001",
+  rewrite: (path: string) => path.replace(/^\/contract-whist\/api/, ""),
+};
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
@@ -32,6 +37,7 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: "/contract-whist/index.html",
+        navigateFallbackDenylist: [/^\/contract-whist\/api\//],
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff,woff2}"],
         runtimeCaching: [
           {
@@ -60,4 +66,7 @@ export default defineConfig({
     postcss: { plugins: [] },
   },
   base: "/contract-whist",
+  // Local dev/preview: forward the password API to `node server/auth.mjs`.
+  server: { proxy: { "/contract-whist/api": apiProxy } },
+  preview: { proxy: { "/contract-whist/api": apiProxy } },
 });

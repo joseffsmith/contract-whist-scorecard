@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { db } from "../db";
 import { useMyPlayer } from "../players/account";
@@ -5,12 +6,16 @@ import { queryHomeGames } from "../queries";
 import { alpha, t } from "../theme/tokens";
 import { summarizeGame } from "../utils/gameStatus";
 import { ThemePicker } from "./chrome/ThemeToggle";
+import { usePasswordsAvailable } from "../lib/passwordAuth";
 import { AlsoYou } from "./AlsoYou";
+import { SetPasswordSheet } from "./SetPasswordSheet";
 import { LinkPlayerToMe } from "./UserLogin";
 
 export const UserManager = () => {
   const { isLoading: isLoadingUser, user } = db.useAuth();
   const nav = useNavigate();
+  const passwordsOn = usePasswordsAvailable();
+  const [passwordOpen, setPasswordOpen] = useState(false);
 
   const { player: linkedPlayer, isLoading: isLoadingPlayer } = useMyPlayer();
   const { data: gamesData } = db.useQuery(queryHomeGames);
@@ -192,6 +197,16 @@ export const UserManager = () => {
         <ThemePicker />
       </div>
 
+      {!user.isGuest && passwordsOn && (
+        <Row
+          label="Set a password"
+          sub="Log in with email + password next time"
+          onClick={() => setPasswordOpen(true)}
+        />
+      )}
+      {passwordOpen && (
+        <SetPasswordSheet onClose={() => setPasswordOpen(false)} />
+      )}
       <Row
         label="Players & duplicates"
         sub="Find and merge players who are the same person"

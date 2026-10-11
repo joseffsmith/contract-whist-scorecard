@@ -14,6 +14,12 @@ import {
   useAccountReconcile,
   useMyPlayer,
 } from "../players/account";
+import {
+  AuthError,
+  passwordLogIn,
+  passwordSignUp,
+  usePasswordsAvailable,
+} from "../lib/passwordAuth";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
 import { GuestMigrationDialog } from "./GuestMigrationDialog";
 import { Shell } from "./chrome/Shell";
@@ -31,6 +37,10 @@ export const UserLogin = () => {
   const guestGames = useGuestGames();
   const next = useNext();
   const reconciling = useAccountReconcile();
+  const passwordsOn = usePasswordsAvailable();
+  const [method, setMethod] = useState<"password" | "code">("password");
+  const [codeEmail, setCodeEmail] = useState("");
+  const usePassword = !!passwordsOn && method === "password";
 
   const { player: myPlayer, isLoading } = useMyPlayer();
 
@@ -67,17 +77,45 @@ export const UserLogin = () => {
         title={user?.isGuest ? "Keep your games" : "Welcome back"}
         subtitle={
           user?.isGuest
-            ? "Add your email to keep your player on any phone. No password needed."
-            : "Magic-code sign in. No password needed."
+            ? "Add an email to keep your player on any phone."
+            : "Log in, or create an account in seconds."
         }
       >
-        {!sentEmail ? (
+        {sentEmail ? (
+          <MagicCodeStep sentEmail={sentEmail} />
+        ) : (
           <>
-            <EmailStep onSent={setSentEmail} />
+            {usePassword ? (
+              <PasswordStep
+                onUseCode={(email) => {
+                  setCodeEmail(email);
+                  setMethod("code");
+                }}
+              />
+            ) : (
+              <EmailStep onSent={setSentEmail} initialEmail={codeEmail} />
+            )}
+            {passwordsOn && (
+              <button
+                onClick={() =>
+                  setMethod(method === "code" ? "password" : "code")
+                }
+                style={{
+                  display: "block",
+                  margin: "14px auto 0",
+                  background: "transparent",
+                  border: "none",
+                  color: t.gold,
+                  fontSize: 13,
+                }}
+              >
+                {usePassword
+                  ? "Email me a code instead"
+                  : "Use a password instead"}
+              </button>
+            )}
             <GuestEntry />
           </>
-        ) : (
-          <MagicCodeStep sentEmail={sentEmail} />
         )}
       </LoginFrame>
     </Shell>
@@ -280,6 +318,9 @@ const Field = ({
   autoComplete,
   inputMode,
   pattern,
+  autoFocus = true,
+  passwordManager = false,
+  right,
 }: {
   label: string;
   value: string;
@@ -288,6 +329,10 @@ const Field = ({
   autoComplete?: string;
   inputMode?: "numeric" | "text";
   pattern?: string;
+  autoFocus?: boolean;
+  // Let password managers fill this field (they're told to ignore the rest).
+  passwordManager?: boolean;
+  right?: React.ReactNode;
 }) => (
   <div
     style={{
@@ -308,25 +353,29 @@ const Field = ({
     >
       {label}
     </div>
-    <input
-      type={type}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      autoComplete={autoComplete}
-      inputMode={inputMode}
-      pattern={pattern}
-      data-1p-ignore
-      autoFocus
-      style={{
-        width: "100%",
-        background: "transparent",
-        border: "none",
-        outline: "none",
-        color: t.cream,
-        fontSize: 16,
-        padding: 0,
-      }}
-    />
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        autoComplete={autoComplete}
+        inputMode={inputMode}
+        pattern={pattern}
+        data-1p-ignore={passwordManager ? undefined : true}
+        autoFocus={autoFocus}
+        style={{
+          flex: 1,
+          minWidth: 0,
+          background: "transparent",
+          border: "none",
+          outline: "none",
+          color: t.cream,
+          fontSize: 16,
+          padding: 0,
+        }}
+      />
+      {right}
+    </div>
   </div>
 );
 
@@ -354,8 +403,165 @@ const Submit = ({
   </button>
 );
 
-const EmailStep = ({ onSent }: { onSent: (email: string) => void }) => {
+const PasswordStep = ({
+  onUseCode,
+}: {
+  onUseCode: (email: string) => void;
+}) => {
+  const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
+  const [password, setPasswordValue] = useState("");
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<AuthError | null>(null);
+  const signup = mode === "signup";
+
+  // On success UserLogin re-renders with the user and takes it from there.
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      if (signup) await passwordSignUp(email, password);
+      else await passwordLogIn(email, password);
+    } catch (err) {
+      const ae =
+        err instanceof AuthError ? err : new AuthError((err as Error).message);
+      setError(ae);
+      if (ae.code === "has_password") setMode("login");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const tab = (m: "login" | "signup", label: string) => (
+    <button
+      type="button"
+      onClick={() => {
+        setMode(m);
+        setError(null);
+      }}
+      style={{
+        flex: 1,
+        padding: "8px 0",
+        borderRadius: 8,
+        border: "none",
+        background: mode === m ? t.goldFill : "transparent",
+        color: mode === m ? t.onGold : t.cream,
+        opacity: mode === m ? 1 : 0.7,
+        fontWeight: mode === m ? 700 : 500,
+        fontSize: 13,
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <form onSubmit={submit}>
+      <div
+        style={{
+          display: "flex",
+          gap: 4,
+          padding: 3,
+          marginBottom: 12,
+          borderRadius: 10,
+          background: alpha(t.shade, 0.22),
+          border: `1px solid ${alpha(t.gold, 0.13)}`,
+        }}
+      >
+        {tab("login", "Log in")}
+        {tab("signup", "Create account")}
+      </div>
+      <Field
+        label="Email"
+        value={email}
+        onChange={setEmail}
+        type="email"
+        autoComplete="username"
+        passwordManager
+      />
+      <div style={{ height: 8 }} />
+      <Field
+        label="Password"
+        value={password}
+        onChange={setPasswordValue}
+        type={show ? "text" : "password"}
+        autoComplete={signup ? "new-password" : "current-password"}
+        autoFocus={false}
+        passwordManager
+        right={
+          <button
+            type="button"
+            onClick={() => setShow((v) => !v)}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: t.gold,
+              fontSize: 12,
+              padding: 0,
+            }}
+          >
+            {show ? "Hide" : "Show"}
+          </button>
+        }
+      />
+      {signup && (
+        <div
+          style={{ fontSize: 12, color: t.cream, opacity: 0.6, marginTop: 8 }}
+        >
+          At least 8 characters. No email confirmation needed.
+        </div>
+      )}
+      {error && (
+        <div
+          style={{
+            marginTop: 10,
+            padding: "10px 12px",
+            borderRadius: 10,
+            border: `1px solid ${alpha(t.red, 0.5)}`,
+            color: t.cream,
+            fontSize: 13,
+            lineHeight: 1.4,
+          }}
+        >
+          {error.message}
+          {(error.code === "has_account" ||
+            error.code === "bad_credentials") && (
+            <button
+              type="button"
+              onClick={() => onUseCode(email)}
+              style={{
+                display: "block",
+                marginTop: 6,
+                padding: 0,
+                background: "transparent",
+                border: "none",
+                color: t.gold,
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
+              Email me a code instead →
+            </button>
+          )}
+        </div>
+      )}
+      <Submit disabled={busy || !email || !password}>
+        {busy ? "…" : signup ? "Create account" : "Log in"}
+      </Submit>
+    </form>
+  );
+};
+
+const EmailStep = ({
+  onSent,
+  initialEmail = "",
+}: {
+  onSent: (email: string) => void;
+  initialEmail?: string;
+}) => {
+  const [email, setEmail] = useState(initialEmail);
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) return;

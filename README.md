@@ -37,6 +37,10 @@ port 80 under `/contract-whist/` (`/` redirects there).
 3. **Domain:** e.g. `https://whist.joseffsmith.uk`. Leave any "strip prefix"
    option off; the app expects the `/contract-whist/` path.
 4. Keep **Auto deploy** on, so every push to `main` deploys.
+5. For email + password sign-in (`server/auth.mjs`): add a persistent volume
+   at `/data` (password hashes live there) and set the `INSTANT_ADMIN_TOKEN`
+   environment variable (InstantDB dashboard → Admin). Without the token the
+   app just offers email codes.
 
 ### Cutting over from joseffsmith.uk/contract-whist
 
