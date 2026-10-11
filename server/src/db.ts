@@ -138,7 +138,7 @@ export type Snapshot = {
   seats: SeatRow[];
   rounds: RoundRow[];
   turns: TurnRow[];
-  users: { id: string; email: string | null }[];
+  users?: { id: string; email: string | null }[]; // none: users re-register
 };
 
 export function openDb(dataDir: string) {
@@ -296,7 +296,7 @@ export function importSnapshot(db: Db, snapshot: Snapshot): void {
       db.writeOps(ops, 1);
     }
     const now = new Date().toISOString();
-    for (const u of snapshot.users) {
+    for (const u of snapshot.users ?? []) {
       db.stmt(
         "INSERT INTO users (id, email, is_guest, created_at) VALUES (?, ?, 0, ?)"
       ).run(u.id, u.email ? u.email.trim().toLowerCase() : null, now);

@@ -1,8 +1,6 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { createMailer } from "./mail";
-import type { SendResetEmail } from "./mail";
 import { createAuth } from "./auth";
 import { openDb } from "./db";
 import { HttpError, clientIp, createLimiter, readJson, send } from "./http";
@@ -14,9 +12,6 @@ export type ServerOptions = {
   adminEmails?: string[];
   publicUrl?: string;
   host?: string;
-  resendApiKey?: string;
-  mailFrom?: string;
-  sendResetEmail?: SendResetEmail; // replaces Resend (tests)
   pingMs?: number; // SSE heartbeat interval (tests only)
 };
 
@@ -35,9 +30,6 @@ export async function startServer(opts: ServerOptions) {
       .map((e) => e.trim().toLowerCase())
       .filter(Boolean),
     publicUrl: opts.publicUrl || DEFAULT_PUBLIC_URL,
-    sendResetEmail:
-      opts.sendResetEmail ??
-      createMailer({ apiKey: opts.resendApiKey, from: opts.mailFrom }),
   });
 
   const routes: Record<string, (c: Ctx) => unknown> = {
@@ -49,7 +41,6 @@ export async function startServer(opts: ServerOptions) {
     "POST /auth/logout": (c) => auth.logout(c.req),
     "GET /auth/me": (c) => auth.me(c.req),
     "POST /auth/password": (c) => auth.password(c.req, c.ip),
-    "POST /auth/forgot": (c) => auth.forgot(c.req, c.ip),
     "POST /auth/reset-link": (c) => auth.resetLink(c.req),
     "POST /auth/reset": (c) => auth.reset(c.req, c.ip),
 

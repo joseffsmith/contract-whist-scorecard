@@ -6,8 +6,6 @@ const server = await startServer({
   dataDir: process.env.DATA_DIR ?? "/data",
   adminEmails: (process.env.ADMIN_EMAILS ?? "").split(","),
   publicUrl: process.env.PUBLIC_URL,
-  resendApiKey: process.env.RESEND_API_KEY,
-  mailFrom: process.env.MAIL_FROM,
 });
 console.log(`whist server listening on ${server.url}`);
 

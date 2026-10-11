@@ -17,7 +17,6 @@ import type {
 import type { Db } from "./db";
 import { HttpError, bearerToken, readJson } from "./http";
 import type { Limiter } from "./http";
-import type { SendResetEmail } from "./mail";
 import { newActionId } from "./sync";
 import type { Sync } from "./sync";
 
@@ -31,7 +30,6 @@ const scrypt = promisify(scryptCb) as (
 const SCRYPT = { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const MIN_PASSWORD = 8;
 const RESET_LINK_MS = 7 * 24 * 60 * 60 * 1000;
-const HOUR = 60 * 60 * 1000;
 const TOO_MANY = "Too many attempts. Try again in a few minutes.";
 
 type UserRow = {
@@ -95,7 +93,6 @@ const publicUser = (u: UserRow): PublicUser => ({
 export type AuthOptions = {
   adminEmails: string[];
   publicUrl: string;
-  sendResetEmail: SendResetEmail;
 };
 
 export function createAuth(
@@ -106,8 +103,8 @@ export function createAuth(
 ) {
   // A real-looking hash so unknown emails take as long as known ones.
   const dummy = hashPassword("not-a-real-password");
-  const tooMany = (key: string, max: number, windowMs?: number) => {
-    if (limiter.limited(key, max, windowMs))
+  const tooMany = (key: string, max: number) => {
+    if (limiter.limited(key, max))
       throw new HttpError(429, TOO_MANY, "rate_limited");
   };
 
@@ -286,14 +283,7 @@ export function createAuth(
         String(body.password ?? ""),
         stored ?? (await dummy)
       );
-      if (user && !stored) {
-        throw new HttpError(
-          401,
-          "This account doesn't have a password yet. Tap “Forgot password” to set one.",
-          "no_password"
-        );
-      }
-      if (!user || !ok)
+      if (!user || !stored || !ok)
         throw new HttpError(401, "Wrong email or password.", "bad_credentials");
       const token = createSession(user.id);
       if (typeof body.guestToken === "string")
@@ -338,22 +328,6 @@ export function createAuth(
       if (!target)
         throw new HttpError(404, "No account with that email.", "not_found");
       return { url: createResetLink(target.id) };
-    },
-
-    // Always answers ok, so it can't be used to find out who has an account.
-    async forgot(req: IncomingMessage, ip: string) {
-      const email = normEmail((await readJson(req)).email);
-      tooMany(`forgot:${ip}`, 5, HOUR);
-      tooMany(`forgot:${email}`, 5, HOUR);
-      const user = userByEmail(email);
-      if (user && !user.is_guest) {
-        const url = createResetLink(user.id);
-        // Not awaited: the response shouldn't depend on the mail service.
-        opts
-          .sendResetEmail(email, url)
-          .catch((e) => console.error("Reset email failed:", e));
-      }
-      return { ok: true };
     },
 
     async reset(req: IncomingMessage, ip: string) {
