@@ -252,7 +252,7 @@ export function createSyncClient(
   function waitForVersion(target: number, ms: number) {
     return new Promise<void>((resolve) => {
       const waiter = { target, resolve: () => {} };
-      const timer = setTimeout(waiter.resolve, ms);
+      const timer = setTimeout(() => waiter.resolve(), ms);
       waiter.resolve = () => {
         clearTimeout(timer);
         versionWaiters.delete(waiter);

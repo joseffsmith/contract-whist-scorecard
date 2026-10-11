@@ -39,7 +39,12 @@ export function createFakeServer() {
   const server = {
     data,
     log: [] as string[], // ids of actions applied, in order
-    requests: [] as { method: string; path: string; body?: any; token?: string }[],
+    requests: [] as {
+      method: string;
+      path: string;
+      body?: any;
+      token?: string;
+    }[],
     offline: false, // every request fails like a dead network
     blockPush: false, // pushes answer 503
     loseNextPushResponse: false, // apply, then fail as if the reply was lost
@@ -80,6 +85,10 @@ export function createFakeServer() {
       return token;
     },
 
+    forgetTokens() {
+      tokens.clear();
+    },
+
     cutStreams() {
       for (const stream of [...streams]) stream.end(new Error("cut"));
     },
@@ -106,7 +115,8 @@ export function createFakeServer() {
       const auth = headers.get("authorization")?.replace(/^Bearer /, "");
       server.requests.push({ method, path, body, token: auth });
 
-      if (path === "/sync/stream") return openStream(Number(url.searchParams.get("since")), init?.signal);
+      if (path === "/sync/stream")
+        return openStream(Number(url.searchParams.get("since")), init?.signal);
       return handle(path, url, body, auth);
     }) as typeof fetch,
   };
@@ -127,15 +137,22 @@ export function createFakeServer() {
       case "/sync/push": {
         if (!user) return fail(401, "Sign in to do that.", "not_signed_in");
         if (server.blockPush) return fail(503, "Busy", "unavailable");
-        const results: PushResult[] = (body.actions as Action[]).map((action) => {
-          try {
-            runAction(user, action);
-            return { id: action.id, ok: true as const };
-          } catch (error) {
-            if (!(error instanceof ActionError)) throw error;
-            return { id: action.id, ok: false as const, error: error.message, code: error.code };
+        const results: PushResult[] = (body.actions as Action[]).map(
+          (action) => {
+            try {
+              runAction(user, action);
+              return { id: action.id, ok: true as const };
+            } catch (error) {
+              if (!(error instanceof ActionError)) throw error;
+              return {
+                id: action.id,
+                ok: false as const,
+                error: error.message,
+                code: error.code,
+              };
+            }
           }
-        });
+        );
         if (server.loseNextPushResponse) {
           server.loseNextPushResponse = false;
           throw new TypeError("Failed to fetch");
@@ -148,10 +165,18 @@ export function createFakeServer() {
       }
       case "/auth/signup": {
         if (accounts.some((a) => a.email === body.email)) {
-          return fail(409, "That email already has an account. Log in instead.", "has_account");
+          return fail(
+            409,
+            "That email already has an account. Log in instead.",
+            "has_account"
+          );
         }
         if (user?.isGuest) {
-          const upgraded = { id: user.id, email: body.email as string, isGuest: false };
+          const upgraded = {
+            id: user.id,
+            email: body.email as string,
+            isGuest: false,
+          };
           tokens.set(token!, upgraded);
           accounts.push({ ...upgraded, password: body.password });
           return json(200, { token: token!, user: upgraded });
@@ -160,16 +185,25 @@ export function createFakeServer() {
         return json(200, { token: server.tokenFor(created), user: created });
       }
       case "/auth/login": {
-        const account = accounts.find((a) => a.email === body.email && a.password === body.password);
-        if (!account) return fail(401, "Wrong email or password.", "bad_credentials");
-        const loggedIn = { id: account.id, email: account.email, isGuest: false };
+        const account = accounts.find(
+          (a) => a.email === body.email && a.password === body.password
+        );
+        if (!account)
+          return fail(401, "Wrong email or password.", "bad_credentials");
+        const loggedIn = {
+          id: account.id,
+          email: account.email,
+          isGuest: false,
+        };
         return json(200, { token: server.tokenFor(loggedIn), user: loggedIn });
       }
       case "/auth/logout":
         if (token) tokens.delete(token);
         return json(200, { ok: true });
       case "/auth/password":
-        return user ? json(200, { ok: true }) : fail(401, "Sign in to do that.", "not_signed_in");
+        return user
+          ? json(200, { ok: true })
+          : fail(401, "Sign in to do that.", "not_signed_in");
       default:
         return fail(404, "Not found", "not_found");
     }
@@ -206,7 +240,9 @@ export function createFakeServer() {
   function snapshotChangeSet(): ChangeSet {
     const changes: ChangeSet = { version, puts: {}, deletes: {}, reset: true };
     for (const table of TABLES) {
-      (changes.puts as Record<string, unknown[]>)[table] = [...data[table].values()];
+      (changes.puts as Record<string, unknown[]>)[table] = [
+        ...data[table].values(),
+      ];
     }
     return changes;
   }
@@ -261,7 +297,9 @@ export function createFakeServer() {
         });
       },
     });
-    return new Response(body, { headers: { "content-type": "text/event-stream" } });
+    return new Response(body, {
+      headers: { "content-type": "text/event-stream" },
+    });
   }
 
   return server;
