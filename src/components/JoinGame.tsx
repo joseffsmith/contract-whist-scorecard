@@ -5,7 +5,7 @@ import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { db } from "../db";
 import { claimPlayer, useMyPlayer } from "../players/account";
 import { mergePlayers } from "../players/merge";
-import { queryGameData } from "../queries";
+import { useGame, useIsOffline } from "../lib/offline";
 import { alpha, goldButton, t } from "../theme/tokens";
 import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
@@ -17,13 +17,11 @@ export const JoinGame = () => {
   const { gameId } = useParams<{ gameId: string }>();
   const nav = useNavigate();
   const { user, player: me, isLoading: meLoading } = useMyPlayer();
-  const { data, isLoading } = db.useQuery(
-    gameId ? queryGameData(gameId) : null
-  );
+  const { game, isLoading } = useGame(gameId);
+  const offline = useIsOffline();
   const [busy, setBusy] = useState(false);
   const [notListed, setNotListed] = useState(false);
 
-  const game = data?.games[0];
   const seats = [...(game?.playersOrders ?? [])]
     .sort((a, b) => a.orderNumber - b.orderNumber)
     .map((po) => po.player)
@@ -53,6 +51,18 @@ export const JoinGame = () => {
   };
 
   if (!gameId) return <Navigate to="/" replace />;
+  // A phone that's never seen this game (or isn't signed in yet) needs the
+  // server to join. Don't leave them staring at "Loading…".
+  if (offline && (!game || !user)) {
+    return (
+      <Frame title="No signal">
+        <Muted>
+          Joining needs a connection. Try again when you've got signal. In the
+          meantime the host can keep scoring and add you by name.
+        </Muted>
+      </Frame>
+    );
+  }
   if (isLoading || meLoading) return <Frame>Loading…</Frame>;
   if (!game || game.deletedAt) {
     return (
@@ -134,7 +144,7 @@ export const JoinGame = () => {
             busy={busy}
             onClick={() =>
               run(async () => {
-                await addExistingPlayerToGame(gameId, me.id, seats.length);
+                await addExistingPlayerToGame(gameId, me, seats.length);
                 goToGame();
               })
             }
@@ -209,10 +219,10 @@ export const JoinGame = () => {
             hideClaimed
             excludedPlayerIds={seats.map((p) => p.id)}
             contextPlayerIds={seats.map((p) => p.id)}
-            choosePlayer={(pid) =>
+            choosePlayer={(player) =>
               run(async () => {
-                await claimPlayer(pid, user.id);
-                await addExistingPlayerToGame(gameId, pid, seats.length);
+                await claimPlayer(player.id, user.id);
+                await addExistingPlayerToGame(gameId, player, seats.length);
                 goToGame();
               })
             }
@@ -221,7 +231,11 @@ export const JoinGame = () => {
                 const pid = id();
                 await db.transact([db.tx.players[pid].update({ name })]);
                 await claimPlayer(pid, user.id);
-                await addExistingPlayerToGame(gameId, pid, seats.length);
+                await addExistingPlayerToGame(
+                  gameId,
+                  { id: pid, name },
+                  seats.length
+                );
                 goToGame();
               })
             }

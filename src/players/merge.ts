@@ -1,4 +1,5 @@
 import { db } from "../db";
+import { online } from "../lib/offline";
 
 // Merging moves every seat (playersOrders) and turn from one player to
 // another and marks the old player as merged. What moved is recorded on the
@@ -15,13 +16,15 @@ const one = <T>(x: T | T[] | undefined | null): T | undefined =>
   Array.isArray(x) ? x[0] : x ?? undefined;
 
 async function loadPlayer(playerId: string) {
-  const { data } = await db.queryOnce({
-    players: {
-      $: { where: { id: playerId } },
-      playersOrders: { game: {} },
-      turns: {},
-    },
-  });
+  const { data } = await online(() =>
+    db.queryOnce({
+      players: {
+        $: { where: { id: playerId } },
+        playersOrders: { game: {} },
+        turns: {},
+      },
+    })
+  );
   const p = data.players[0];
   if (!p) throw new Error("Player not found");
   return p;
@@ -61,9 +64,11 @@ export async function mergePlayers(
     );
   }
 
-  const { data: dealerData } = await db.queryOnce({
-    games: { $: { where: { initialDealerId: fromId } } },
-  });
+  const { data: dealerData } = await online(() =>
+    db.queryOnce({
+      games: { $: { where: { initialDealerId: fromId } } },
+    })
+  );
 
   const log: MergeLog = {
     into: intoId,
@@ -98,13 +103,15 @@ export async function undoMerge(fromId: string) {
   if (!from.mergedInto || !log) throw new MergeError("Nothing to undo");
   // Seats/turns may have moved on again since (e.g. a later merge), so look
   // up who holds them now rather than assuming log.into.
-  const { data } = await db.queryOnce({
-    playersOrders: {
-      $: { where: { id: { in: log.playersOrders } } },
-      player: {},
-    },
-    turns: { $: { where: { id: { in: log.turns } } }, player: {} },
-  });
+  const { data } = await online(() =>
+    db.queryOnce({
+      playersOrders: {
+        $: { where: { id: { in: log.playersOrders } } },
+        player: {},
+      },
+      turns: { $: { where: { id: { in: log.turns } } }, player: {} },
+    })
+  );
   await db.transact([
     ...data.playersOrders.map((po) => {
       const holder = one(po.player)?.id;

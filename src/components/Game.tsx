@@ -4,7 +4,7 @@ import Confetti from "react-confetti";
 import { useNavigate, useParams } from "react-router-dom";
 import { DEALS } from "../constants";
 import { db } from "../db";
-import { queryGameData } from "../queries";
+import { useGame } from "../lib/offline";
 import {
   alpha,
   fluid,
@@ -31,31 +31,30 @@ export const GameComp = () => {
   const [inviteOpen, setInviteOpen] = useState(false);
 
   const { isLoading: isLoadingUser, user } = db.useAuth();
-  const { isLoading, data } = db.useQuery(
-    gameId ? queryGameData(gameId) : null
-  );
+  const { isLoading, game } = useGame(gameId);
 
   useEffect(() => {
     if (!gameId) navigate("/");
   }, [gameId, navigate]);
 
-  if (!data || isLoadingUser || isLoading) {
+  if (!game || isLoadingUser || isLoading) {
     return (
       <>
         <Crumb trail={[{ label: "Home", to: "/" }, { label: "Game" }]} />
-        <div style={{ padding: 20, opacity: 0.6 }}>Loading…</div>
+        <div style={{ padding: 20, opacity: 0.6 }}>
+          {isLoading || isLoadingUser ? "Loading…" : "Game not found."}
+        </div>
       </>
     );
   }
-
-  const game = data.games[0];
   const initialDealerId = game.initialDealerId;
   const initialDealerIdx =
     game.playersOrders.find((po) => po.player?.id === initialDealerId)
       ?.orderNumber ?? null;
 
   const rs = game.rounds.sort((a, b) => a.roundNumber - b.roundNumber);
-  const numPlayers = Object.values(game.playersOrders).length;
+  // Skip a seat whose player hasn't loaded rather than crashing.
+  const numPlayers = game.playersOrders.filter((po) => po.player).length;
 
   const isGameFinished = rs.every(
     (r) =>
@@ -76,7 +75,7 @@ export const GameComp = () => {
 
   const players = Object.values(game.playersOrders)
     .sort((a, b) => a.orderNumber - b.orderNumber)
-    .flatMap((p) => p.player!);
+    .flatMap((p) => (p.player ? [p.player] : []));
 
   const currentPlayerId = getCurrentPlayerIdFromRound(
     currentRound,

@@ -1,6 +1,7 @@
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { db } from "../db";
-import { queryHomeGames, queryPlayersWithUserId } from "../queries";
+import { useMyPlayer } from "../players/account";
+import { queryHomeGames } from "../queries";
 import { alpha, t } from "../theme/tokens";
 import { summarizeGame } from "../utils/gameStatus";
 import { ThemePicker } from "./chrome/ThemeToggle";
@@ -11,9 +12,7 @@ export const UserManager = () => {
   const { isLoading: isLoadingUser, user } = db.useAuth();
   const nav = useNavigate();
 
-  const { data: playerData, isLoading: isLoadingPlayer } = db.useQuery(
-    user ? queryPlayersWithUserId(user.id) : null
-  );
+  const { player: linkedPlayer, isLoading: isLoadingPlayer } = useMyPlayer();
   const { data: gamesData } = db.useQuery(queryHomeGames);
 
   if (isLoadingUser) {
@@ -25,8 +24,6 @@ export const UserManager = () => {
   if (isLoadingPlayer) {
     return <div style={{ padding: 20, opacity: 0.6 }}>Loading…</div>;
   }
-
-  const linkedPlayer = playerData?.players[0];
 
   if (!linkedPlayer) {
     return <LinkPlayerToMe />;

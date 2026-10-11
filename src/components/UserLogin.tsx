@@ -9,7 +9,11 @@ import {
 } from "../guest/guestStore";
 import { useGuestGames } from "../guest/useGuestGame";
 import { alpha, goldButton, t } from "../theme/tokens";
-import { claimPlayer, useAccountReconcile } from "../players/account";
+import {
+  claimPlayer,
+  useAccountReconcile,
+  useMyPlayer,
+} from "../players/account";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
 import { GuestMigrationDialog } from "./GuestMigrationDialog";
 import { Shell } from "./chrome/Shell";
@@ -28,9 +32,7 @@ export const UserLogin = () => {
   const next = useNext();
   const reconciling = useAccountReconcile();
 
-  const { isLoading, data: playerUser } = db.useQuery(
-    user ? { players: { $: { where: { $user: user.id } } } } : null
-  );
+  const { player: myPlayer, isLoading } = useMyPlayer();
 
   // Guests (joined by QR) see the email form so they can add an account.
   if (user && !user.isGuest) {
@@ -41,7 +43,7 @@ export const UserLogin = () => {
         </Shell>
       );
     }
-    if (!playerUser?.players?.length) {
+    if (!myPlayer) {
       return <LinkPlayerToMe />;
     }
     if (guestGames.length > 0) {
@@ -431,9 +433,9 @@ export const LinkPlayerToMe = () => {
     await db.transact([db.tx.players[playerId].update({ name })]);
     await claimPlayer(playerId, user.id);
   };
-  const choosePlayer = async (pid: string) => {
+  const choosePlayer = async (player: { id: string }) => {
     if (!user) throw new Error("No user");
-    await claimPlayer(pid, user.id);
+    await claimPlayer(player.id, user.id);
   };
 
   return (

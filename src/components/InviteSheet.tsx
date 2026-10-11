@@ -1,4 +1,5 @@
 import { enqueueSnackbar } from "notistack";
+import { useIsOffline } from "../lib/offline";
 import { alpha, t } from "../theme/tokens";
 import { QrCode } from "./chrome/QrCode";
 import { Sheet } from "./chrome/Sheet";
@@ -16,6 +17,7 @@ export const InviteSheet = ({
   onClose: () => void;
 }) => {
   const url = joinUrl(gameId);
+  const offline = useIsOffline();
   const share = async () => {
     if (navigator.share) {
       try {
@@ -55,6 +57,22 @@ export const InviteSheet = ({
         >
           Point your camera at the code. No sign-up needed.
         </div>
+        {offline && (
+          <div
+            style={{
+              fontSize: 12,
+              color: t.cream,
+              border: `1px solid ${alpha(t.gold, 0.4)}`,
+              borderRadius: 10,
+              padding: "8px 10px",
+              margin: "-6px 0 14px",
+              lineHeight: 1.4,
+            }}
+          >
+            You're offline, so phones can only join once they have signal. You
+            can keep scoring and add people by name.
+          </div>
+        )}
         <div style={{ display: "flex", justifyContent: "center" }}>
           <QrCode value={url} size={Math.min(260, window.innerWidth - 80)} />
         </div>

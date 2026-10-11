@@ -3,12 +3,12 @@ import { enqueueSnackbar } from "notistack";
 import { Outlet, useLocation, useNavigate, matchPath } from "react-router-dom";
 import { DEALS } from "../constants";
 import { db } from "../db";
-import { queryPlayersWithUserId } from "../queries";
 import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
 import { OfflineBanner } from "./chrome/OfflineBanner";
 import { Shell } from "./chrome/Shell";
 import { RootHeader, RootTabId } from "./chrome/RootHeader";
-import { useAccountReconcile } from "../players/account";
+import { useWarmOfflineCache } from "../lib/offline";
+import { useAccountReconcile, useMyPlayer } from "../players/account";
 import { t } from "../theme/tokens";
 
 // Map a pathname to a root-tab id, or null if this is a deep (breadcrumb) route.
@@ -24,6 +24,7 @@ export const App = () => {
   const nav = useNavigate();
   const location = useLocation();
   useAccountReconcile();
+  useWarmOfflineCache();
   const { isLoading, user, error } = db.useAuth();
   const status = db.useConnectionStatus();
   const connection =
@@ -37,16 +38,14 @@ export const App = () => {
       ? "errored"
       : "unexpected state";
 
-  const { data: playerUser } = db.useQuery(
-    user ? queryPlayersWithUserId(user.id) : null
-  );
+  const { player: myPlayer } = useMyPlayer();
 
   async function createNewGame() {
     if (!user) {
       nav("/login");
       return;
     }
-    if (!playerUser?.players.length) {
+    if (!myPlayer) {
       enqueueSnackbar("No user linked", { variant: "error" });
       return;
     }
@@ -66,7 +65,7 @@ export const App = () => {
           .link({ game: gameId })
       ),
     ]);
-    await addExistingPlayerToGame(gameId, playerUser.players[0].id, 0);
+    await addExistingPlayerToGame(gameId, myPlayer, 0);
     nav("/games/" + gameId + "/manage");
   }
 

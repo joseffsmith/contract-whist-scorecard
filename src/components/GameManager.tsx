@@ -19,11 +19,8 @@ import { enqueueSnackbar } from "notistack";
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { db } from "../db";
-import {
-  queryGameData,
-  queryPlayersWithUserId,
-  queryTurnsForGame,
-} from "../queries";
+import { useGame } from "../lib/offline";
+import { useMyPlayer } from "../players/account";
 import { alpha, goldButton, t } from "../theme/tokens";
 import { Player, PlayersOrdersWithPlayers } from "../types";
 import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
@@ -39,12 +36,8 @@ export const GameManager = () => {
   const [addingOpen, setAddingOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
 
-  const { isLoading, data } = db.useQuery(
-    gameId ? queryGameData(gameId) : null
-  );
-  const { data: playerUser } = db.useQuery(
-    user ? queryPlayersWithUserId(user.id) : null
-  );
+  const { isLoading, game } = useGame(gameId);
+  const { player: myPlayer } = useMyPlayer();
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -53,17 +46,19 @@ export const GameManager = () => {
     })
   );
 
-  if (isLoading || !data) {
+  if (isLoading || !game) {
     return (
       <>
         <Crumb trail={[{ label: "Home", to: "/" }, { label: "New game" }]} />
-        <div style={{ padding: 20, opacity: 0.6 }}>Loading…</div>
+        <div style={{ padding: 20, opacity: 0.6 }}>
+          {isLoading ? "Loading…" : "Game not found."}
+        </div>
       </>
     );
   }
 
-  const game = data.games[0];
   const playerOrders = game.playersOrders;
+  const hasStarted = game.rounds.some((r) => r.turns.length > 0);
   const playerOrdersInGame = [...playerOrders].sort(
     (a, b) => a.orderNumber - b.orderNumber
   );
@@ -122,10 +117,11 @@ export const GameManager = () => {
               return (
                 <PlayerRow
                   key={po.id}
-                  isSelf={po.player?.id === playerUser?.players[0]?.id}
+                  isSelf={po.player?.id === myPlayer?.id}
                   playerOrderId={po.id}
                   player={player}
                   isDealer={dealerIdx === idx}
+                  canChangeDealer={!hasStarted}
                 />
               );
             })}
@@ -148,10 +144,10 @@ export const GameManager = () => {
                 }
                 setAddingOpen(false);
               }}
-              choosePlayer={async (pid) => {
+              choosePlayer={async (player) => {
                 await addExistingPlayerToGame(
                   gameId!,
-                  pid,
+                  player,
                   playerOrdersInGame.length
                 );
                 setAddingOpen(false);
@@ -159,7 +155,7 @@ export const GameManager = () => {
               excludedPlayerIds={playerOrdersInGame.map((p) => p.player?.id)}
               contextPlayerIds={[
                 ...playerOrdersInGame.map((p) => p.player?.id),
-                playerUser?.players[0]?.id,
+                myPlayer?.id,
               ]}
             />
             <button
@@ -255,11 +251,13 @@ const PlayerRow = ({
   playerOrderId,
   player,
   isDealer,
+  canChangeDealer,
 }: {
   isSelf: boolean;
   playerOrderId: string;
   player: Player;
   isDealer: boolean;
+  canChangeDealer: boolean;
 }) => {
   const { gameId } = useParams<{ gameId: string }>();
   const { attributes, listeners, setNodeRef, transform, transition } =
@@ -268,11 +266,6 @@ const PlayerRow = ({
     transform: CSS.Transform.toString(transform),
     transition,
   };
-
-  const { data: turnsData } = db.useQuery(
-    gameId ? queryTurnsForGame(gameId) : null
-  );
-  const canChangeDealer = turnsData?.turns.length === 0;
 
   const remove = async () => {
     await db.transact([db.tx.playersOrders[playerOrderId].delete()]);

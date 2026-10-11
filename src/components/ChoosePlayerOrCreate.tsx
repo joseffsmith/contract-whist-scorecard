@@ -17,7 +17,7 @@ export const ChoosePlayerOrCreate = ({
   hideClaimed = false,
 }: {
   createPlayer: (name: string) => Promise<void>;
-  choosePlayer: (id: string) => Promise<void>;
+  choosePlayer: (player: PlayerInfo) => Promise<void>;
   excludedPlayerIds: (string | undefined)[];
   // Players already at the table (or you) — people they play with rank first.
   contextPlayerIds?: (string | undefined)[];
@@ -71,10 +71,10 @@ export const ChoosePlayerOrCreate = ({
     }
   };
 
-  const pick = async (id: string) => {
+  const pick = async (player: PlayerInfo) => {
     setBusy(true);
     try {
-      await choosePlayer(id);
+      await choosePlayer(player);
       setInput("");
       setConfirmDupe(false);
     } finally {
@@ -183,7 +183,7 @@ export const ChoosePlayerOrCreate = ({
             }}
           >
             {options.map((o) => (
-              <PlayerOption key={o.id} player={o} onPick={() => pick(o.id)} />
+              <PlayerOption key={o.id} player={o} onPick={() => pick(o)} />
             ))}
           </div>
         </>

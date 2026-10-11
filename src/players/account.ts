@@ -1,6 +1,7 @@
 import { enqueueSnackbar } from "notistack";
 import { useEffect, useRef, useState } from "react";
 import { db } from "../db";
+import { useIsOffline } from "../lib/offline";
 import { mergePlayers } from "./merge";
 
 // A phone that joined by QR is signed in as an Instant *guest* user. If that
@@ -33,16 +34,28 @@ export async function claimPlayer(playerId: string, userId: string) {
   ]);
 }
 
+// This phone's / account's own player. Looked up by the visible claimedBy
+// marker, which also works offline from the local cache; the $user link
+// (only resolvable by the server) covers players claimed before claimedBy
+// existed, until the backfill below sets it.
 export function useMyPlayer() {
   const { user, isLoading: authLoading } = db.useAuth();
-  const { data, isLoading } = db.useQuery(
+  const byClaim = db.useQuery(
+    user ? { players: { $: { where: { claimedBy: user.id } } } } : null
+  );
+  const byLink = db.useQuery(
     user ? { players: { $: { where: { $user: user.id } } } } : null
   );
-  const player = data?.players.find((p) => !p.mergedInto) ?? data?.players[0];
+  const candidates = [
+    ...(byClaim.data?.players ?? []),
+    ...(byLink.data?.players ?? []),
+  ];
+  const player = candidates.find((p) => !p.mergedInto) ?? candidates[0];
+  const stillLooking = byClaim.isLoading || byLink.isLoading;
   return {
     user,
     player,
-    isLoading: authLoading || (!!user && isLoading),
+    isLoading: authLoading || (!!user && !player && stillLooking),
   };
 }
 
@@ -51,6 +64,7 @@ export function useMyPlayer() {
 // "which player is you?".
 export function useAccountReconcile(): boolean {
   const { user, player, isLoading } = useMyPlayer();
+  const offline = useIsOffline();
   const [busy, setBusy] = useState(false);
   const running = useRef(false);
   const handoff = readHandoff();
@@ -73,6 +87,9 @@ export function useAccountReconcile(): boolean {
 
     const h = readHandoff();
     if (!h) return;
+    // Carrying a guest player over needs the server; try again once online
+    // rather than dropping the handoff.
+    if (offline) return;
     if (h.guestUserId === user.id || player?.id === h.playerId) {
       writeHandoff(null); // upgraded in place
       return;
@@ -111,7 +128,7 @@ export function useAccountReconcile(): boolean {
         setBusy(false);
       }
     })();
-  }, [user, player, isLoading]);
+  }, [user, player, isLoading, offline]);
 
   return pending || busy;
 }
