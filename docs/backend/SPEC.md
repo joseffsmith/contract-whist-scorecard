@@ -164,3 +164,13 @@ every rebase. Ops must not depend on row iteration order (sort ids).
   engine tests with fake-indexeddb and a stubbed fetch/server.
 - The orchestrator runs browser end-to-end tests (online, offline,
   multi-phone) before cutover.
+
+## Cutover notice
+
+`src/components/chrome/AccountMovedBanner.tsx` (with `src/lib/legacyAccount.ts`)
+detects a leftover InstantDB sign-in in the browser and explains that logins
+didn't carry over. Mount it at the top of Home and the You page with
+`signedIn={!!user && !user.isGuest}`. Its "Create account" link opens
+`/login?mode=signup&next=/user` — the login screen should open on the
+"Create account" tab when `mode=signup`.
+
