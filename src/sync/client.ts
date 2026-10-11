@@ -17,12 +17,26 @@ import type {
   PushResponse,
 } from "../../shared/types";
 import { BASE_PATH } from "../lib/paths";
-import { openStorage } from "./storage";
-import type { PendingEntry, Session, SyncStorage } from "./storage";
-import { OFFLINE_MESSAGE, SyncError, createTransport } from "./transport";
+import { createMemoryStorage, openStorage } from "./storage";
+import type {
+  PendingEntry,
+  Session,
+  StoredState,
+  SyncStorage,
+} from "./storage";
+import {
+  OFFLINE_MESSAGE,
+  SyncError,
+  createTransport,
+  isAuthResponse,
+} from "./transport";
 import type { StreamHandle } from "./transport";
 
 export type ConnectionStatus = "connected" | "connecting" | "offline";
+// "memory": no IndexedDB, changes won't survive a reload. "failing": writes
+// to IndexedDB are failing. Either way the UI should say "Not saving on this
+// device".
+export type StorageHealth = "ok" | "memory" | "failing";
 export type AuthState = { isLoading: boolean; user: PublicUser | null };
 export type ActionRejection = { action: Action; error: string; code: string };
 
@@ -42,9 +56,14 @@ export type SyncDeps = {
   apiBase: string;
   backoff: { minMs: number; maxMs: number };
   batchSize: number;
+  maxBatchBytes: number;
   // How long to wait for the stream to deliver our own pushed changes before
   // pulling them.
   streamGraceMs: number;
+  // A stream must stay up this long before the reconnect backoff resets.
+  healthyMs: number;
+  // Give up on opening storage after this long and use memory.
+  storageTimeoutMs: number;
   requestTimeoutMs?: number;
   streamIdleMs?: number;
 };
@@ -53,15 +72,17 @@ export type SyncClient = {
   // Resolves once local data (snapshot, pending queue, session) is loaded.
   ready: Promise<void>;
   start(): Promise<void>;
+  // Stops all network activity and timers. start() resumes.
   stop(): void;
   dispatch<N extends ActionName>(name: N, args: ActionArgs[N]): Promise<void>;
   onActionRejected(callback: (rejection: ActionRejection) => void): () => void;
   subscribe(callback: () => void): () => void;
   getView(): DataState;
   getStatus(): ConnectionStatus;
+  getStorageHealth(): StorageHealth;
   getAuth(): AuthState;
-  // True until hydrated and we have something to show (data, a first pull,
-  // or no connection to wait for).
+  // True until hydrated and we have something to show (data, queued changes,
+  // a first pull, or no connection to wait for).
   isLoading(): boolean;
   getPendingCount(): number;
   signInAsGuest(): Promise<PublicUser>;
@@ -72,7 +93,9 @@ export type SyncClient = {
   resetPassword(token: string, password: string): Promise<PublicUser>;
   // Admins only: a one-time set-password link for the account with `email`.
   createResetLink(email: string): Promise<string>;
-  // Resolves when everything written so far has reached storage.
+  // The first admin proves they run the server with its bootstrap token.
+  claimAdmin(token: string): Promise<void>;
+  // Resolves when everything written so far has been attempted on storage.
   persisted(): Promise<void>;
 };
 
@@ -118,7 +141,10 @@ function defaultDeps(): SyncDeps {
     apiBase: `${BASE_PATH}/api`,
     backoff: { minMs: 1000, maxMs: 30_000 },
     batchSize: 50,
+    maxBatchBytes: 200_000,
     streamGraceMs: 500,
+    healthyMs: 5000,
+    storageTimeoutMs: 5000,
   };
 }
 
@@ -129,6 +155,15 @@ const copyData = (data: DataState): DataState => ({
   rounds: new Map(data.rounds),
   turns: new Map(data.turns),
 });
+
+const encoder = new TextEncoder();
+const actionBytes = (action: Action) =>
+  encoder.encode(JSON.stringify(action)).length;
+
+const UNSYNCED_MESSAGE =
+  "Couldn't sync your changes yet. Try again when you have signal.";
+
+type Domain = "snapshot" | "pending" | "session";
 
 export function createSyncClient(
   overrides: Partial<SyncDeps> = {}
@@ -143,17 +178,19 @@ export function createSyncClient(
 
   // ── State ───────────────────────────────────────────────────────────────
   // view = snapshot (server rows at `version`) + pending actions re-applied.
-  let storage: SyncStorage;
+  let storage: SyncStorage | undefined;
   let snapshot = createMemoryState();
   let version = 0;
   let pending: PendingEntry[] = [];
-  let nextSeq = 1;
+  let lastAt = 0;
+  let counter = 0;
   let session: Session | null = null;
   let view = createMemoryState();
 
   let hydrated = false;
   let firstPull = false;
   let status: ConnectionStatus = "connecting";
+  let health: StorageHealth = "ok";
   let loading = true;
   let auth: AuthState = { isLoading: true, user: null };
 
@@ -162,14 +199,68 @@ export function createSyncClient(
 
   let resolveReady: () => void;
   const ready = new Promise<void>((resolve) => (resolveReady = resolve));
+  let hydrating: Promise<void> | null = null;
   let starting: Promise<void> | null = null;
+  let everStarted = false;
   let running = false;
+  // Bumped by stop(): work started before it must not touch state after it.
+  let epoch = 0;
   let stopNetwork = () => {};
 
-  // Storage writes run one after another, in call order.
+  // ── Persistence ─────────────────────────────────────────────────────────
+  // Writes run one after another, in call order. A write that fails marks
+  // its domain dirty; the next write to it (or a periodic retry) rewrites the
+  // whole domain from memory, so a gap never leaves storage half-updated.
+
   let writes: Promise<void> = Promise.resolve();
-  const persist = (write: () => Promise<void>) =>
-    (writes = writes.then(write).catch(() => {}));
+  const dirty = new Set<Domain>();
+  let healTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const fullChangeSet = (): ChangeSet => {
+    const puts: Record<string, unknown[]> = {};
+    for (const table of TABLES) puts[table] = [...snapshot[table].values()];
+    return { version, reset: true, puts, deletes: {} } as ChangeSet;
+  };
+  const repairs: Record<Domain, () => Promise<void>> = {
+    snapshot: () => storage!.applyChanges(fullChangeSet()),
+    pending: () => storage!.replacePending(pending),
+    session: () => storage!.setSession(session),
+  };
+
+  function save(domain: Domain, incremental: () => Promise<void>) {
+    return (writes = writes.then(async () => {
+      try {
+        await (dirty.has(domain) ? repairs[domain]() : incremental());
+        dirty.delete(domain);
+      } catch {
+        dirty.add(domain);
+      }
+      updateHealth();
+    }));
+  }
+  const savePending = (write: () => Promise<void>) => save("pending", write);
+  const saveSession = (next: Session | null) =>
+    save("session", () => storage!.setSession(next));
+
+  function updateHealth() {
+    const next: StorageHealth = !storage?.persistent
+      ? storage
+        ? "memory"
+        : "ok"
+      : dirty.size
+      ? "failing"
+      : "ok";
+    if (next !== health) {
+      health = next;
+      notify();
+    }
+    if (dirty.size && !healTimer) {
+      healTimer = setTimeout(() => {
+        healTimer = undefined;
+        for (const domain of [...dirty]) save(domain, repairs[domain]);
+      }, deps.backoff.maxMs);
+    }
+  }
 
   // ── Derived view ────────────────────────────────────────────────────────
 
@@ -196,7 +287,8 @@ export function createSyncClient(
     return next;
   }
 
-  const hasData = () => TABLES.some((table) => snapshot[table].size > 0);
+  const hasData = () =>
+    pending.length > 0 || TABLES.some((table) => snapshot[table].size > 0);
 
   function notify() {
     loading = !hydrated || !(hasData() || firstPull || status === "offline");
@@ -218,15 +310,31 @@ export function createSyncClient(
     notify();
   }
 
+  function emitRejected(rejection: ActionRejection) {
+    for (const listener of [...rejectionListeners]) listener(rejection);
+  }
+
   // ── Snapshot ────────────────────────────────────────────────────────────
 
   const versionWaiters = new Set<{ target: number; resolve: () => void }>();
 
-  function dropPending(test: (entry: PendingEntry) => boolean) {
+  // Removes entries from the queue. `reportAs` tells the UI about the ones
+  // the server never acked (they are lost).
+  function dropPending(
+    test: (entry: PendingEntry) => boolean,
+    reportAs?: { code: string; error: string }
+  ) {
     const gone = pending.filter(test);
     if (!gone.length) return false;
     pending = pending.filter((entry) => !gone.includes(entry));
-    persist(() => storage.deletePending(gone.map((entry) => entry.seq)));
+    savePending(() => storage!.deletePending(gone.map((entry) => entry.id)));
+    if (reportAs) {
+      for (const entry of gone) {
+        if (entry.ackVersion === undefined) {
+          emitRejected({ action: entry.action, ...reportAs });
+        }
+      }
+    }
     return true;
   }
 
@@ -234,21 +342,44 @@ export function createSyncClient(
   const pruneAcked = () =>
     dropPending((e) => e.ackVersion !== undefined && e.ackVersion <= version);
 
-  function receive(changes: ChangeSet) {
-    if (!changes.reset && changes.version <= version) return;
-    if (changes.reset) snapshot = createMemoryState();
+  // `pulledSince` is set for a pull's answer, which can arrive late. Stream
+  // events come in order, so they are never stale.
+  function receive(changes: ChangeSet, pulledSince?: number) {
+    let lost: PendingEntry[] = [];
+    if (changes.reset) {
+      if (pulledSince !== undefined && changes.version < version) {
+        // An older snapshot than we hold: a slow pull overtaken by the
+        // stream, unless the server really is behind what we asked for
+        // (restored from a backup) and nothing newer arrived meanwhile.
+        const serverBehind =
+          pulledSince > 0 &&
+          changes.version < pulledSince &&
+          version === pulledSince;
+        if (!serverBehind) return;
+      }
+      snapshot = createMemoryState();
+      // Actions acked at versions the server no longer has must go again.
+      lost = pending.filter(
+        (e) => e.ackVersion !== undefined && e.ackVersion > changes.version
+      );
+      for (const entry of lost) delete entry.ackVersion;
+    } else if (changes.version <= version) {
+      return;
+    }
     for (const table of TABLES) {
       const rows = snapshot[table] as Map<string, { id: string }>;
       for (const row of changes.puts[table] ?? []) rows.set(row.id, row);
       for (const id of changes.deletes[table] ?? []) rows.delete(id);
     }
     version = changes.version;
-    persist(() => storage.applyChanges(changes));
+    save("snapshot", () => storage!.applyChanges(changes));
+    if (lost.length) savePending(() => storage!.putPending(lost));
     pruneAcked();
     rebuild();
     for (const waiter of [...versionWaiters]) {
       if (version >= waiter.target) waiter.resolve();
     }
+    if (lost.length) void push();
   }
 
   function waitForVersion(target: number, ms: number) {
@@ -264,17 +395,35 @@ export function createSyncClient(
     });
   }
 
+  // One pull at a time: callers share it and its result is applied once.
+  let pulling: Promise<void> | null = null;
+  function pullNow(): Promise<void> {
+    if (pulling) return pulling;
+    const since = version;
+    const myEpoch = epoch;
+    const pull = transport.pull(since).then((changes) => {
+      if (myEpoch === epoch) receive(changes, since);
+    });
+    pulling = pull;
+    const clear = () => {
+      if (pulling === pull) pulling = null;
+    };
+    pull.then(clear, clear);
+    return pull;
+  }
+
   // Make sure the snapshot reaches `target` (a push response's version):
   // give the stream a moment, then pull.
   async function catchUp(target: number) {
     if (version >= target) return;
     if (status === "connected")
       await waitForVersion(target, deps.streamGraceMs);
-    if (version >= target || !running) return;
-    try {
-      receive(await transport.pull(version));
-    } catch {
-      // The connection loop will catch up; the acked actions stay queued.
+    for (let i = 0; i < 2 && version < target && running; i++) {
+      try {
+        await pullNow();
+      } catch {
+        return; // the connection loop will catch up; acked actions stay queued
+      }
     }
   }
 
@@ -283,6 +432,7 @@ export function createSyncClient(
   let attempt = 0;
   let failures = 0;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let healthyTimer: ReturnType<typeof setTimeout> | undefined;
   let stream: StreamHandle | null = null;
 
   const delayFor = (failureCount: number) =>
@@ -296,46 +446,71 @@ export function createSyncClient(
     stream = null;
   }
 
-  function connect() {
+  // `force` tries even if the browser says we're offline, which it gets wrong
+  // on captive portals and flaky mobile data.
+  function connect(force = false) {
     if (!running) return;
     clearTimeout(retryTimer);
     closeStream();
     const id = ++attempt;
-    if (!deps.network.isOnline()) return setStatus("offline");
+    if (!deps.network.isOnline()) {
+      setStatus("offline");
+      if (!force) {
+        retryTimer = setTimeout(() => connect(true), deps.backoff.maxMs);
+        return;
+      }
+    }
     void (async () => {
       try {
-        const changes = await transport.pull(version);
-        if (id !== attempt) return;
-        firstPull = true;
-        receive(changes);
-        notify();
-        stream = transport.openStream(
-          version,
-          (cs) => id === attempt && receive(cs),
-          (event) => {
-            if (id !== attempt) return;
-            if (event === "open") {
-              failures = 0;
-              setStatus("connected");
-              void push();
-            } else {
-              fail();
-            }
-          }
-        );
-      } catch {
-        if (id === attempt) fail();
+        await pullNow();
+      } catch (error) {
+        if (id === attempt) fail(error, "pull");
+        return;
       }
+      if (id !== attempt) return;
+      // The server answered, so we're connected even if the stream is blocked
+      // (then we poll, at the reconnect rate).
+      firstPull = true;
+      setStatus("connected");
+      notify();
+      void checkSession();
+      stream = transport.openStream(
+        version,
+        (changes) => id === attempt && receive(changes),
+        (event, error) => {
+          if (id !== attempt) return;
+          if (event === "open") {
+            clearTimeout(healthyTimer);
+            healthyTimer = setTimeout(() => (failures = 0), deps.healthyMs);
+            void push();
+          } else {
+            fail(error, "stream");
+          }
+        }
+      );
     })();
   }
 
-  function fail() {
+  function fail(error: unknown, kind: "pull" | "stream") {
     closeStream();
+    clearTimeout(healthyTimer);
     failures += 1;
-    // A drop after being connected is "connecting" until the retry fails too.
-    setStatus(status === "connected" ? "connecting" : "offline");
+    // A failed pull after being connected is "connecting" until a retry
+    // fails too. A stream that fails after a good pull keeps us connected.
+    if (kind === "pull") {
+      setStatus(status === "connected" ? "connecting" : "offline");
+    }
+    const limited = error instanceof SyncError && error.status === 429;
     clearTimeout(retryTimer);
-    retryTimer = setTimeout(connect, delayFor(failures));
+    if (deps.network.isOnline()) {
+      // Rate limited: wait longer than a plain failure would.
+      retryTimer = setTimeout(
+        () => connect(),
+        delayFor(limited ? failures + 2 : failures)
+      );
+    } else {
+      retryTimer = setTimeout(() => connect(true), deps.backoff.maxMs);
+    }
   }
 
   function onNetworkChange() {
@@ -343,13 +518,44 @@ export function createSyncClient(
     if (deps.network.isOnline()) {
       failures = 0;
       pushFailures = 0;
-      connect();
-      void push();
     } else {
-      attempt += 1;
-      clearTimeout(retryTimer);
-      closeStream();
       setStatus("offline");
+    }
+    connect(true);
+    void push();
+  }
+
+  // Asks the server whether our session still exists. Only a 401 for the same
+  // token counts as revoked; the queue is kept either way.
+  async function checkSession() {
+    const checked = session;
+    if (!checked) return;
+    const myEpoch = epoch;
+    try {
+      const { user } = await transport.get<{ user?: PublicUser }>(
+        "/auth/me",
+        checked.token
+      );
+      if (myEpoch !== epoch || session?.token !== checked.token) return;
+      if (
+        user &&
+        user.id === checked.user.id &&
+        (user.email !== checked.user.email ||
+          user.isGuest !== checked.user.isGuest)
+      ) {
+        session = { token: checked.token, user };
+        saveSession(session);
+        rebuild();
+      }
+    } catch (error) {
+      if (
+        error instanceof SyncError &&
+        error.status === 401 &&
+        myEpoch === epoch &&
+        session?.token === checked.token
+      ) {
+        setSession(null);
+      }
     }
   }
 
@@ -359,11 +565,36 @@ export function createSyncClient(
   let pushDone: Promise<void> = Promise.resolve();
   let pushFailures = 0;
   let pushTimer: ReturnType<typeof setTimeout> | undefined;
+  // Shrinks when the server says a batch is too big, grows back as pushes work.
+  let batchLimit = Infinity;
+  const sizes = new WeakMap<PendingEntry, number>();
 
   const unacked = () =>
     pending.filter((entry) => entry.ackVersion === undefined);
   const canPush = () =>
-    running && hydrated && !!session && deps.network.isOnline();
+    running &&
+    hydrated &&
+    !!session &&
+    (deps.network.isOnline() || status === "connected");
+
+  // The oldest unacked actions, within the count and byte limits (always at
+  // least one).
+  function nextBatch() {
+    const limit = Math.min(batchLimit, deps.batchSize);
+    const batch: PendingEntry[] = [];
+    let bytes = 0;
+    for (const entry of pending) {
+      if (entry.ackVersion !== undefined) continue;
+      let size = sizes.get(entry);
+      if (size === undefined) sizes.set(entry, (size = actionBytes(entry.action)));
+      if (batch.length && (batch.length >= limit || bytes + size > deps.maxBatchBytes)) {
+        break;
+      }
+      batch.push(entry);
+      bytes += size;
+    }
+    return batch;
+  }
 
   function push(): Promise<void> {
     if (pushing) return pushDone;
@@ -372,52 +603,96 @@ export function createSyncClient(
     return pushDone;
   }
 
-  async function pushLoop() {
-    pushing = true;
-    try {
-      while (canPush()) {
-        const batch = unacked().slice(0, deps.batchSize);
-        if (!batch.length) return;
-        let response: PushResponse;
-        try {
-          response = await transport.push(
-            batch.map((entry) => entry.action),
-            session!.token
-          );
-        } catch (error) {
-          return pushFailed(error);
-        }
-        if (!handlePushResponse(batch, response)) {
-          return pushFailed(new SyncError("Incomplete push response", "error"));
-        }
-        pushFailures = 0;
-      }
-    } finally {
-      pushing = false;
-    }
-  }
-
-  function pushFailed(error: unknown) {
-    if (error instanceof SyncError && error.status === 401) {
-      // The server no longer knows this session. Keep the queue; signing in
-      // again as the same user resumes it.
-      setSession(null);
-      return;
-    }
+  function schedulePushRetry() {
     pushFailures += 1;
     clearTimeout(pushTimer);
     pushTimer = setTimeout(() => void push(), delayFor(pushFailures));
   }
 
-  // Returns false if the server answered none of the batch (avoids a hot loop).
+  async function pushLoop() {
+    pushing = true;
+    const myEpoch = epoch;
+    try {
+      while (canPush() && myEpoch === epoch) {
+        const batch = nextBatch();
+        if (!batch.length) return;
+        const token = session!.token;
+        let response: PushResponse;
+        try {
+          response = await transport.push(
+            batch.map((entry) => entry.action),
+            token
+          );
+        } catch (error) {
+          if (myEpoch !== epoch) return;
+          if (pushRefused(error, batch, token)) continue;
+          return;
+        }
+        if (myEpoch !== epoch) return;
+        if (!handlePushResponse(batch, response)) {
+          schedulePushRetry();
+          return;
+        }
+        pushFailures = 0;
+        batchLimit = Math.min(deps.batchSize, batchLimit * 2);
+      }
+    } catch {
+      // Whatever went wrong, the queue stays and we try again.
+      if (myEpoch === epoch) schedulePushRetry();
+    } finally {
+      if (myEpoch === epoch) pushing = false;
+    }
+  }
+
+  // Handles a failed push request. Returns true when the loop can go straight
+  // on (the batch was split or a hopeless action dropped).
+  function pushRefused(error: unknown, batch: PendingEntry[], token: string) {
+    const status = error instanceof SyncError ? error.status : undefined;
+    if (status === 401) {
+      // The server no longer knows this session (unless it has changed since
+      // the request). Keep the queue; signing in again as the same user
+      // resumes it.
+      if (session?.token === token) setSession(null);
+      return false;
+    }
+    if (status === 413 || status === 400) {
+      if (batch.length > 1) {
+        batchLimit = Math.max(1, Math.floor(batch.length / 2));
+        return true;
+      }
+      const tooLarge = status === 413;
+      dropPending((e) => e === batch[0]);
+      rebuild();
+      emitRejected({
+        action: batch[0].action,
+        code: tooLarge ? "too_large" : "invalid",
+        error: tooLarge
+          ? "That change was too big to save."
+          : "The server couldn't accept that change.",
+      });
+      return true;
+    }
+    schedulePushRetry();
+    return false;
+  }
+
+  // Applies the server's per-action answers. Returns false if the batch should
+  // be retried after a backoff (a server error, or an answer that skips it).
   function handlePushResponse(batch: PendingEntry[], response: PushResponse) {
     const byId = new Map(batch.map((entry) => [entry.action.id, entry]));
     const acked: PendingEntry[] = [];
     const rejected: ActionRejection[] = [];
     const rejectedEntries: PendingEntry[] = [];
+    let retry = false;
     for (const result of response.results) {
       const entry = byId.get(result.id);
       if (!entry || !pending.includes(entry)) continue;
+      if (!result.ok && result.code === "server_error") {
+        // Not the action's fault. Later results may depend on it, so stop
+        // here and send it all again.
+        retry = true;
+        break;
+      }
       if (result.ok) {
         entry.ackVersion = response.version;
         acked.push(entry);
@@ -430,26 +705,30 @@ export function createSyncClient(
         });
       }
     }
-    if (!acked.length && !rejected.length)
-      return !batch.some((e) => pending.includes(e));
+    if (!acked.length && !rejected.length) {
+      return !retry && !batch.some((e) => pending.includes(e));
+    }
 
-    if (acked.length) persist(() => storage.putPending(acked));
+    if (acked.length) savePending(() => storage!.putPending(acked));
     dropPending((entry) => rejectedEntries.includes(entry));
     const pruned = pruneAcked();
     if (rejected.length || pruned) rebuild();
-    for (const rejection of rejected) {
-      for (const listener of [...rejectionListeners]) listener(rejection);
-    }
+    rejected.forEach(emitRejected);
     void catchUp(response.version);
-    return true;
+    return !retry;
   }
 
   // ── Session ─────────────────────────────────────────────────────────────
 
   function setSession(next: Session | null) {
     session = next;
-    persist(() => storage.setSession(next));
-    if (next) dropPending((entry) => entry.userId !== next.user.id);
+    saveSession(next);
+    if (next) {
+      dropPending((entry) => entry.userId !== next.user.id, {
+        code: "signed_out",
+        error: "You signed in as someone else before this change was saved.",
+      });
+    }
     rebuild();
     if (next) {
       pushFailures = 0;
@@ -457,11 +736,16 @@ export function createSyncClient(
     }
   }
 
-  async function authRequest(path: string, body: unknown, token?: string) {
-    await start();
+  async function authRequest<T = AuthResponse>(
+    path: string,
+    body: unknown,
+    token?: string,
+    validate: ((json: any) => boolean) | undefined = isAuthResponse
+  ) {
+    await begin();
     if (!deps.network.isOnline())
       throw new SyncError(OFFLINE_MESSAGE, "offline");
-    return transport.post<AuthResponse>(path, body, token);
+    return transport.post<T>(path, body, token, validate);
   }
 
   const adopt = (response: AuthResponse) => {
@@ -471,39 +755,87 @@ export function createSyncClient(
 
   // ── Lifecycle ───────────────────────────────────────────────────────────
 
+  const orMemory = <T>(promise: Promise<T>, ms: number, fallback: () => T) =>
+    new Promise<T>((resolve) => {
+      const timer = setTimeout(() => resolve(fallback()), ms);
+      promise.then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        () => {
+          clearTimeout(timer);
+          resolve(fallback());
+        }
+      );
+    });
+
   async function hydrate() {
-    storage = await deps.openStorage().catch(() => openStorage(null));
-    const stored = await storage.load();
+    storage = await orMemory(
+      deps.openStorage(),
+      deps.storageTimeoutMs,
+      createMemoryStorage
+    );
+    let stored: StoredState;
+    try {
+      stored = await storage.load();
+    } catch {
+      // Unreadable: never write over it. Carry on in memory.
+      storage = createMemoryStorage();
+      stored = await storage.load();
+    }
     snapshot = stored.data;
     version = stored.version;
     pending = stored.pending;
-    nextSeq = pending.reduce((max, entry) => Math.max(max, entry.seq), 0) + 1;
+    for (const entry of pending) {
+      lastAt = Math.max(lastAt, entry.at);
+      counter = Math.max(counter, entry.n);
+    }
     session = stored.session;
-    if (session) dropPending((entry) => entry.userId !== session!.user.id);
+    if (session) {
+      dropPending((entry) => entry.userId !== session!.user.id, {
+        code: "signed_out",
+        error: "You signed in as someone else before this change was saved.",
+      });
+    }
     pruneAcked();
     view = buildView();
     hydrated = true;
+    health = storage.persistent ? "ok" : "memory";
     resolveReady();
     notify();
   }
 
+  const begin = () => (everStarted ? hydrating! : start());
+
   function start(): Promise<void> {
-    starting ??= (async () => {
-      await hydrate();
+    if (starting) return starting;
+    everStarted = true;
+    const myEpoch = epoch;
+    return (starting = (async () => {
+      await (hydrating ??= hydrate());
+      if (myEpoch !== epoch) return;
       running = true;
       stopNetwork = deps.network.subscribe(onNetworkChange);
-      connect();
+      connect(true);
       void push();
-    })();
-    return starting;
+    })());
   }
 
   function stop() {
     running = false;
+    epoch += 1;
     attempt += 1;
+    starting = null;
+    pushing = false;
+    pulling = null;
     stopNetwork();
+    stopNetwork = () => {};
     clearTimeout(retryTimer);
     clearTimeout(pushTimer);
+    clearTimeout(healthyTimer);
+    clearTimeout(healTimer);
+    healTimer = undefined;
     closeStream();
     for (const waiter of [...versionWaiters]) waiter.resolve();
   }
@@ -511,10 +843,11 @@ export function createSyncClient(
   // ── Public API ──────────────────────────────────────────────────────────
 
   async function dispatch<N extends ActionName>(name: N, args: ActionArgs[N]) {
-    await start();
+    await begin();
     const user = session?.user;
     if (!user) throw new ActionError("Sign in to do that.", "not_signed_in");
-    const now = new Date(deps.now()).toISOString();
+    const nowMs = deps.now();
+    const now = new Date(nowMs).toISOString();
     const action = { id: deps.uuid(), name, args, clientTime: now } as Action;
     // Throws the ActionError if this isn't valid on top of what we have.
     const ops = applyAction(memoryReadState(view), action, {
@@ -522,8 +855,11 @@ export function createSyncClient(
       isGuest: user.isGuest,
       now,
     });
+    lastAt = Math.max(lastAt, nowMs);
     const entry: PendingEntry = {
-      seq: nextSeq++,
+      id: action.id,
+      at: lastAt,
+      n: ++counter,
       userId: user.id,
       isGuest: user.isGuest,
       action,
@@ -534,18 +870,29 @@ export function createSyncClient(
     applyOps(next, ops);
     view = next;
     notify();
-    const saved = persist(() => storage.putPending([entry]));
+    // If this write fails, getStorageHealth() turns "failing" and notifies.
+    const saved = savePending(() => storage!.putPending([entry]));
     void push();
     await saved;
   }
 
   async function logIn(email: string, password: string) {
-    await start();
-    const guestToken = session?.user.isGuest ? session.token : undefined;
-    // The guest's queued work goes up under the guest before we leave it.
-    if (guestToken && unacked().length && canPush()) await push();
+    await begin();
+    if (!deps.network.isOnline())
+      throw new SyncError(OFFLINE_MESSAGE, "offline");
+    const guest = session?.user.isGuest ? session : null;
+    if (guest && unacked().length) {
+      // The guest's queued work goes up under the guest before we leave it.
+      // If it can't, stay a guest rather than lose it.
+      await push();
+      if (unacked().length) throw new SyncError(UNSYNCED_MESSAGE, "unsynced");
+    }
     return adopt(
-      await authRequest("/auth/login", { email, password, guestToken })
+      await authRequest("/auth/login", {
+        email,
+        password,
+        guestToken: guest?.token,
+      })
     );
   }
 
@@ -565,16 +912,17 @@ export function createSyncClient(
     },
     getView: () => view,
     getStatus: () => status,
+    getStorageHealth: () => health,
     getAuth: () => auth,
     isLoading: () => loading,
     getPendingCount: () => pending.length,
     async signInAsGuest() {
-      await start();
+      await begin();
       if (session) return session.user;
       return adopt(await authRequest("/auth/guest", {}));
     },
     async signUp(email, password) {
-      await start();
+      await begin();
       const guestToken = session?.user.isGuest ? session.token : undefined;
       return adopt(
         await authRequest("/auth/signup", { email, password }, guestToken)
@@ -582,31 +930,40 @@ export function createSyncClient(
     },
     logIn,
     async logOut() {
-      await start();
+      await begin();
       const token = session?.token;
-      dropPending(() => true);
+      dropPending(() => true, {
+        code: "signed_out",
+        error: "You logged out before this change was saved.",
+      });
       setSession(null);
       if (token && deps.network.isOnline()) {
         transport.post("/auth/logout", {}, token).catch(() => {});
       }
     },
     async setPassword(password) {
-      await start();
+      await begin();
       if (!session) throw new SyncError("Sign in first.", "not_signed_in");
-      await authRequest("/auth/password", { password }, session.token);
+      await authRequest("/auth/password", { password }, session.token, undefined);
     },
     async resetPassword(token, password) {
       return adopt(await authRequest("/auth/reset", { token, password }));
     },
     async createResetLink(email) {
-      await start();
+      await begin();
       if (!session) throw new SyncError("Sign in first.", "not_signed_in");
-      const { url } = await transport.post<{ url: string }>(
+      const { url } = await authRequest<{ url: string }>(
         "/auth/reset-link",
         { email },
-        session.token
+        session.token,
+        (json) => typeof json.url === "string"
       );
       return url;
+    },
+    async claimAdmin(token) {
+      await begin();
+      if (!session) throw new SyncError("Sign in first.", "not_signed_in");
+      await authRequest("/auth/claim-admin", { token }, session.token, undefined);
     },
   };
 }

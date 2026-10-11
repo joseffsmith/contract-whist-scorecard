@@ -5,6 +5,8 @@ import { applyAction } from "../../shared/actions";
 import { ActionError } from "../../shared/types";
 import type {
   Action,
+  ReadState,
+  RowOp,
   ChangeSet,
   PushResponse,
   PushResult,
@@ -15,12 +17,15 @@ import type { Limiter } from "./http";
 
 export type Actor = { id: string; isGuest: boolean };
 
-// One action as run by `apply`. `internal` is only ever set by the server.
-export type Step = {
-  action: Action;
-  actor: Actor;
-  internal?: { allowClaimedFrom?: string };
-};
+// One step of `apply`: an action, or a server-internal row update (never
+// built from client input). `internal` is only ever set by the server.
+export type Step =
+  | {
+      action: Action;
+      actor: Actor;
+      internal?: { allowClaimedFrom?: string };
+    }
+  | { rows: (state: ReadState) => RowOp[] };
 
 const MAX_ACTIONS_PER_PUSH = 500;
 const MAX_STREAM_BACKLOG = 2 * 1024 * 1024; // bytes a slow client may fall behind
@@ -56,7 +61,8 @@ export function createSync(db: Db, limiter: Limiter, opts: SyncOptions = {}) {
   // HttpError for anything that isn't the action's fault (retry is safe).
   function apply(id: string, steps: Step[]): PushResult {
     const now = new Date().toISOString();
-    const by = steps[0]?.actor.id ?? null;
+    const first = steps.find((step) => "actor" in step);
+    const by = first && "actor" in first ? first.actor.id : null;
     let changedAt = 0;
     try {
       changedAt = db.transaction(() => {
@@ -71,14 +77,20 @@ export function createSync(db: Db, limiter: Limiter, opts: SyncOptions = {}) {
         const state = db.readState();
         const next = db.version() + 1;
         let wrote = false;
-        for (const { action, actor, internal } of steps) {
-          const ctx = {
-            userId: actor.id,
-            isGuest: actor.isGuest,
-            now,
-            internal,
-          };
-          const ops = applyAction(state, action, ctx);
+        for (const step of steps) {
+          let ops: RowOp[];
+          if ("rows" in step) {
+            ops = step.rows(state);
+          } else {
+            const { actor, internal } = step;
+            const ctx = {
+              userId: actor.id,
+              isGuest: actor.isGuest,
+              now,
+              internal,
+            };
+            ops = applyAction(state, step.action, ctx);
+          }
           if (ops.length) wrote = true;
           db.writeOps(ops, next); // later steps see these writes
         }

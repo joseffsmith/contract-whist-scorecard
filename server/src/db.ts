@@ -104,6 +104,9 @@ const MIGRATIONS = [
     used_at TEXT
   );
   `,
+  `
+  CREATE INDEX games_createdBy ON games ("createdBy");
+  `,
 ];
 
 function migrate(sql: DatabaseSync): void {

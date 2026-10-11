@@ -464,7 +464,7 @@ const ResetLink = () => {
         </div>
       )}
       <div style={{ fontSize: 11, color: t.cream, opacity: 0.5, marginTop: 8 }}>
-        The link works once and lasts 7 days. 
+        The link works once and lasts 7 days.
       </div>
     </>
   );

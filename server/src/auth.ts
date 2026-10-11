@@ -89,6 +89,7 @@ const publicUser = (u: UserRow): PublicUser => ({
   id: u.id,
   email: u.email,
   isGuest: !!u.is_guest,
+  ...(u.is_admin ? { isAdmin: true } : {}),
 });
 
 export type AuthOptions = {
