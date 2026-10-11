@@ -46,6 +46,9 @@ function linkId(link: Link): string | undefined {
 
 export class ImportFormatError extends Error {}
 
+// createdBy for imported games that had no creator (matches no user).
+export const LEGACY_CREATOR = "legacy-import";
+
 export function transformInstant(data: unknown): {
   snapshot: Snapshot;
   counts: ImportCounts;
@@ -104,8 +107,10 @@ export function transformInstant(data: unknown): {
   for (const g of list(data.games)) {
     const id = str(g.id);
     const createdAt = str(g.createdAt);
-    const createdBy = str(g.createdBy);
-    if (!id || !createdAt || !createdBy || !fresh("games", id)) {
+    // Games from before InstantDB recorded a creator have none; nobody
+    // could edit them there either, so they come across owned by nobody.
+    const createdBy = str(g.createdBy) || LEGACY_CREATOR;
+    if (!id || !createdAt || !fresh("games", id)) {
       skipped.games += 1;
       // Count what we are dropping with it.
       for (const s of list(g.playersOrders)) skipped.seats += s ? 1 : 0;

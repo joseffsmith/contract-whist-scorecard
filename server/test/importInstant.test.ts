@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { transformInstant } from "../src/importInstant";
+import { LEGACY_CREATOR, transformInstant } from "../src/importInstant";
 import { newGame, start } from "./helpers";
 
 // A small InstantDB export: links come back as arrays of one (or objects).
@@ -134,6 +134,35 @@ describe("transformInstant", () => {
       turns: 3,
       skipped: { players: 2, games: 1, seats: 3, rounds: 1, turns: 2 },
     });
+  });
+
+  it("keeps games that have no creator, owned by nobody", () => {
+    const { snapshot, counts } = transformInstant({
+      players: [{ id: "p1", name: "Oli" }],
+      games: [
+        {
+          id: "old",
+          createdAt: "2024-08-23T16:04:09.134Z",
+          playersOrders: [{ id: "s1", orderNumber: 0, player: [{ id: "p1" }] }],
+          rounds: [
+            {
+              id: "r1",
+              roundNumber: 0,
+              turns: [{ id: "t1", bid: 1, score: 11, player: [{ id: "p1" }] }],
+            },
+          ],
+        },
+      ],
+    });
+    expect(snapshot.games).toEqual([
+      {
+        id: "old",
+        createdAt: "2024-08-23T16:04:09.134Z",
+        createdBy: LEGACY_CREATOR,
+      },
+    ]);
+    expect(snapshot.turns).toHaveLength(1);
+    expect(counts.skipped.games).toBe(0);
   });
 
   it("rejects data that isn't an export", () => {
