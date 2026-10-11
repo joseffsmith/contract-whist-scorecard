@@ -103,6 +103,8 @@ export type PlayerStats = {
 };
 
 export type HeadToHead = {
+  // Games (finished or not) they both played in.
+  sharedGames: number;
   // Finished games both played.
   games: number;
   aAhead: number;
@@ -136,7 +138,9 @@ export type Award = {
 export type Opponent = { playerId: string; name: string; games: number };
 
 // ── Preparation ─────────────────────────────────────────────────────────
-// Each game is digested once (and cached per games array).
+// Each game object is digested once and cached on its identity: the sync
+// selectors keep the same object for a game whose rows haven't changed, so an
+// update to one game only re-digests that game.
 
 type PTurn = { bid: number; score: number; made: boolean; tricks: number };
 type PRound = {
@@ -151,6 +155,7 @@ type PGame = {
   id: string;
   createdAt: string;
   seatIds: string[];
+  seatSet: Set<string>;
   names: Map<string, string>;
   merged: Set<string>;
   numPlayers: number;
@@ -162,15 +167,30 @@ type PGame = {
   rounds: PRound[];
 };
 
-const preparedCache = new WeakMap<readonly StatsGame[], PGame[]>();
+type Prepared = {
+  // Live games, oldest first.
+  games: PGame[];
+  // Each player's games, oldest first.
+  byPlayer: Map<string, PGame[]>;
+};
+
+const preparedCache = new WeakMap<readonly StatsGame[], Prepared>();
+const gameCache = new WeakMap<StatsGame, PGame>();
 
 function prepareGame(g: StatsGame): PGame {
+  // Seats in order, skipping ones whose player hasn't loaded and any player
+  // seated twice (they'd inflate the table size).
+  const seen = new Set<string>();
   const seats = [...g.playersOrders]
     .sort((a, b) => a.orderNumber - b.orderNumber)
-    .filter((po) => po.player);
+    .filter((po) => {
+      if (!po.player || seen.has(po.player.id)) return false;
+      seen.add(po.player.id);
+      return true;
+    });
   const seatIds = seats.map((po) => po.player!.id);
   const numPlayers = seatIds.length;
-  const summary = summarizeGame(g.playersOrders, g.rounds);
+  const summary = summarizeGame(seats, g.rounds);
   const totals = new Map(summary.totals.map((x) => [x.id, x.score]));
   const winnerId =
     summary.isFinished && summary.winnerIdx >= 0
@@ -220,6 +240,7 @@ function prepareGame(g: StatsGame): PGame {
     id: g.id,
     createdAt: g.createdAt,
     seatIds,
+    seatSet: seen,
     names: new Map(seats.map((po) => [po.player!.id, po.player!.name])),
     merged: new Set(
       seats.filter((po) => po.player!.mergedInto).map((po) => po.player!.id)
@@ -233,17 +254,31 @@ function prepareGame(g: StatsGame): PGame {
   };
 }
 
-// Live games, oldest first (ties broken by id so the order is stable).
-function prepare(games: readonly StatsGame[]): PGame[] {
+// Live games, oldest first (ties broken by id so the order is stable), and
+// the index from player to their games.
+function prepare(games: readonly StatsGame[]): Prepared {
   let out = preparedCache.get(games);
   if (!out) {
-    out = games
+    const live = games
       .filter((g) => !g.deletedAt)
-      .map(prepareGame)
+      .map((g) => {
+        let p = gameCache.get(g);
+        if (!p) gameCache.set(g, (p = prepareGame(g)));
+        return p;
+      })
       .sort(
         (a, b) =>
           a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)
       );
+    const byPlayer = new Map<string, PGame[]>();
+    for (const g of live) {
+      for (const id of g.seatIds) {
+        const list = byPlayer.get(id);
+        if (list) list.push(g);
+        else byPlayer.set(id, [g]);
+      }
+    }
+    out = { games: live, byPlayer };
     preparedCache.set(games, out);
   }
   return out;
@@ -284,7 +319,8 @@ const positionOf = (g: PGame, playerId: string): number => {
 
 // ── Player stats ────────────────────────────────────────────────────────
 
-function statsFor(all: PGame[], playerId: string): PlayerStats {
+// `all` is the player's own games, oldest first.
+function statsFor(all: readonly PGame[], playerId: string): PlayerStats {
   const bySize = {
     small: emptyTally(),
     medium: emptyTally(),
@@ -314,7 +350,6 @@ function statsFor(all: PGame[], playerId: string): PlayerStats {
   let current = 0;
 
   for (const g of all) {
-    if (!g.seatIds.includes(playerId)) continue;
     games += 1;
 
     for (const r of g.rounds) {
@@ -360,7 +395,14 @@ function statsFor(all: PGame[], playerId: string): PlayerStats {
         .filter(([id]) => id !== playerId)
         .map(([, s]) => s);
       if (won && others.some((s) => s > mine)) comebacks += 1;
-      if (!won && others.every((s) => s < mine)) collapses += 1;
+      // Tied for first at the end only lost on the tie-break: not a collapse.
+      if (
+        !won &&
+        others.every((s) => s < mine) &&
+        positionOf(g, playerId) > 1
+      ) {
+        collapses += 1;
+      }
     }
   }
 
@@ -417,11 +459,33 @@ function statsFor(all: PGame[], playerId: string): PlayerStats {
   };
 }
 
+// A player's stats only depend on their own games, so keep the last result
+// per player and reuse it while those games are the very same objects. After a
+// sync change only the players in the changed game are recomputed.
+const statsCache = new Map<
+  string,
+  { games: readonly PGame[]; stats: PlayerStats }
+>();
+
+function cachedStats(theirs: readonly PGame[], playerId: string): PlayerStats {
+  const hit = statsCache.get(playerId);
+  if (
+    hit &&
+    hit.games.length === theirs.length &&
+    hit.games.every((g, i) => g === theirs[i])
+  ) {
+    return hit.stats;
+  }
+  const stats = statsFor(theirs, playerId);
+  statsCache.set(playerId, { games: theirs, stats });
+  return stats;
+}
+
 export function computePlayerStats(
   games: readonly StatsGame[],
   playerId: string
 ): PlayerStats {
-  return statsFor(prepare(games), playerId);
+  return cachedStats(prepare(games).byPlayer.get(playerId) ?? [], playerId);
 }
 
 // ── Head to head ────────────────────────────────────────────────────────
@@ -431,8 +495,8 @@ export function computeHeadToHead(
   aId: string,
   bId: string
 ): HeadToHead {
-  const shared = prepare(games).filter(
-    (g) => g.seatIds.includes(aId) && g.seatIds.includes(bId)
+  const shared = (prepare(games).byPlayer.get(aId) ?? []).filter((g) =>
+    g.seatSet.has(bId)
   );
   let aAhead = 0;
   let bAhead = 0;
@@ -475,6 +539,7 @@ export function computeHeadToHead(
   }
 
   return {
+    sharedGames: shared.length,
     games: finished.length,
     aAhead,
     bAhead,
@@ -504,8 +569,8 @@ export function computeOpponents(
   playerId: string
 ): Opponent[] {
   const counts = new Map<string, Opponent>();
-  for (const g of prepare(games)) {
-    if (!g.finished || !g.seatIds.includes(playerId)) continue;
+  for (const g of prepare(games).byPlayer.get(playerId) ?? []) {
+    if (!g.finished) continue;
     for (const id of g.seatIds) {
       if (id === playerId || g.merged.has(id)) continue;
       const o = counts.get(id) ?? {
@@ -537,19 +602,12 @@ type Candidate = {
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
 export function computeAwards(games: readonly StatsGame[]): Award[] {
-  const all = prepare(games);
-  const names = new Map<string, string>();
-  const merged = new Set<string>();
-  for (const g of all) {
-    for (const [id, name] of g.names) names.set(id, name);
-    for (const id of g.merged) merged.add(id);
-  }
-
   const pool: Candidate[] = [];
-  for (const [playerId, name] of names) {
-    if (merged.has(playerId)) continue;
-    const s = statsFor(all, playerId);
+  for (const [playerId, theirs] of prepare(games).byPlayer) {
+    if (theirs.some((g) => g.merged.has(playerId))) continue;
+    const s = cachedStats(theirs, playerId);
     if (s.rounds >= AWARD_MIN_ROUNDS) {
+      const name = theirs[theirs.length - 1].names.get(playerId) ?? "?";
       pool.push({ playerId, name, rounds: s.rounds, s });
     }
   }
@@ -599,7 +657,10 @@ export function computeAwards(games: readonly StatsGame[]): Award[] {
     "Greediest",
     best((c) => {
       const n = c.s.misses.over + c.s.misses.under;
-      return n >= AWARD_MIN_MISSES ? c.s.misses.under / n : null;
+      // Nobody is "greedy" on 0%.
+      return n >= AWARD_MIN_MISSES && c.s.misses.under > 0
+        ? c.s.misses.under / n
+        : null;
     }),
     (v) => `${pct(v)} of misses too greedy`
   );
@@ -615,8 +676,8 @@ export function computeAwards(games: readonly StatsGame[]): Award[] {
   give(
     "sharpshooter",
     "Sharpshooter",
-    best((c) => c.s.hitRate),
-    (v) => `${pct(v)} of rounds`
+    best((c) => (c.s.hitRate ? c.s.hitRate : null)),
+    (v) => `${pct(v)} of bids made`
   );
   give(
     "comeback-king",

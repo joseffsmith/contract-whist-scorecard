@@ -15,6 +15,7 @@ import {
   mutedText,
   num,
   pct,
+  plural,
   SectionLabel,
   SmallN,
   Tile,
@@ -86,8 +87,8 @@ export const PlayerStats = () => {
           {player.name}
         </div>
         <div style={{ ...mutedText, fontSize: 12, marginTop: 4 }}>
-          based on {stats.rounds} round{stats.rounds === 1 ? "" : "s"} ·{" "}
-          {stats.games} game{stats.games === 1 ? "" : "s"}
+          based on {plural(stats.rounds, "round")} ·{" "}
+          {plural(stats.games, "game")}
         </div>
 
         {stats.rounds === 0 ? (
@@ -184,7 +185,7 @@ export const PlayerStats = () => {
                     <div
                       style={{ fontSize: 12, color: t.cream, opacity: 0.55 }}
                     >
-                      {o.games} game{o.games === 1 ? "" : "s"}
+                      {plural(o.games, "game")}
                     </div>
                     <div style={{ color: t.gold, opacity: 0.7 }}>›</div>
                   </Link>
@@ -243,7 +244,7 @@ const BiddingCard = ({ s }: { s: Stats }) => {
                 ? `of rounds, made ${pct(zeroMade)}`
                 : "of rounds"
             }
-            hint={s.zeroBids.count}
+            hint={s.rounds}
           />
         </TileGrid>
 
@@ -606,14 +607,13 @@ const Results = ({ s }: { s: Stats }) => (
 const FormSection = ({ s }: { s: Stats }) => (
   <>
     <SectionLabel>
-      Form · last {s.form.length > 1 ? s.form.length : ""} game
-      {s.form.length === 1 ? "" : "s"}
+      {s.form.length === 0
+        ? "Streaks"
+        : s.form.length === 1
+        ? "Form · last game"
+        : `Form · last ${s.form.length} games`}
     </SectionLabel>
-    {s.form.length === 0 ? (
-      <Card>
-        <div style={mutedText}>No finished games yet.</div>
-      </Card>
-    ) : (
+    {s.form.length > 0 && (
       <div style={{ display: "flex", gap: 6 }}>
         {s.form.map((f) => (
           <Link
@@ -655,7 +655,7 @@ const FormSection = ({ s }: { s: Stats }) => (
         ))}
       </div>
     )}
-    <Card style={{ marginTop: 8 }}>
+    <Card style={{ marginTop: s.form.length > 0 ? 8 : 0 }}>
       <TileGrid>
         <Tile
           label="Current streak"

@@ -8,6 +8,7 @@ import {
   mutedText,
   num,
   pct,
+  plural,
   SectionLabel,
   SmallN,
 } from "../stats/ui";
@@ -36,18 +37,14 @@ export const HeadToHead = () => {
   const back = () => nav(`/stats/${playerId}`);
 
   // A merged-away player's rows live on their target now.
-  if (a?.mergedInto || b?.mergedInto) {
-    return (
-      <Navigate
-        to={`/stats/${a?.mergedInto ?? playerId}/vs/${
-          b?.mergedInto ?? otherId
-        }`}
-        replace
-      />
-    );
+  const resolvedA = a?.mergedInto ?? playerId;
+  const resolvedB = b?.mergedInto ?? otherId;
+  const samePlayer = !!a && !!b && resolvedA === resolvedB;
+  if (!samePlayer && (resolvedA !== playerId || resolvedB !== otherId)) {
+    return <Navigate to={`/stats/${resolvedA}/vs/${resolvedB}`} replace />;
   }
 
-  if (!a || !b || playerId === otherId) {
+  if (!a || !b || samePlayer) {
     return (
       <>
         <Crumb
@@ -57,8 +54,19 @@ export const HeadToHead = () => {
           ]}
           onBack={() => nav("/leaderboard")}
         />
-        <div style={{ padding: 20, opacity: 0.6 }}>
-          {isLoading ? "Loading…" : "Players not found."}
+        <div style={{ padding: 20, ...mutedText }}>
+          {samePlayer ? (
+            <>
+              That's the same player{playerId !== otherId ? " (merged)" : ""}.{" "}
+              <Link to={`/stats/${resolvedA}`} style={{ color: t.gold }}>
+                See {a.name}'s stats →
+              </Link>
+            </>
+          ) : isLoading ? (
+            "Loading…"
+          ) : (
+            "Players not found."
+          )}
         </div>
       </>
     );
@@ -118,11 +126,17 @@ export const HeadToHead = () => {
             <div
               style={{ fontFamily: t.display, fontSize: 17, color: t.cream }}
             >
-              Never played together
+              {h.sharedGames === 0
+                ? "Never played together"
+                : "Nothing scored together yet"}
             </div>
             <div style={{ ...mutedText, marginTop: 6 }}>
-              {a.name} and {b.name} haven't shared a game yet. Once they have,
-              the scoreboard between them shows up here.
+              {h.sharedGames === 0
+                ? `${a.name} and ${b.name} haven't shared a game yet. Once they have, the scoreboard between them shows up here.`
+                : `${a.name} and ${b.name} are in ${plural(
+                    h.sharedGames,
+                    "game"
+                  )} together, but no round has been scored for both of them yet.`}
             </div>
           </Card>
         ) : (
@@ -131,7 +145,8 @@ export const HeadToHead = () => {
             <Card>
               {h.games === 0 ? (
                 <div style={mutedText}>
-                  No finished games together yet, so there's no scoreline.
+                  No finished games together yet, so there's no scoreline.{" "}
+                  {plural(h.sharedGames, "game")} in progress.
                 </div>
               ) : (
                 <>
@@ -178,7 +193,7 @@ export const HeadToHead = () => {
                     {h.draws > 0
                       ? `${h.draws} draw${h.draws === 1 ? "" : "s"} · `
                       : ""}
-                    {h.games} finished game{h.games === 1 ? "" : "s"}
+                    {plural(h.games, "finished game")}
                     <SmallN n={h.games} />
                   </div>
                   <div
@@ -281,7 +296,7 @@ export const HeadToHead = () => {
                           marginTop: 1,
                         }}
                       >
-                        {r.numPlayers} players
+                        {plural(r.numPlayers, "player")}
                       </div>
                     </div>
                     <Score

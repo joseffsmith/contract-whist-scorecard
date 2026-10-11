@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { computeAwards } from "../stats/playerStats";
+import { plural } from "../stats/ui";
 import { selectHomeGames, useSyncView } from "../sync";
 import { alpha, t } from "../theme/tokens";
 import { summarizeGame } from "../utils/gameStatus";
@@ -16,10 +17,8 @@ type Row = {
 
 export const Leaderboard = () => {
   const { view, isLoading } = useSyncView();
-  const awards = useMemo(
-    () => computeAwards(selectHomeGames(view).games),
-    [view]
-  );
+  const allGames = selectHomeGames(view).games;
+  const awards = useMemo(() => computeAwards(allGames), [allGames]);
 
   if (isLoading) {
     return <div style={{ padding: 20, opacity: 0.6 }}>Loading…</div>;
@@ -196,7 +195,8 @@ export const Leaderboard = () => {
                   marginTop: 1,
                 }}
               >
-                {r.wins} wins · {r.finished}/{r.games} games · avg {avg}
+                {plural(r.wins, "win")} · {r.finished}/{plural(r.games, "game")}{" "}
+                · avg {avg}
               </div>
             </div>
             <div

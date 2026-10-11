@@ -155,6 +155,9 @@ export const Divider = () => (
   />
 );
 
+export const plural = (n: number, word: string): string =>
+  `${n} ${word}${n === 1 ? "" : "s"}`;
+
 export const pct = (x: number | null): string =>
   x === null ? "—" : `${Math.round(x * 100)}%`;
 

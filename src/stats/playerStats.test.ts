@@ -820,7 +820,7 @@ describe("computeAwards", () => {
     // B and C both hit 100%; tie goes to the name that sorts first
     expect(find(awards, "sharpshooter")).toMatchObject({
       playerId: "B",
-      detail: "100% of rounds",
+      detail: "100% of bids made",
     });
     expect(find(awards, "boldest")?.playerId).toBe("A");
     expect(find(awards, "careful")?.playerId).toBe("B");
@@ -894,5 +894,215 @@ describe("computeAwards", () => {
     );
     const awards = computeAwards(withMerged);
     expect(awards.some((a) => a.playerId === "A")).toBe(false);
+  });
+});
+
+// ── Boundaries and robustness ───────────────────────────────────────────
+
+// Two players. Through round 5 B leads 6-0. In round `change` A moves ahead
+// (A needs 7+ more than B in that round, so the lead flips exactly there).
+// From round 7 on A scores 11 a round to B's 0, so A always wins.
+const leadChange = (change: 6 | 7) =>
+  full("lc" + change, day(1), ["A", "B"], (r, p): Cell => {
+    if (r <= 5) return p === 0 ? [1, 0] : [0, 1]; // A 0, B 1
+    if (r === 6) {
+      if (change === 6) return p === 0 ? [1, 1] : [1, 0]; // A 11, B 0
+      return [1, 0]; // both 0
+    }
+    if (r === 7 && change === 7) return p === 0 ? [2, 2] : [1, 0]; // A 12
+    return p === 0 ? [1, 1] : [1, 0];
+  });
+
+describe("comeback / collapse mid-game boundary", () => {
+  it("a lead taken in round index 6 counts as leading after 7 rounds", () => {
+    const g = leadChange(6);
+    expect(computePlayerStats([g], "A").wins).toBe(1);
+    expect(computePlayerStats([g], "A").comebacks).toBe(0);
+    expect(computePlayerStats([g], "B").collapses).toBe(0);
+  });
+
+  it("a lead taken in round index 7 is a comeback (and a collapse)", () => {
+    const g = leadChange(7);
+    expect(computePlayerStats([g], "A").comebacks).toBe(1);
+    expect(computePlayerStats([g], "B").collapses).toBe(1);
+  });
+
+  it("is not a collapse when the leader was tied for first at the end", () => {
+    // B leads 77-7 after seven rounds, then A claws back to an exact tie.
+    // A is first seat, so A "wins" the tie-break; B didn't collapse.
+    const g = full("tie", day(1), ["A", "B"], (r, p): Cell => {
+      if (r <= 6) return p === 0 ? [0, 1] : [1, 1]; // A 7, B 77
+      // A needs 70 over the last six rounds while B scores 0: 10 + 5 x 12
+      if (r === 7) return p === 0 ? [0, 0] : [1, 0];
+      return p === 0 ? [2, 2] : [1, 0];
+    });
+    expect(computePlayerStats([g], "A").wins).toBe(1);
+    expect(computePlayerStats([g], "B").wins).toBe(0);
+    expect(computePlayerStats([g], "B").form[0].position).toBe(1);
+    expect(computePlayerStats([g], "B").collapses).toBe(0);
+  });
+});
+
+describe("award thresholds", () => {
+  const awardKeys = (gs: StatsGame[]) => computeAwards(gs).map((a) => a.key);
+  const base = [1, 2].map((i) => full(`b${i}`, day(i), ["A", "B"], allMade)); // 26 rounds
+  const partial = (n: number) =>
+    game(
+      "partial",
+      day(5),
+      ["A", "B"],
+      Array.from({ length: n }, (): Cell[] => [
+        [1, 1],
+        [1, 1],
+      ])
+    );
+
+  it("needs exactly 30 completed rounds: 29 is not enough", () => {
+    expect(awardKeys([...base, partial(3)])).toEqual([]);
+    expect(awardKeys([...base, partial(4)])).toContain("sharpshooter");
+  });
+
+  it("counts rounds from unfinished games but needs 3 finished games for Comeback king", () => {
+    const swing = (id: string, d: number, rounds: number) =>
+      game(
+        id,
+        day(d),
+        ["A", "B"],
+        Array.from({ length: rounds }, (_, r): Cell[] => {
+          if (r <= 6)
+            return [
+              [0, 1],
+              [1, 1],
+            ];
+          return [
+            [2, 2],
+            [1, 0],
+          ];
+        })
+      );
+    const two = [swing("s1", 1, 13), swing("s2", 2, 13)];
+    const unfinished = swing("u", 3, 10); // 36 rounds in total
+    const awards = computeAwards([...two, unfinished]);
+    expect(awards.map((a) => a.key)).toContain("sharpshooter");
+    expect(awards.map((a) => a.key)).not.toContain("comeback-king");
+    // a third *finished* game unlocks it
+    const three = computeAwards([...two, swing("s3", 3, 13)]);
+    expect(three.find((a) => a.key === "comeback-king")?.detail).toBe(
+      "3 comebacks"
+    );
+  });
+
+  describe("Greediest", () => {
+    // A bids 2 and takes 0 (a greedy miss) `under` times, takes 3 (a
+    // cautious miss) `over` times, otherwise makes it. 39 rounds.
+    const greedy = (under: number, over: number) =>
+      [0, 1, 2].map((i) =>
+        full(`gr${i}`, day(i + 1), ["A", "B"], (r, p): Cell => {
+          if (p === 1) return [1, 1];
+          const n = i * 13 + r;
+          if (n < under) return [2, 0];
+          if (n < under + over) return [2, 3];
+          return [2, 2];
+        })
+      );
+
+    it("needs 10 misses: 9 is not enough, 10 is", () => {
+      expect(awardKeys(greedy(9, 0))).not.toContain("greediest");
+      expect(awardKeys(greedy(10, 0))).toContain("greediest");
+      expect(awardKeys(greedy(5, 4))).not.toContain("greediest");
+      expect(awardKeys(greedy(5, 5))).toContain("greediest");
+    });
+
+    it("is not given at 0% (all misses too cautious)", () => {
+      expect(awardKeys(greedy(0, 12))).not.toContain("greediest");
+    });
+  });
+
+  it("Sharpshooter isn't given for a 0% hit rate", () => {
+    const never = [1, 2, 3].map((i) =>
+      full(`n${i}`, day(i), ["A", "B"], (): Cell => [1, 0])
+    );
+    expect(awardKeys(never)).not.toContain("sharpshooter");
+  });
+});
+
+describe("seats and table size", () => {
+  it("skips an unloaded seat before the player when sizing the table and dealing", () => {
+    const g = full("g", day(1), ["A", "B"], allMade);
+    g.playersOrders.unshift({ orderNumber: -1, player: undefined });
+    const s = computePlayerStats([g], "A");
+    // Two real players: B deals round 0, A deals the odd rounds (6 of 13).
+    expect(s.asDealer.rounds).toBe(6);
+    expect(s.notDealer.rounds).toBe(7);
+    expect(s.finished).toBe(1);
+    expect(s.expectedWins).toBeCloseTo(0.5);
+    // fair share uses 2 players: round 0 is 7 cards -> bid 1 / 3.5
+    const once = full("g2", day(1), ["A", "B"], allMade);
+    expect(computePlayerStats([once], "A").aggression).toBeCloseTo(
+      s.aggression!
+    );
+    expect(computePlayerStats([g], "B").asDealer.rounds).toBe(7);
+  });
+
+  it("initialDealerId indexes among the loaded seats only", () => {
+    const g = full("g", day(1), ["A", "B"], allMade, { dealer: "A" });
+    g.playersOrders.unshift({ orderNumber: -1, player: undefined });
+    // A is loaded seat 0 -> deals even rounds: 0,2,...,12 = 7
+    expect(computePlayerStats([g], "A").asDealer.rounds).toBe(7);
+  });
+
+  it("counts a player seated twice once", () => {
+    const g = full("g", day(1), ["A", "B"], allMade);
+    g.playersOrders.push({
+      orderNumber: 5,
+      player: { id: "B", name: "B" },
+    });
+    const a = computePlayerStats([g], "A");
+    expect(a.expectedWins).toBeCloseTo(0.5);
+    expect(a.finished).toBe(1);
+    expect(computeOpponents([g], "A")).toEqual([
+      { playerId: "B", name: "B", games: 1 },
+    ]);
+    expect(computePlayerStats([g], "B").games).toBe(1);
+  });
+
+  it("two players tied for second share the position", () => {
+    const g = full("g", day(1), ["A", "B", "C", "D"], (_, p): Cell => {
+      if (p === 0) return [1, 1]; // 143
+      if (p === 3) return [1, 0]; // 0
+      return [0, 1]; // 13
+    });
+    const pos = (id: string) => computePlayerStats([g], id).form[0].position;
+    expect([pos("A"), pos("B"), pos("C"), pos("D")]).toEqual([1, 2, 2, 4]);
+  });
+});
+
+describe("caching", () => {
+  it("gives the same answers for a new array of the same game objects", () => {
+    const a = full("a", day(1), ["A", "B"], allMade);
+    const b = full("b", day(2), ["A", "B"], allMade);
+    const first = computePlayerStats([a, b], "A");
+    expect(computePlayerStats([b, a], "A")).toEqual(first);
+    // a replaced game object is digested afresh
+    const b2 = full(
+      "b",
+      day(2),
+      ["A", "B"],
+      (_, p): Cell => (p === 0 ? [1, 0] : [1, 1])
+    );
+    expect(computePlayerStats([a, b2], "A").made).toBe(13);
+  });
+});
+
+describe("computeHeadToHead sharedGames", () => {
+  it("counts unfinished shared games separately from finished ones", () => {
+    const unfinished = game("u", day(1), ["A", "B"], []);
+    const h = computeHeadToHead([unfinished], "A", "B");
+    expect(h.sharedGames).toBe(1);
+    expect(h.games).toBe(0);
+    expect(h.sharedRounds).toBe(0);
+    const done = full("d", day(2), ["A", "B"], allMade);
+    expect(computeHeadToHead([unfinished, done], "A", "B").sharedGames).toBe(2);
+    expect(computeHeadToHead([], "A", "B").sharedGames).toBe(0);
   });
 });
