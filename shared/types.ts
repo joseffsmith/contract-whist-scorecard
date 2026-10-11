@@ -61,7 +61,13 @@ export type Tables = {
   turns: TurnRow;
 };
 export type TableName = keyof Tables;
-export const TABLES: TableName[] = ["players", "games", "seats", "rounds", "turns"];
+export const TABLES: TableName[] = [
+  "players",
+  "games",
+  "seats",
+  "rounds",
+  "turns",
+];
 
 // A complete set of rows, keyed by id. The client keeps one of these (the
 // server snapshot) and the server exposes its SQLite data through ReadState.
@@ -94,9 +100,19 @@ export type ActionArgs = {
   claimPlayer: { playerId: string };
   unclaimPlayer: { playerId: string };
   // Creates the game, its 13 rounds and the host's seat (order 0).
-  createGame: { gameId: string; roundIds: string[]; seatId: string; playerId: string };
+  createGame: {
+    gameId: string;
+    roundIds: string[];
+    seatId: string;
+    playerId: string;
+  };
   deleteGame: { gameId: string };
-  addSeat: { seatId: string; gameId: string; playerId: string; orderNumber: number };
+  addSeat: {
+    seatId: string;
+    gameId: string;
+    playerId: string;
+    orderNumber: number;
+  };
   removeSeat: { seatId: string };
   reorderSeats: { gameId: string; seatIds: string[] }; // new order, all seats
   setInitialDealer: { gameId: string; playerId: string };
@@ -139,6 +155,11 @@ export class ActionError extends Error {
   }
 }
 
+// Thrown by a ReadState implementation when storage itself fails (e.g. the
+// database is locked). applyAction re-throws it untouched so the server can
+// answer "try again" instead of rejecting the action for good.
+export class StateError extends Error {}
+
 // Implemented in shared/actions.ts:
 //   export function applyAction(state: ReadState, action: Action, ctx: ActionContext): RowOp[]
 // Pure and deterministic: throws ActionError when not allowed/invalid,
@@ -166,5 +187,7 @@ export type ChangeSet = {
 };
 
 export type PushRequest = { actions: Action[] };
-export type PushResult = { id: string; ok: true } | { id: string; ok: false; error: string; code: string };
+export type PushResult =
+  | { id: string; ok: true }
+  | { id: string; ok: false; error: string; code: string };
 export type PushResponse = { results: PushResult[]; version: number };

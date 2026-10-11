@@ -2,7 +2,7 @@
 // Runs optimistically in the browser and authoritatively on the server.
 // See docs/backend/SPEC.md ("Actions").
 
-import { ActionError } from "./types";
+import { ActionError, StateError } from "./types";
 import type {
   Action,
   ActionArgs,
@@ -855,7 +855,9 @@ export function applyAction(
   try {
     return dispatch(state, action, ctx);
   } catch (error) {
-    if (error instanceof ActionError) throw error;
+    if (error instanceof ActionError || error instanceof StateError) {
+      throw error;
+    }
     throw new ActionError("Invalid request.", "invalid");
   }
 }

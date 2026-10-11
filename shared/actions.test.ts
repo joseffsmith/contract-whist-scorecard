@@ -2246,3 +2246,24 @@ describe("importGame", () => {
     });
   });
 });
+
+describe("storage failures", () => {
+  it("re-throws StateError from ReadState instead of rejecting as invalid", async () => {
+    const { StateError } = await import("./types");
+    const failing = {
+      get() {
+        throw new StateError("database is locked");
+      },
+      where() {
+        throw new StateError("database is locked");
+      },
+    };
+    expect(() =>
+      applyAction(
+        failing as never,
+        { id: "a1", name: "claimPlayer", args: { playerId: "p1" } },
+        { userId: "u1", isGuest: false, now: "2026-01-01T00:00:00.000Z" }
+      )
+    ).toThrow(StateError);
+  });
+});
