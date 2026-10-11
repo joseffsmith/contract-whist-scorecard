@@ -662,7 +662,7 @@ export function createSyncClient(
     }
     if (code === 413 || code === 400) {
       if (batch.length > 1) {
-        batchLimit = Math.max(1, Math.floor(batch.length / 2));
+        batchLimit = batchLimit;
         return true;
       }
       const tooLarge = code === 413;
