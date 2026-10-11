@@ -70,6 +70,8 @@ export type SyncClient = {
   logOut(): Promise<void>;
   setPassword(password: string): Promise<void>;
   resetPassword(token: string, password: string): Promise<PublicUser>;
+  // Admins only: a one-time set-password link for the account with `email`.
+  createResetLink(email: string): Promise<string>;
   // Resolves when everything written so far has reached storage.
   persisted(): Promise<void>;
 };
@@ -595,6 +597,16 @@ export function createSyncClient(
     },
     async resetPassword(token, password) {
       return adopt(await authRequest("/auth/reset", { token, password }));
+    },
+    async createResetLink(email) {
+      await start();
+      if (!session) throw new SyncError("Sign in first.", "not_signed_in");
+      const { url } = await transport.post<{ url: string }>(
+        "/auth/reset-link",
+        { email },
+        session.token
+      );
+      return url;
     },
   };
 }
