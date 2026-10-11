@@ -7,6 +7,11 @@ Demo: https://joseffsmith.uk/contract-whist
 - mix order of suits
 - tell you who's turn it is to deal (over multiple games)
 
+## Native apps
+
+`mobile/` wraps the web app for iOS and Android with Capacitor; see
+`mobile/README.md` to build and ship it.
+
 ## Offline first
 
 Anyone who has opened the app before must be able to use it with no signal.
@@ -71,6 +76,11 @@ serving the app under `/contract-whist/` (`/` redirects there) and proxying
      `1` means the last entry, as set by one host nginx using
      `proxy_add_x_forwarded_for`. Use `2` if another proxy sits in front of
      that, and `0` to ignore the header and use the connection's address.
+   - `CORS_ORIGINS` (optional): extra comma-separated origins (like
+     `http://localhost:5173`, no path or trailing slash; a bad entry stops the
+     server at startup) allowed to call the API cross-origin. The iOS and
+     Android apps (`mobile/`) are always allowed, as `capacitor://localhost`
+     and `https://localhost`. The website needs no CORS.
    - `BACKUP_DAYS` (default `14`, `0` turns backups off): see Backups below.
    - `DATA_DIR` (default `/data`), `PORT` (default 3001) and `HOST` (default
      `127.0.0.1`) rarely need changing.

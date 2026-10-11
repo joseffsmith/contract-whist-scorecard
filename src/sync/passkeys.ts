@@ -54,8 +54,12 @@ export const browserPasskeys: PasskeyApi = {
       : load().then((m) => m.startAuthentication({ optionsJSON })),
 };
 
+// Not in the native app yet: its WebView origin (capacitor://localhost) can't
+// use the joseffsmith.uk passkeys until the native plugin lands (phase 3).
 export const passkeysSupported = () =>
-  typeof window !== "undefined" && !!window.PublicKeyCredential;
+  import.meta.env.MODE !== "mobile" &&
+  typeof window !== "undefined" &&
+  !!window.PublicKeyCredential;
 
 // The person dismissed the prompt, or it timed out.
 export const isCancelled = (error: unknown) =>

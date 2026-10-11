@@ -1,10 +1,12 @@
 node_modules
 .DS_Store
 dist
+dist-mobile
 dist-ssr
 *.local
 
 .env*
+!.env.mobile
 .firebase
 
 .claude

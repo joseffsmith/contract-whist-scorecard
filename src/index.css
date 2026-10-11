@@ -49,11 +49,32 @@ body {
     var(--wh-felt-dk) 100%
   );
   color: var(--wh-cream);
-  font-family: "Inter Tight", -apple-system, BlinkMacSystemFont, "Segoe UI",
-    system-ui, sans-serif;
+  font-family: "Inter Tight Variable", "Inter Tight", -apple-system,
+    BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overscroll-behavior-y: none;
+}
+
+/* The native app draws under the status bar and home indicator (see
+   src/lib/native.ts), so keep the page clear of them. The web look is
+   unchanged: this only applies inside the app. */
+html.native,
+html.native body {
+  overscroll-behavior: none; /* no rubber-band; panels scroll inside */
+}
+html.native body {
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+/* Fixed layers sit outside the padded body. */
+html.native .safe-fixed {
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+  background: var(--wh-felt-dk);
+}
+html.native .notistack-SnackbarContainer {
+  margin-top: env(safe-area-inset-top);
 }
 
 * {

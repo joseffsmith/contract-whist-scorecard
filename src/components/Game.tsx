@@ -3,6 +3,7 @@ import Confetti from "react-confetti";
 import { useNavigate, useParams } from "react-router-dom";
 import { DEALS } from "../constants";
 import { act, newId } from "../lib/dispatch";
+import { success, tap, warning } from "../lib/native";
 import { useGame } from "../lib/offline";
 import { useAuth, useConnectionStatus } from "../sync";
 import {
@@ -145,6 +146,9 @@ export const GameComp = () => {
       for (const fill of fills) {
         if (!(await act("setScore", fill))) return;
       }
+      // Everyone has scored: the round (or the whole game) is done.
+      const filled = new Set(fills.map((f) => f.turnId));
+      if (turns.every((tt) => filled.has(tt.id) || tt.score != null)) success();
     }
   };
 
@@ -594,10 +598,14 @@ export const GameComp = () => {
             {bidOptions.map((opt) => (
               <button
                 key={opt.number}
-                disabled={opt.disabled}
-                onClick={() =>
-                  stage === "bid" ? handleBid(opt) : setTricksMade(opt.number)
-                }
+                // Not `disabled`, so a tap on the hook option can still buzz.
+                aria-disabled={opt.disabled}
+                onClick={() => {
+                  if (opt.disabled) return warning();
+                  tap();
+                  if (stage === "bid") handleBid(opt);
+                  else setTricksMade(opt.number);
+                }}
                 style={{
                   minWidth: 0,
                   padding: "clamp(14px, 2.2vh, 20px) 0",

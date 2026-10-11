@@ -5,6 +5,7 @@ import { isIP } from "node:net";
 import type { AddressInfo } from "node:net";
 import { createAuth } from "./auth";
 import { createBackups } from "./backup";
+import { createCors } from "./cors";
 import { NotEmptyError, importSnapshot, openDb } from "./db";
 import { HttpError, clientIp, createLimiter, readJson, send } from "./http";
 import { ImportFormatError, transformInstant } from "./importInstant";
@@ -14,6 +15,7 @@ export type ServerOptions = {
   port: number;
   dataDir: string;
   publicUrl?: string;
+  corsOrigins?: string; // comma-separated, on top of the native apps (cors.ts)
   host?: string;
   adminBootstrapToken?: string; // POST /auth/claim-admin; the first admin only
   passkeyRpId?: string; // default: the host of publicUrl
@@ -72,6 +74,7 @@ function checkPasskeyConfig({
 }
 
 export async function startServer(opts: ServerOptions) {
+  const cors = createCors(opts.corsOrigins); // throws on a bad entry
   const db = openDb(opts.dataDir);
   const limiter = createLimiter();
   const sync = createSync(db, limiter, opts);
@@ -183,6 +186,7 @@ export async function startServer(opts: ServerOptions) {
 
   const server = createServer(async (req, res) => {
     try {
+      if (cors(req, res)) return;
       let url: URL;
       try {
         url = new URL(req.url ?? "/", "http://localhost");

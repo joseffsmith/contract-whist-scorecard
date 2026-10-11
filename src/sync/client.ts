@@ -17,7 +17,7 @@ import type {
   PushResponse,
   TableName,
 } from "../../shared/types";
-import { BASE_PATH } from "../lib/paths";
+import { API_BASE } from "../lib/paths";
 import { browserPasskeys, isCancelled, passkeyError } from "./passkeys";
 import type { PasskeyApi } from "./passkeys";
 import { createMemoryStorage, openStorage } from "./storage";
@@ -185,7 +185,7 @@ function defaultDeps(): SyncDeps {
     secret: randomSecret,
     network: browserNetwork,
     passkeys: browserPasskeys,
-    apiBase: `${BASE_PATH}/api`,
+    apiBase: API_BASE,
     backoff: { minMs: 1000, maxMs: 30_000 },
     batchSize: 50,
     maxBatchBytes: 200_000,

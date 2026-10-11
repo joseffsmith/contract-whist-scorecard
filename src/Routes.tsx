@@ -15,6 +15,7 @@ import { Players } from "./components/Players";
 import { ResetPassword } from "./components/ResetPassword";
 import { UserLogin } from "./components/UserLogin";
 import { UserManager } from "./components/UserManager";
+import { BASE_PATH } from "./lib/paths";
 
 export const router = createBrowserRouter(
   [
@@ -41,5 +42,5 @@ export const router = createBrowserRouter(
       ],
     },
   ],
-  { basename: "/contract-whist" }
+  { basename: BASE_PATH || "/" }
 );
