@@ -17,6 +17,7 @@ const server = await startServer({
   host: process.env.HOST || "127.0.0.1",
   dataDir: process.env.DATA_DIR ?? "/data",
   publicUrl: process.env.PUBLIC_URL,
+  corsOrigins: process.env.CORS_ORIGINS,
   adminBootstrapToken: process.env.ADMIN_BOOTSTRAP_TOKEN,
   importToken: process.env.IMPORT_TOKEN,
   backupDays: backupDays === undefined ? undefined : Number(backupDays),

@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createAuth } from "./auth";
 import { createBackups } from "./backup";
+import { createCors } from "./cors";
 import { NotEmptyError, importSnapshot, openDb } from "./db";
 import { HttpError, clientIp, createLimiter, readJson, send } from "./http";
 import { ImportFormatError, transformInstant } from "./importInstant";
@@ -13,6 +14,7 @@ export type ServerOptions = {
   port: number;
   dataDir: string;
   publicUrl?: string;
+  corsOrigins?: string; // comma-separated; default: the native apps (cors.ts)
   host?: string;
   adminBootstrapToken?: string; // POST /auth/claim-admin; the first admin only
   importToken?: string; // enables POST /admin/import (one-off migration)
@@ -41,6 +43,7 @@ const sameSecret = (a: string, b: string) =>
 export async function startServer(opts: ServerOptions) {
   const db = openDb(opts.dataDir);
   const limiter = createLimiter();
+  const cors = createCors(opts.corsOrigins);
   const sync = createSync(db, limiter, opts);
   const auth = createAuth(db, sync, limiter, {
     adminBootstrapToken: opts.adminBootstrapToken || undefined,
@@ -118,6 +121,7 @@ export async function startServer(opts: ServerOptions) {
 
   const server = createServer(async (req, res) => {
     try {
+      if (cors(req, res)) return;
       let url: URL;
       try {
         url = new URL(req.url ?? "/", "http://localhost");

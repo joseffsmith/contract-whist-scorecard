@@ -4,6 +4,7 @@ import { useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { DEALS } from "../constants";
 import { clearScore, deleteTurn, setBid, setScore } from "../guest/guestStore";
 import { useGuestGame } from "../guest/useGuestGame";
+import { success, tap, warning } from "../lib/native";
 import {
   alpha,
   fluid,
@@ -118,6 +119,13 @@ export const GuestGameComp = () => {
     if (!turn) return;
     const score = turn.bid === tricks ? tricks + 10 : tricks;
     setScore(game.id, turn.id, score);
+    // The last score of the round (or the game).
+    if (
+      turn.score === null &&
+      currentRound.turns.filter((tt) => tt.score !== null).length + 1 ===
+        numPlayers
+    )
+      success();
   };
 
   const undo = () => {
@@ -564,10 +572,14 @@ export const GuestGameComp = () => {
             {bidOptions.map((opt) => (
               <button
                 key={opt.number}
-                disabled={opt.disabled}
-                onClick={() =>
-                  stage === "bid" ? handleBid(opt) : handleScore(opt.number)
-                }
+                // Not `disabled`, so a tap on the hook option can still buzz.
+                aria-disabled={opt.disabled}
+                onClick={() => {
+                  if (opt.disabled) return warning();
+                  tap();
+                  if (stage === "bid") handleBid(opt);
+                  else handleScore(opt.number);
+                }}
                 style={{
                   minWidth: 0,
                   padding: "clamp(14px, 2.2vh, 20px) 0",

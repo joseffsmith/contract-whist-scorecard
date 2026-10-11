@@ -17,7 +17,7 @@ import type {
   PushResponse,
   TableName,
 } from "../../shared/types";
-import { BASE_PATH } from "../lib/paths";
+import { API_BASE } from "../lib/paths";
 import { createMemoryStorage, openStorage } from "./storage";
 import type {
   PendingEntry,
@@ -151,7 +151,7 @@ function defaultDeps(): SyncDeps {
     uuid: randomUuid,
     secret: randomSecret,
     network: browserNetwork,
-    apiBase: `${BASE_PATH}/api`,
+    apiBase: API_BASE,
     backoff: { minMs: 1000, maxMs: 30_000 },
     batchSize: 50,
     maxBatchBytes: 200_000,

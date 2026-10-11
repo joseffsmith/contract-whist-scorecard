@@ -56,6 +56,10 @@ const subscribe = (l: () => void) => {
   return () => listeners.delete(l);
 };
 
+// For code outside React (the native status bar, src/lib/native.ts).
+export const resolvedTheme = () => resolve(pref);
+export const subscribeTheme = subscribe;
+
 export function useTheme() {
   const current = useSyncExternalStore(subscribe, () => pref);
   const resolved = useSyncExternalStore(subscribe, () => resolve(pref));

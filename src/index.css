@@ -56,6 +56,14 @@ body {
   overscroll-behavior-y: none;
 }
 
+/* The native app draws under the status bar and home indicator (see
+   src/lib/native.ts), so keep the page clear of them. The web look is
+   unchanged: this only applies inside the app. */
+html.native body {
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
 * {
   box-sizing: border-box;
   touch-action: manipulation;
