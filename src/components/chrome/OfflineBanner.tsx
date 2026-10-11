@@ -6,7 +6,11 @@ import { alpha, t } from "../../theme/tokens";
 // during the transient "connecting" states at startup and brief blips.
 const SHOW_AFTER_MS = 1000;
 
-export const OfflineBanner = ({ connection }: { connection: ConnectionStatus }) => {
+export const OfflineBanner = ({
+  connection,
+}: {
+  connection: ConnectionStatus;
+}) => {
   const isOffline = connection === "offline";
   const [visible, setVisible] = useState(false);
 

@@ -3,11 +3,13 @@ import { useEffect } from "react";
 import { Outlet, useLocation, useNavigate, matchPath } from "react-router-dom";
 import { DEALS } from "../constants";
 import { act, newId } from "../lib/dispatch";
+import { useStorageHealth } from "../lib/storageHealth";
 import { useMyPlayer } from "../players/account";
 import { sync, useAuth, useConnectionStatus } from "../sync";
 import { t } from "../theme/tokens";
 import { OfflineBanner } from "./chrome/OfflineBanner";
 import { Shell } from "./chrome/Shell";
+import { StorageWarning } from "./chrome/StorageWarning";
 import { RootHeader, RootTabId } from "./chrome/RootHeader";
 
 // Map a pathname to a root-tab id, or null if this is a deep (breadcrumb) route.
@@ -23,6 +25,7 @@ export const App = () => {
   const nav = useNavigate();
   const location = useLocation();
   const connection = useConnectionStatus();
+  const storageHealth = useStorageHealth();
 
   // Changes the server turned down after we'd already shown them locally.
   useEffect(
@@ -67,6 +70,7 @@ export const App = () => {
 
   return (
     <Shell>
+      {storageHealth !== "ok" && <StorageWarning />}
       <OfflineBanner connection={connection} />
       {rootTab && (
         <RootHeader

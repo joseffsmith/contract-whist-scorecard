@@ -239,7 +239,7 @@ export const Players = () => {
           </>
         )}
 
-        {canEdit && <ResetLink />}
+        {user?.isAdmin && <ResetLink />}
       </div>
 
       {mergingFrom && (
@@ -464,7 +464,7 @@ const ResetLink = () => {
         </div>
       )}
       <div style={{ fontSize: 11, color: t.cream, opacity: 0.5, marginTop: 8 }}>
-        The link works once and lasts 7 days. Only admins can create them.
+        The link works once and lasts 7 days. 
       </div>
     </>
   );

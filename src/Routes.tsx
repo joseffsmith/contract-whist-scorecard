@@ -1,4 +1,5 @@
 import { createBrowserRouter } from "react-router-dom";
+import { AdminSetup } from "./components/AdminSetup";
 import { App } from "./components/App";
 import { GameComp } from "./components/Game";
 import { GameList } from "./components/GameList";
@@ -16,6 +17,7 @@ import { UserManager } from "./components/UserManager";
 export const router = createBrowserRouter(
   [
     { path: "/login", element: <UserLogin /> },
+    { path: "/admin", element: <AdminSetup /> },
     { path: "/reset", element: <ResetPassword /> },
     { path: "/reset/:token", element: <ResetPassword /> },
     {

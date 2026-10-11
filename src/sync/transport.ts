@@ -28,7 +28,13 @@ export type StreamHandle = { close(): void };
 export interface Transport {
   pull(since: number): Promise<ChangeSet>;
   push(actions: Action[], token: string): Promise<PushResponse>;
-  post<T>(path: string, body: unknown, token?: string): Promise<T>;
+  get<T>(path: string, token?: string): Promise<T>;
+  post<T>(
+    path: string,
+    body: unknown,
+    token?: string,
+    validate?: (json: any) => boolean
+  ): Promise<T>;
   openStream(
     since: number,
     onChangeSet: (changes: ChangeSet) => void,
@@ -45,22 +51,56 @@ export type TransportOptions = {
   streamIdleMs?: number;
 };
 
+const isObject = (value: unknown): value is Record<string, any> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isChangeSet = (json: any) =>
+  isObject(json) &&
+  typeof json.version === "number" &&
+  (json.puts === undefined || isObject(json.puts)) &&
+  (json.deletes === undefined || isObject(json.deletes));
+
+const isPushResponse = (json: any) =>
+  isObject(json) &&
+  typeof json.version === "number" &&
+  Array.isArray(json.results) &&
+  json.results.every(
+    (r: any) => isObject(r) && typeof r.id === "string" && typeof r.ok === "boolean"
+  );
+
+export const isAuthResponse = (json: any) =>
+  isObject(json) &&
+  typeof json.token === "string" &&
+  isObject(json.user) &&
+  typeof json.user.id === "string";
+
+// Tolerates a server that leaves out empty maps.
+const normalize = (json: any): ChangeSet => ({
+  ...json,
+  puts: json.puts ?? {},
+  deletes: json.deletes ?? {},
+});
+
 export function createTransport(options: TransportOptions): Transport {
   const { base } = options;
-  const requestTimeoutMs = options.requestTimeoutMs ?? 20_000;
+  const requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
   const streamIdleMs = options.streamIdleMs ?? 45_000;
   // Call through a wrapper so a swapped global fetch (and test stubs) work.
   const doFetch: typeof fetch = (input, init) => options.fetch(input, init);
 
+  // Anything that isn't a well-formed JSON answer to a successful request
+  // (a captive portal's HTML, a proxy's error page) counts as no connection.
   async function request<T>(
     method: string,
     path: string,
-    body?: unknown,
-    token?: string,
-    timeoutMs = requestTimeoutMs
+    { body, token, validate }: {
+      body?: unknown;
+      token?: string;
+      validate?: (json: any) => boolean;
+    } = {}
   ): Promise<T> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
     let res: Response;
     let json: any;
     try {
@@ -89,21 +129,29 @@ export function createTransport(options: TransportOptions): Transport {
         res.status
       );
     }
+    if (!isObject(json) || (validate && !validate(json))) {
+      throw new SyncError(UNREACHABLE_MESSAGE, "network", res.status);
+    }
     return json as T;
   }
 
   return {
     // Reads are public, so no token: a stale session can't block syncing.
-    pull: (since) =>
-      request("GET", `/sync/pull?since=${since}`, undefined, undefined, 60_000),
+    async pull(since) {
+      const json = await request("GET", `/sync/pull?since=${since}`, {
+        validate: isChangeSet,
+      });
+      return normalize(json);
+    },
     push: (actions, token) =>
-      request<PushResponse>(
-        "POST",
-        "/sync/push",
-        { actions } satisfies PushRequest,
-        token
-      ),
-    post: (path, body, token) => request("POST", path, body, token),
+      request<PushResponse>("POST", "/sync/push", {
+        body: { actions } satisfies PushRequest,
+        token,
+        validate: isPushResponse,
+      }),
+    get: (path, token) => request("GET", path, { token }),
+    post: (path, body, token, validate) =>
+      request("POST", path, { body, token, validate }),
     openStream(since, onChangeSet, onStatus) {
       const controller = new AbortController();
       let closed = false;
@@ -141,7 +189,11 @@ export function createTransport(options: TransportOptions): Transport {
         if (closed) return;
         watchdog();
         onStatus("open");
-        const parse = createSseParser((data) => onChangeSet(JSON.parse(data)));
+        const parse = createSseParser((data) => {
+          const json = JSON.parse(data);
+          if (!isChangeSet(json)) throw new SyncError("Bad event", "stream");
+          onChangeSet(normalize(json));
+        });
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         for (;;) {
