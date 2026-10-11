@@ -6,7 +6,7 @@ import { newId } from "../lib/dispatch";
 import { alpha, goldButton, t } from "../theme/tokens";
 import { useGuestGames } from "../guest/useGuestGame";
 import { claimPlayer, useMyPlayer } from "../players/account";
-import { passkeysSupported, sync, useAuth } from "../sync";
+import { passkeysSupported, sync, useAuth, usePreparedPasskeys } from "../sync";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
 import { AccountMovedBanner } from "./chrome/AccountMovedBanner";
 import { Shell } from "./chrome/Shell";
@@ -39,6 +39,10 @@ export const UserLogin = () => {
     return () => clearTimeout(tmr);
   }, [settling]);
 
+  // A guest with a player has games to keep; one made only so a passkey can be
+  // registered (see PasskeyEntry) has nothing, and sees the signed-out page.
+  const keeping = !!user?.isGuest && !!myPlayer;
+
   // Guests (joined by QR) see the email form so they can add an account.
   if (user && (!user.isGuest || playingAsGuest)) {
     if (isLoading || (settling && !myPlayer)) {
@@ -59,9 +63,9 @@ export const UserLogin = () => {
     <Shell>
       <AccountMovedBanner signedIn={false} />
       <LoginFrame
-        title={user?.isGuest ? "Keep your games" : "Welcome back"}
+        title={keeping ? "Keep your games" : "Welcome back"}
         subtitle={
-          user?.isGuest
+          keeping
             ? passkeysSupported()
               ? "Create a passkey to keep your player on any phone."
               : "Add an email to keep your player on any phone."
@@ -76,8 +80,8 @@ export const UserLogin = () => {
         ) : (
           <PasswordStep onSignedIn={() => setSettling(true)} />
         )}
-        {!user && <GuestEntry onStart={() => setPlayingAsGuest(true)} />}
-        {!user && localGames.length > 0 && (
+        {!keeping && <GuestEntry onStart={() => setPlayingAsGuest(true)} />}
+        {!keeping && localGames.length > 0 && (
           <div
             style={{
               marginTop: 14,
@@ -104,38 +108,37 @@ const showError = (e: Error) =>
 
 // Sign in with a passkey, or make an account with one. Dismissing the
 // browser's prompt just leaves things as they were.
+//
+// Safari only opens a passkey prompt close to the user's tap, so the prompts'
+// options are fetched before it (usePreparedPasskeys) and the tap handlers
+// below call straight into sync with nothing awaited first. Registering needs
+// a session to ask as, so a signed-out visitor gets a guest on arrival; the
+// passkey then upgrades that guest.
 const PasskeyEntry = ({ onSignedIn }: { onSignedIn: () => void }) => {
   const { user } = useAuth();
   const [busy, setBusy] = useState(false);
 
-  const signIn = async () => {
-    setBusy(true);
-    try {
-      if (await sync.logInWithPasskey()) onSignedIn();
-    } catch (e) {
-      showError(e as Error);
-    } finally {
-      setBusy(false);
-    }
-  };
+  usePreparedPasskeys(["login", "register"]);
+  useEffect(() => {
+    if (!user) sync.signInAsGuest().catch(() => {});
+  }, [user]);
 
-  // A passkey upgrades the signed-in guest, so there has to be one.
-  const create = async () => {
+  // Each attempt spends its options: get new ones ready.
+  const attempt = (run: Promise<unknown | null>) => {
     setBusy(true);
-    const madeGuest = !user;
-    let done = false;
-    try {
-      if (madeGuest) await sync.signInAsGuest();
-      done = !!(await sync.registerPasskey(deviceName()));
-      if (done) onSignedIn();
-    } catch (e) {
-      showError(e as Error);
-    } finally {
-      // Don't leave a stray guest behind if no account came of it.
-      if (madeGuest && !done) await sync.logOut().catch(() => {});
-      setBusy(false);
-    }
+    run
+      .then((done) => {
+        if (done) onSignedIn();
+      })
+      .catch(showError)
+      .finally(() => {
+        setBusy(false);
+        void sync.preparePasskey("login");
+        void sync.preparePasskey("register");
+      });
   };
+  const signIn = () => attempt(sync.logInWithPasskey());
+  const create = () => attempt(sync.registerPasskey(deviceName()));
 
   return (
     <div>
@@ -155,7 +158,7 @@ const PasskeyEntry = ({ onSignedIn }: { onSignedIn: () => void }) => {
       </button>
       <button
         onClick={create}
-        disabled={busy}
+        disabled={busy || !user}
         style={{
           width: "100%",
           marginTop: 8,
@@ -167,7 +170,7 @@ const PasskeyEntry = ({ onSignedIn }: { onSignedIn: () => void }) => {
           fontFamily: t.display,
           fontSize: 15,
           fontWeight: 600,
-          opacity: busy ? 0.6 : 1,
+          opacity: busy || !user ? 0.6 : 1,
         }}
       >
         Create an account with a passkey

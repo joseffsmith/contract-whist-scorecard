@@ -657,7 +657,9 @@ describe("passkeys", () => {
   it("does nothing, quietly, when the prompt is dismissed", async () => {
     const { api, prompts } = fakePasskeys();
     api.dismiss = true;
-    const client = await signedInClient({ deps: { passkeys: api } });
+    const client = await signedInClient({
+      deps: { passkeys: api, quickDismissMs: 0 },
+    });
     const guest = client.getAuth().user;
     expect(await client.registerPasskey()).toBeNull();
     expect(await client.logInWithPasskey()).toBeNull();
@@ -774,6 +776,176 @@ describe("passkeys", () => {
     // The passkey no longer signs in.
     const error = await client.logInWithPasskey().catch((e) => e);
     expect(error.code).toBe("unknown_passkey");
+  });
+
+  it("opens the prompt straight from the tap when the options are ready", async () => {
+    const { api, prompts } = fakePasskeys();
+    const client = await signedInClient({ deps: { passkeys: api } });
+    await client.registerPasskey();
+    await client.logOut();
+    await client.preparePasskey("login");
+    const requests = server.requests.length;
+    const tap = client.logInWithPasskey();
+    // Synchronously: no await, and no request, before the prompt.
+    expect(prompts.get).toBe(1);
+    expect(server.requests.length).toBe(requests);
+    expect(await tap).toMatchObject({ isGuest: false });
+    // The options were used up.
+    await client.logOut();
+    const again = client.logInWithPasskey();
+    expect(prompts.get).toBe(1);
+    await again;
+    expect(prompts.get).toBe(2);
+  });
+
+  it("prepares registration for the session it asked as, and not before there is one", async () => {
+    const { api, prompts } = fakePasskeys();
+    const client = newClient({ deps: { passkeys: api } });
+    await client.start();
+    await client.preparePasskey("register");
+    expect(server.requests.some((r) => r.path.includes("/register/"))).toBe(
+      false
+    );
+    await client.signInAsGuest();
+    await client.preparePasskey("register");
+    const options = () =>
+      server.requests.filter((r) => r.path.endsWith("/register/options"));
+    expect(options()).toHaveLength(1);
+    await client.preparePasskey("register"); // still fresh: no second request
+    expect(options()).toHaveLength(1);
+    const tap = client.registerPasskey();
+    expect(prompts.create).toBe(1);
+    await tap;
+    expect(options()).toHaveLength(1);
+  });
+
+  it("asks again when the prepared options are old", async () => {
+    const { api } = fakePasskeys();
+    let clock = Date.now();
+    const client = await signedInClient({
+      deps: { passkeys: api, now: () => clock },
+    });
+    await client.preparePasskey("register");
+    clock += 4 * 60 * 1000 + 1;
+    await client.registerPasskey();
+    expect(
+      server.requests.filter((r) => r.path.endsWith("/register/options"))
+    ).toHaveLength(2);
+  });
+
+  it("hands a guest over only after the prompt", async () => {
+    const { api } = fakePasskeys();
+    const first = await signedInClient({ deps: { passkeys: api } });
+    await first.registerPasskey();
+    await first.logOut();
+
+    let atPrompt = 0;
+    const spy = {
+      ...api,
+      get: async (o: never) => {
+        atPrompt = server.requests.length;
+        return api.get();
+      },
+    };
+    const client = await signedInClient({
+      storage: new IDBFactory(),
+      deps: { passkeys: spy },
+    });
+    server.blockPush = true; // so the queue is still waiting at the tap
+    await client.dispatch("createPlayer", { playerId: "p2", name: "Guest" });
+    await client.preparePasskey("login");
+    const requests = server.requests.length;
+    server.blockPush = false;
+    await client.logInWithPasskey();
+    const after = server.requests.slice(requests).map((r) => r.path);
+    expect(atPrompt).toBe(requests); // nothing slow before the prompt
+    expect(after.indexOf("/sync/push")).toBeGreaterThanOrEqual(0);
+    expect(after.indexOf("/sync/push")).toBeLessThan(
+      after.indexOf("/auth/passkey/login/verify")
+    );
+    expect(server.data.players.has("p2")).toBe(true);
+  });
+
+  it("says so when the browser refuses the prompt at once", async () => {
+    const { api } = fakePasskeys();
+    api.dismiss = true; // refused instantly: not a person's cancel
+    const client = await signedInClient({ deps: { passkeys: api } });
+    for (const attempt of [
+      () => client.registerPasskey(),
+      () => client.logInWithPasskey(),
+    ]) {
+      const error = await attempt().catch((e) => e);
+      expect([error.code, error.message]).toEqual([
+        "prompt_failed",
+        "Couldn't open the passkey prompt. Try again.",
+      ]);
+    }
+    // A cancel that took a while is the person's.
+    api.get = async () => {
+      await sleep(30);
+      throw Object.assign(new Error("x"), { name: "NotAllowedError" });
+    };
+    const slow = await signedInClient({
+      storage: new IDBFactory(),
+      deps: { passkeys: api, quickDismissMs: 10 },
+    });
+    expect(await slow.logInWithPasskey()).toBeNull();
+  });
+
+  it("adds an email and password to a passkey account", async () => {
+    const { api } = fakePasskeys();
+    const client = await signedInClient({ deps: { passkeys: api } });
+    await client.registerPasskey();
+    const user = await client.addEmail("ann@example.com", "secret123");
+    expect(user).toMatchObject({ email: "ann@example.com", hasPassword: true });
+    expect(client.getAuth().user).toEqual(user);
+    const sent = server.requests.find((r) => r.path === "/auth/email")!;
+    expect(sent.body).toEqual({
+      email: "ann@example.com",
+      password: "secret123",
+    });
+  });
+
+  it("signs out the other devices only", async () => {
+    server.addAccount("ann@example.com", "secret123");
+    const here = newClient();
+    await here.start();
+    await here.logIn("ann@example.com", "secret123");
+    const there = newClient({ storage: new IDBFactory() });
+    await there.start();
+    await there.logIn("ann@example.com", "secret123");
+    await here.signOutOthers();
+    await there.preparePasskey("login"); // anything that touches the server
+    await waitFor(() => there.getAuth().user !== null);
+    const sessionOf = (c: SyncClient) => c.getAuth().user?.id;
+    expect(sessionOf(here)).toBeTruthy();
+    const error = await there.listPasskeys().catch((e) => e);
+    expect(error.code).toBe("not_signed_in");
+  });
+
+  it("still drops the deleted user's queue if a 401 cleared the session first", async () => {
+    const { api } = fakePasskeys();
+    let client!: SyncClient;
+    // Once the server has deleted the account, a push gets a 401 and signs the
+    // client out before the delete's own answer reaches it.
+    const fetchWithRace = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ) => {
+      const res = await server.fetch(input, init);
+      if (init?.method === "DELETE") {
+        await client.dispatch("createPlayer", { playerId: "p9", name: "Late" });
+        await waitFor(() => client.getAuth().user === null);
+      }
+      return res;
+    }) as typeof fetch;
+    client = await signedInClient({
+      deps: { passkeys: api, fetch: fetchWithRace },
+    });
+    await client.registerPasskey();
+    await client.deleteAccount();
+    expect(client.getAuth().user).toBeNull();
+    expect(client.getPendingCount()).toBe(0);
   });
 });
 

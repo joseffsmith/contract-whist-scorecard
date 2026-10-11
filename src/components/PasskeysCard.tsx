@@ -2,7 +2,7 @@ import { enqueueSnackbar } from "notistack";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { deviceName } from "../lib/deviceName";
-import { sync, useAuth, passkeysSupported } from "../sync";
+import { passkeysSupported, sync, useAuth, usePreparedPasskeys } from "../sync";
 import type { PasskeyInfo } from "../sync";
 import { alpha, goldButton, t } from "../theme/tokens";
 import { Sheet } from "./chrome/Sheet";
@@ -30,20 +30,23 @@ const outlineButton = {
 } as const;
 
 // Adds a passkey for the signed-in user. A dismissed prompt does nothing.
-function useAddPasskey(onAdded?: () => void) {
+// The options are fetched ahead and the tap calls straight in with nothing
+// awaited first, because Safari only opens the prompt close to the tap.
+function useAddPasskey() {
   const [busy, setBusy] = useState(false);
-  const add = async () => {
+  usePreparedPasskeys(["register"]);
+  const add = () => {
     setBusy(true);
-    try {
-      if (await sync.registerPasskey(deviceName())) {
-        enqueueSnackbar("Passkey added", { variant: "success" });
-        onAdded?.();
-      }
-    } catch (e) {
-      showError(e as Error);
-    } finally {
-      setBusy(false);
-    }
+    sync
+      .registerPasskey(deviceName())
+      .then((user) => {
+        if (user) enqueueSnackbar("Passkey added", { variant: "success" });
+      })
+      .catch(showError)
+      .finally(() => {
+        setBusy(false);
+        void sync.preparePasskey("register");
+      });
   };
   return { busy, add };
 }
@@ -237,8 +240,9 @@ export const PasskeysCard = () => {
             Remove this passkey?
           </div>
           <div style={{ fontSize: 13, color: t.cream, opacity: 0.8 }}>
-            {removing.name || "This passkey"} will no longer sign you in. You
-            can also delete it from your phone's passwords.
+            {removing.name || "This passkey"} will no longer sign you in, and
+            anyone signed in with it is signed out (that may include this
+            device). You can also delete it from your phone's passwords.
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
             <button

@@ -66,6 +66,16 @@ export function createSync(db: Db, limiter: Limiter, opts: SyncOptions = {}) {
     let changedAt = 0;
     try {
       changedAt = db.transaction(() => {
+        // A deleted account writes nothing, even with a request in flight.
+        for (const step of steps) {
+          if (!("actor" in step)) continue;
+          const row = db
+            .stmt("SELECT deleted_at FROM users WHERE id = ?")
+            .get(step.actor.id) as { deleted_at: string | null } | undefined;
+          if (row?.deleted_at) {
+            throw new HttpError(401, "Please sign in again.", "not_signed_in");
+          }
+        }
         const earlier = db.appliedBy(id);
         if (earlier) {
           if (earlier.user_id === by) return 0;
@@ -101,6 +111,7 @@ export function createSync(db: Db, limiter: Limiter, opts: SyncOptions = {}) {
         return wrote ? next : 0;
       });
     } catch (e) {
+      if (e instanceof HttpError) throw e;
       if (e instanceof ActionError) {
         return { id, ok: false, error: e.message, code: e.code };
       }

@@ -54,7 +54,8 @@ export const DeleteAccountSheet = ({ onClose }: { onClose: () => void }) => {
         >
           This can't be undone. You'll be signed out everywhere and your
           passkeys and password stop working. Games and scores stay for the
-          people you played with, but your player is no longer yours.
+          people you played with, but your player is no longer yours, and games
+          you hosted can no longer be edited, except by the app admin.
           {pending > 0 &&
             ` You also have ${pending} change${pending === 1 ? "" : "s"} that ${
               pending === 1 ? "hasn't" : "haven't"

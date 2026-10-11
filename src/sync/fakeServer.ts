@@ -391,6 +391,24 @@ export function createFakeServer() {
         return user
           ? json(200, { ok: true })
           : fail(401, "Sign in to do that.", "not_signed_in");
+      case "/auth/email": {
+        if (!user) return fail(401, "Sign in to do that.", "not_signed_in");
+        if (user.isGuest) return fail(403, "Create an account first.", "guest");
+        const withEmail = {
+          ...user,
+          email: body.email as string,
+          hasPassword: true,
+        };
+        tokens.set(token!, withEmail);
+        accounts.push({ ...withEmail, password: body.password });
+        return json(200, { token: token!, user: withEmail });
+      }
+      case "/auth/sessions/revoke-others":
+        if (!user) return fail(401, "Sign in to do that.", "not_signed_in");
+        for (const [t, u] of [...tokens]) {
+          if (u.id === user.id && t !== token) tokens.delete(t);
+        }
+        return json(200, { ok: true });
       case "/auth/passkey/register/options":
         if (!user) return fail(401, "Sign in to do that.", "not_signed_in");
         return json(200, {

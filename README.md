@@ -46,7 +46,9 @@ serving the app under `/contract-whist/` (`/` redirects there) and proxying
    - `PASSKEY_RP_ID`: the domain passkeys are tied to (the "relying party
      ID"). Default: the host of `PUBLIC_URL`, i.e. `joseffsmith.uk`. A
      passkey made for `joseffsmith.uk` also works on its subdomains, but not
-     the other way round, and changing this later orphans every passkey.
+     the other way round, and changing this later orphans every passkey. It
+     must be a bare host name that every `PASSKEY_ORIGINS` host equals or sits
+     under, or the server won't start.
    - `PASSKEY_ORIGINS`: comma-separated list of the page origins allowed to
      make or use passkeys. Default: the origin of `PUBLIC_URL`. For the live
      site: `https://joseffsmith.uk,https://whist.joseffsmith.uk`. For local

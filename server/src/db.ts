@@ -133,6 +133,11 @@ const MIGRATIONS = [
   -- A deleted account stays as a tombstone, so its id can't be registered again.
   ALTER TABLE users ADD COLUMN deleted_at TEXT;
   `,
+  `
+  -- Sessions made by signing in with a passkey end when it is removed.
+  ALTER TABLE sessions ADD COLUMN passkey_id TEXT;
+  CREATE INDEX sessions_passkey_id ON sessions (passkey_id);
+  `,
 ];
 
 function migrate(sql: DatabaseSync): void {

@@ -1,4 +1,4 @@
-import { useMemo, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { sync } from "./client";
 import type { AuthState, ConnectionStatus, StorageHealth } from "./client";
 import type { DataState } from "../../shared/types";
@@ -43,4 +43,29 @@ export function useStorageHealth(): StorageHealth {
     sync.getStorageHealth,
     sync.getStorageHealth
   );
+}
+
+// Keeps passkey prompts ready for the tap while the component is on screen:
+// the options are fetched ahead (see SyncClient.preparePasskey), and again when
+// they get old, when the page becomes visible, or when a session appears.
+export function usePreparedPasskeys(kinds: ("login" | "register")[]): void {
+  const { user } = useAuth();
+  const key = kinds.join();
+  useEffect(() => {
+    const prepare = () => {
+      for (const kind of key.split(",") as typeof kinds) {
+        void sync.preparePasskey(kind);
+      }
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") prepare();
+    };
+    prepare();
+    const timer = setInterval(prepare, 60 * 1000);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [key, user?.id]);
 }

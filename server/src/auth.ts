@@ -201,11 +201,15 @@ export function createAuth(
       .get(sha256(token)) as UserRow | undefined;
   }
 
-  function createSession(userId: string): string {
+  // `passkeyId`: the passkey this session was made by signing in with.
+  function createSession(
+    userId: string,
+    passkeyId: string | null = null
+  ): string {
     const token = newToken();
     db.stmt(
-      "INSERT INTO sessions (token_hash, user_id, created_at) VALUES (?, ?, ?)"
-    ).run(sha256(token), userId, new Date().toISOString());
+      "INSERT INTO sessions (token_hash, user_id, created_at, passkey_id) VALUES (?, ?, ?, ?)"
+    ).run(sha256(token), userId, new Date().toISOString(), passkeyId);
     return token;
   }
 
@@ -364,9 +368,10 @@ export function createAuth(
   // sent along hands that guest's player and games over to the user.
   async function startSession(
     user: UserRow,
-    guestToken: unknown
+    guestToken: unknown,
+    passkeyId: string | null = null
   ): Promise<AuthResponse> {
-    const token = createSession(user.id);
+    const token = createSession(user.id, passkeyId);
     if (typeof guestToken === "string") await handoff(guestToken, user);
     return respond(user, token);
   }
@@ -560,9 +565,59 @@ export function createAuth(
       if (user.is_guest) {
         throw new HttpError(403, "Create an account first.", "guest");
       }
+      if (!user.email) {
+        throw new HttpError(400, "Add an email first.", "no_email");
+      }
       const password = validPassword((await readJson(req)).password);
       setPassword(user.id, await hashPassword(password));
       deleteSessions(user.id, bearerToken(req)); // sign out everywhere else
+      return { ok: true };
+    },
+
+    // A passkey-only account adds an email and password as a backup way in.
+    async addEmail(req: IncomingMessage, ip: string) {
+      const user = requireUser(req);
+      tooMany(`signup:${ip}`, 30);
+      if (user.is_guest) {
+        throw new HttpError(403, "Create an account first.", "guest");
+      }
+      if (user.email) {
+        throw new HttpError(409, "You already have an email.", "has_email");
+      }
+      const body = await readJson(req);
+      const email = normEmail(body.email);
+      if (!validEmail(email))
+        throw new HttpError(400, "Enter a valid email.", "invalid_email");
+      const password = validPassword(body.password);
+      const hasAccount = () =>
+        new HttpError(
+          409,
+          "That email already has an account. Log in instead.",
+          "has_account"
+        );
+      if (userByEmail(email)) throw hasAccount();
+      const hashed = await hashPassword(password);
+      try {
+        const set = db
+          .stmt(
+            "UPDATE users SET email = ?, password_salt = ?, password_hash = ? WHERE id = ? AND email IS NULL AND deleted_at IS NULL"
+          )
+          .run(email, hashed.salt, hashed.hash, user.id);
+        if (!set.changes)
+          throw new HttpError(401, "Please sign in again.", "not_signed_in");
+      } catch (e) {
+        // Lost a race with another signup for the same email.
+        if (String(e).includes("UNIQUE")) throw hasAccount();
+        throw e;
+      }
+      return respond(userById(user.id)!, bearerToken(req));
+    },
+
+    // Signs out every other device, keeping this one.
+    async revokeOthers(req: IncomingMessage, ip: string) {
+      const user = requireUser(req);
+      tooMany(`revoke:${ip}`, 10);
+      deleteSessions(user.id, bearerToken(req));
       return { ok: true };
     },
 
@@ -588,13 +643,14 @@ export function createAuth(
         })),
         authenticatorSelection: {
           residentKey: "required",
-          userVerification: "preferred",
+          userVerification: "required",
         },
       });
       const challengeId = challenges.put(
         "register",
         options.challenge,
-        user.id
+        user.id,
+        ip
       );
       return { challengeId, options };
     },
@@ -616,7 +672,7 @@ export function createAuth(
           expectedChallenge: challenge,
           expectedOrigin: opts.passkey.origins,
           expectedRPID: opts.passkey.rpID,
-          requireUserVerification: false, // "preferred" when it was asked for
+          requireUserVerification: true,
         });
       } catch {
         throw passkeyFailed(400);
@@ -631,6 +687,14 @@ export function createAuth(
         // Signed out, or deleted, while the browser was asking for the passkey.
         const current = liveUserById(user.id);
         if (!current) {
+          throw new HttpError(401, "Please sign in again.", "not_signed_in");
+        }
+        // The session this request came with may have ended meanwhile (a sign
+        // out, a password change, another tab upgrading this guest).
+        const session = db
+          .stmt("SELECT 1 FROM sessions WHERE token_hash = ? AND user_id = ?")
+          .get(sha256(bearerToken(req)), current.id);
+        if (!session) {
           throw new HttpError(401, "Please sign in again.", "not_signed_in");
         }
         if (passkeyById(credential.id)) throw exists();
@@ -648,7 +712,11 @@ export function createAuth(
           name || null,
           new Date().toISOString()
         );
-        if (!current.is_guest) return bearerToken(req);
+        // Upgraded by another request while this one was waiting: this session
+        // was a guest's, so give the account a new one.
+        if (!current.is_guest) {
+          return user.is_guest ? createSession(current.id) : bearerToken(req);
+        }
         db.stmt(
           "UPDATE users SET is_guest = 0 WHERE id = ? AND is_guest = 1"
         ).run(current.id);
@@ -664,10 +732,10 @@ export function createAuth(
       tooMany(`passkey-options:${ip}`, 60);
       const options = await generateAuthenticationOptions({
         rpID: opts.passkey.rpID,
-        userVerification: "preferred",
+        userVerification: "required",
       });
       return {
-        challengeId: challenges.put("login", options.challenge, null),
+        challengeId: challenges.put("login", options.challenge, null, ip),
         options,
       };
     },
@@ -699,7 +767,7 @@ export function createAuth(
           expectedChallenge: challenge,
           expectedOrigin: opts.passkey.origins,
           expectedRPID: opts.passkey.rpID,
-          requireUserVerification: false, // "preferred" when it was asked for
+          requireUserVerification: true,
           credential: {
             id: passkey.id,
             publicKey: new Uint8Array(passkey.public_key),
@@ -715,7 +783,7 @@ export function createAuth(
       // Deleted while the browser was checking it.
       const used = db
         .stmt(
-          "UPDATE passkeys SET counter = ?, backed_up = ?, last_used_at = ? WHERE id = ?"
+          "UPDATE passkeys SET counter = MAX(counter, ?), backed_up = ?, last_used_at = ? WHERE id = ?"
         )
         .run(
           newCounter,
@@ -725,7 +793,7 @@ export function createAuth(
         );
       const current = liveUserById(user.id);
       if (!used.changes || !current) throw unknownPasskey();
-      return startSession(current, body.guestToken);
+      return startSession(current, body.guestToken, passkey.id);
     },
 
     // The signed-in account's passkeys (never their keys).
@@ -758,7 +826,11 @@ export function createAuth(
           "last_sign_in"
         );
       }
-      db.stmt("DELETE FROM passkeys WHERE id = ?").run(id);
+      db.transaction(() => {
+        // Whoever signed in with it is signed out.
+        db.stmt("DELETE FROM sessions WHERE passkey_id = ?").run(id);
+        db.stmt("DELETE FROM passkeys WHERE id = ?").run(id);
+      });
       return { ok: true };
     },
 
@@ -853,6 +925,7 @@ export function createAuth(
         "UPDATE reset_tokens SET used_at = ? WHERE user_id = ? AND used_at IS NULL"
       ).run(new Date().toISOString(), found.user_id);
       deleteSessions(found.user_id);
+      db.stmt("DELETE FROM passkeys WHERE user_id = ?").run(found.user_id);
       setPassword(found.user_id, hashed);
       return respond(userById(found.user_id)!, createSession(found.user_id));
     },

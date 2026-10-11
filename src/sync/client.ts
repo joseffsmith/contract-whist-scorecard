@@ -80,6 +80,9 @@ export type SyncDeps = {
   healthyMs: number;
   // Give up on opening storage after this long and use memory.
   storageTimeoutMs: number;
+  // A passkey prompt refused sooner than this after it was asked for wasn't
+  // dismissed by the person.
+  quickDismissMs: number;
   requestTimeoutMs?: number;
   streamIdleMs?: number;
 };
@@ -109,6 +112,14 @@ export type SyncClient = {
   // Make a passkey for the signed-in user; a guest becomes an account. Null
   // when the person dismisses the prompt.
   registerPasskey(name?: string): Promise<PublicUser | null>;
+  // Fetches the options for a passkey prompt ahead of the tap (and loads the
+  // browser side), so the tap can open the prompt at once. Call it when the
+  // buttons appear, and again when it has been used or after a few minutes.
+  preparePasskey(kind: "login" | "register"): Promise<void>;
+  // Gives a passkey-only account an email and password as a backup way in.
+  addEmail(email: string, password: string): Promise<PublicUser>;
+  // Signs out every other device.
+  signOutOthers(): Promise<void>;
   // Sign in with any passkey on this device (a guest's player moves over, as
   // with logIn). Null when the person dismisses the prompt.
   logInWithPasskey(): Promise<PublicUser | null>;
@@ -181,6 +192,7 @@ function defaultDeps(): SyncDeps {
     streamGraceMs: 500,
     healthyMs: 5000,
     storageTimeoutMs: 5000,
+    quickDismissMs: 300,
   };
 }
 
@@ -1069,33 +1081,97 @@ export function createSyncClient(
     );
   }
 
-  // Shows the browser's passkey prompt. Null when it is dismissed.
-  async function prompt<T>(ask: () => Promise<T>): Promise<T | null> {
-    try {
-      return await ask();
-    } catch (error) {
-      if (isCancelled(error)) return null;
-      throw passkeyError(error);
-    }
-  }
-
   // What the server sends before a passkey prompt.
-  type Ceremony<T> = { challengeId: string; options: T };
+  type Ceremony = { challengeId: string; options: any };
+  type Prepared = Ceremony & { at: number; token: string | null };
   const isCeremony = (json: any) =>
     typeof json.challengeId === "string" &&
     typeof json.options === "object" &&
     json.options !== null;
+  const PASSKEY_PATH = {
+    login: "/auth/passkey/login/options",
+    register: "/auth/passkey/register/options",
+  };
+  // The server keeps a challenge for 5 minutes.
+  const PREPARED_MS = 4 * 60 * 1000;
 
+  // Options fetched ahead of the tap, one per kind. Safari opens a passkey
+  // prompt only close to the user's tap, so nothing slow may sit between them.
+  const prepared: Partial<Record<"login" | "register", Prepared>> = {};
+  const preparing: Partial<Record<"login" | "register", Promise<void>>> = {};
+  const usable = (p: Prepared | undefined, token: string | null) =>
+    !!p && p.token === token && deps.now() - p.at < PREPARED_MS;
+
+  async function fetchCeremony(
+    kind: "login" | "register",
+    token: string | null
+  ): Promise<Prepared> {
+    const got = await authRequest<Ceremony>(
+      PASSKEY_PATH[kind],
+      {},
+      token ?? undefined,
+      isCeremony
+    );
+    return { ...got, at: deps.now(), token };
+  }
+
+  function preparePasskey(kind: "login" | "register"): Promise<void> {
+    return (preparing[kind] ??= (async () => {
+      try {
+        await begin();
+        await deps.passkeys.preload?.();
+        // Registering needs a real session to ask for options as.
+        const token = kind === "register" ? session?.token ?? null : null;
+        if (kind === "register" && !token) return;
+        if (usable(prepared[kind], token) || !deps.network.isOnline()) return;
+        prepared[kind] = await fetchCeremony(kind, token);
+      } catch {
+        // The tap asks again, and reports what went wrong.
+      } finally {
+        delete preparing[kind];
+      }
+    })());
+  }
+
+  // Shows the browser's passkey prompt. Null when the person dismisses it. A
+  // refusal that comes straight back wasn't the person: the browser couldn't
+  // open the prompt (Safari does that when it isn't close enough to a tap).
+  async function prompt<T>(ask: () => Promise<T>): Promise<T | null> {
+    const asked = deps.now();
+    try {
+      return await ask();
+    } catch (error) {
+      if (!isCancelled(error)) throw passkeyError(error);
+      if (deps.now() - asked < deps.quickDismissMs) {
+        throw new SyncError(
+          "Couldn't open the passkey prompt. Try again.",
+          "prompt_failed"
+        );
+      }
+      return null;
+    }
+  }
+
+  // The first thing a tap does is open the prompt: with options ready this
+  // has no await before it.
   async function logInWithPasskey() {
+    const taken = prepared.login;
+    delete prepared.login;
+    let ready = usable(taken, null) ? taken! : undefined;
+    if (!ready) {
+      await begin();
+      if (!deps.network.isOnline())
+        throw new SyncError(OFFLINE_MESSAGE, "offline");
+      ready = await fetchCeremony("login", null);
+    }
+    const { challengeId, options } = ready;
+    const response = await prompt(() => deps.passkeys.get(options));
+    if (!response) return null;
+    // Only now the slow part: a guest's work goes up before it is handed over.
     await ensureReal();
     if (!deps.network.isOnline())
       throw new SyncError(OFFLINE_MESSAGE, "offline");
     const guest = await guestToHandOver();
-    const { challengeId, options } = await authRequest<
-      Ceremony<Parameters<PasskeyApi["get"]>[0]>
-    >("/auth/passkey/login/options", {}, undefined, isCeremony);
-    const response = await prompt(() => deps.passkeys.get(options));
-    if (!response) return null;
     return adopt(
       await authRequest("/auth/passkey/login/verify", {
         challengeId,
@@ -1106,23 +1182,29 @@ export function createSyncClient(
   }
 
   async function registerPasskey(name?: string) {
-    await ensureReal();
-    const asked = session;
-    if (!asked?.token) throw new SyncError("Sign in first.", "not_signed_in");
-    const { challengeId, options } = await authRequest<
-      Ceremony<Parameters<PasskeyApi["create"]>[0]>
-    >("/auth/passkey/register/options", {}, asked.token, isCeremony);
+    let asked = session;
+    const taken = prepared.register;
+    delete prepared.register;
+    let ready = usable(taken, asked?.token ?? null) ? taken : undefined;
+    if (!ready) {
+      await ensureReal();
+      asked = session;
+      if (!asked?.token) throw new SyncError("Sign in first.", "not_signed_in");
+      ready = await fetchCeremony("register", asked.token);
+    }
+    const token = asked!.token!;
+    const { challengeId, options } = ready;
     const response = await prompt(() => deps.passkeys.create(options));
     if (!response) return null;
     // The prompt can stay open a long time.
-    if (session?.token !== asked.token) {
+    if (session?.token !== token) {
       throw new SyncError("You signed out. Try again.", "not_signed_in");
     }
     return adopt(
       await authRequest(
         "/auth/passkey/register/verify",
         { challengeId, response, name },
-        asked.token
+        token
       )
     );
   }
@@ -1205,6 +1287,26 @@ export function createSyncClient(
     },
     registerPasskey,
     logInWithPasskey,
+    preparePasskey,
+    async addEmail(email, password) {
+      await begin();
+      if (!session?.token)
+        throw new SyncError("Sign in first.", "not_signed_in");
+      return adopt(
+        await authRequest("/auth/email", { email, password }, session.token)
+      );
+    },
+    async signOutOthers() {
+      await begin();
+      if (!session?.token)
+        throw new SyncError("Sign in first.", "not_signed_in");
+      await authRequest(
+        "/auth/sessions/revoke-others",
+        {},
+        session.token,
+        null
+      );
+    },
     async listPasskeys() {
       await begin();
       if (!session?.token)
@@ -1233,12 +1335,13 @@ export function createSyncClient(
       if (!deps.network.isOnline())
         throw new SyncError(OFFLINE_MESSAGE, "offline");
       await transport.delete("/auth/me", asked.token, { confirm: "DELETE" });
-      if (session?.token !== asked.token) return;
-      dropPending(() => true, {
+      // A push that was in flight may have got a 401 and cleared the session
+      // already; the deleted user's queue goes either way.
+      dropPending((entry) => entry.userId === asked.user.id, {
         code: "signed_out",
         error: "You deleted your account before this change was saved.",
       });
-      setSession(null);
+      if (session?.token === asked.token) setSession(null);
     },
     async setPassword(password) {
       await begin();

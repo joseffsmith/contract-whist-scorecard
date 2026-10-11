@@ -13,6 +13,7 @@ export {
   useAuth,
   useConnectionStatus,
   usePendingCount,
+  usePreparedPasskeys,
   useStorageHealth,
   useSyncView,
 } from "./react";

@@ -116,21 +116,33 @@ every rebase. Ops must not depend on row iteration order (sort ids).
   `GET /auth/me` → `{ user }`. `PublicUser.isAdmin` is set for admins.
   `PublicUser.hasPassword` is true when the account can log in with email and
   password (it has both); `passkeyCount` is how many passkeys it has.
-- `POST /auth/password {password}` (signed-in, non-guest) → set/change.
+- `POST /auth/password {password}` (signed-in, non-guest, with an email) →
+  set/change; an account without an email gets 400 `no_email`.
+- `POST /auth/email {email, password}` (signed-in, non-guest, **no email
+  yet**, i.e. a passkey-only account) → `AuthResponse` (same session). Sets
+  both as a backup sign-in. Same validation as signup; 409 `has_account` for
+  a taken email, 409 `has_email` if it already has one; rate limited with
+  signup.
+- `POST /auth/sessions/revoke-others` (signed in) → `{ ok }`: deletes every
+  session of the user except the one making the request.
 - **Passkeys** (WebAuthn, `@simplewebauthn/server`). Table `passkeys(id =
   credential id base64url, user_id, public_key, counter, transports,
   device_type, backed_up, name, created_at, last_used_at)`. Credentials are
-  discoverable (`residentKey: "required"`, `userVerification: "preferred"`,
-  verified without requiring UV), so signing in needs no username. RP name
-  "Whist". Config: `PASSKEY_RP_ID` (default: host of `PUBLIC_URL`) and
-  `PASSKEY_ORIGINS` (comma list; default: origin of `PUBLIC_URL`); the
-  browser's reported origin and RP ID must match. The authenticator's user
+  discoverable (`residentKey: "required"`) and need user verification
+  (`userVerification: "required"`, enforced when verifying), so signing in
+  needs no username. RP name "Whist". Config: `PASSKEY_RP_ID` (default: host
+  of `PUBLIC_URL`) and `PASSKEY_ORIGINS` (comma list; default: origin of
+  `PUBLIC_URL`); the browser's reported origin and RP ID must match. At
+  startup the RP ID must be a bare host name that every origin's host equals
+  or is a subdomain of, else the server refuses to start. The authenticator's user
   handle is a random 32-byte `users.webauthn_user_id`, made on first use
   (never the user id), and checked on sign-in. A user has at most 20 passkeys.
   - Challenges are kept in memory (single process): random id → challenge,
     single-use (spent even by a failed attempt), 5-minute expiry, bound to the
-    kind of ceremony and, for registration, to the user; the oldest go first
-    beyond 5000. Every `…/options` answer is `{ challengeId, options }` and the
+    kind of ceremony and, for registration, to the user. Limits: 2000
+    outstanding registration challenges, 5000 sign-in ones (separate, so
+    one kind can't flood out the other), and 20 per client IP (both kinds);
+    past a limit the oldest of that kind or IP go first. Every `…/options` answer is `{ challengeId, options }` and the
     client sends `challengeId` back with the browser's response. A missing,
     spent or expired id → 400 `challenge_expired`.
   - `POST /auth/passkey/register/options` (signed in, guest or account) →
@@ -141,8 +153,12 @@ every rebase. Ops must not depend on row iteration order (sort ids).
     `AuthResponse`. A guest is upgraded in place exactly as signup does it
     (`is_guest = 0`, id kept so claims stay, email stays null, no password,
     guest token retired and a new session returned); an account keeps its
-    session. A credential id that already exists (anyone's) → 409
-    `passkey_exists`. Bad attestation → 400 `passkey_failed`.
+    session. The request's own session must still exist when the passkey is
+    stored (checked in the same transaction), else 401 `not_signed_in`: a
+    sign-out, a password change or another tab upgrading the same guest in
+    the meantime wins (that second tab is told to sign in again, never handed
+    the retired guest token). A credential id that already exists (anyone's) →
+    409 `passkey_exists`. Bad attestation → 400 `passkey_failed`.
   - `POST /auth/passkey/login/options` (no session; empty `allowCredentials`)
     and `POST /auth/passkey/login/verify {challengeId, response, guestToken?}`
     → `AuthResponse`. The credential is looked up by id, verified (signature,
@@ -151,6 +167,9 @@ every rebase. Ops must not depend on row iteration order (sort ids).
     login (same code). Unknown credential or deleted user → 401
     `unknown_passkey` "That passkey isn't recognised."; failed verification
     (including a counter that went backwards) → 401 `passkey_failed`.
+  - Sessions made by passkey login record `sessions.passkey_id`; removing
+    that passkey deletes them. An admin password reset also deletes the
+    account's passkeys, like it deletes its sessions.
   - `GET /auth/passkeys` → `{ passkeys: [{ id, name, createdAt, lastUsedAt,
     deviceType, backedUp }] }` (never the key). `DELETE /auth/passkeys/:id`
     removes one of the caller's; 409 `last_sign_in` if the account would be
@@ -227,7 +246,18 @@ every rebase. Ops must not depend on row iteration order (sort ids).
   token, like `logIn`), `listPasskeys()`, `deletePasskey(id)` and
   `deleteAccount()` (signs out locally and drops unsent changes). The first
   two resolve `null` when the person dismisses the browser prompt
-  (`NotAllowedError`/`AbortError`): the UI treats that as a quiet no-op. They
+  (`NotAllowedError`/`AbortError`): the UI treats that as a quiet no-op,
+  unless the refusal came back within `quickDismissMs` (300) of opening it,
+  which is the browser refusing, not the person (Safari does this when the
+  call isn't close enough to the tap): that is a `prompt_failed` error. To
+  keep the call close to the tap, `preparePasskey("login" | "register")`
+  fetches the options (and loads the browser library) beforehand, and the
+  tap uses them with no network wait before the prompt; the guest push and
+  handoff, and `ensureReal`, come after it. `usePreparedPasskeys` refreshes
+  them when older than 4 minutes, on `visibilitychange` and when a session
+  appears. The login page makes a guest on arrival (when signed out) so
+  registration options can be prepared. `addEmail(email, password)` and
+  `signOutOthers()` call the two routes above. They
   go through `SyncDeps.passkeys` (`@simplewebauthn/browser`, loaded on first
   use) so tests can stub the prompt. The UI only offers passkeys when
   `window.PublicKeyCredential` exists (`passkeysSupported()`).

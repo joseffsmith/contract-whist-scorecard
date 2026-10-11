@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -73,6 +74,42 @@ function makeApi(server: Running, dir: string) {
     ) => call("POST", route, body, token, headers),
     delete: (route: string, body?: unknown, token?: string) =>
       call("DELETE", route, body, token),
+    // A request held half-sent, so something else can happen while the server
+    // waits for its body. `finish()` sends the rest and returns the answer.
+    slow(method: string, route: string, body: unknown, token: string) {
+      const data = Buffer.from(JSON.stringify(body));
+      let resolve!: (v: { status: number; body: any }) => void;
+      const done = new Promise<{ status: number; body: any }>(
+        (r) => (resolve = r)
+      );
+      const req = http.request(
+        {
+          host: "127.0.0.1",
+          port: Number(new URL(url).port),
+          method,
+          path: route,
+          headers: {
+            "content-type": "application/json",
+            "content-length": data.length,
+            authorization: `Bearer ${token}`,
+          },
+        },
+        (res) => {
+          let text = "";
+          res.on("data", (c) => (text += c));
+          res.on("end", () =>
+            resolve({ status: res.statusCode!, body: JSON.parse(text) })
+          );
+        }
+      );
+      req.write(data.subarray(0, 1));
+      return {
+        finish: () => {
+          req.end(data.subarray(1));
+          return done;
+        },
+      };
+    },
     async guest(): Promise<AuthResponse> {
       return (await call("POST", "/auth/guest", {})).body;
     },

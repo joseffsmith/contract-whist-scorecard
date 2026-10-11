@@ -9,6 +9,8 @@ import { SyncError } from "./transport";
 // The browser's passkey prompts (Face ID, fingerprint, ...), behind a small
 // interface so tests can stand in for them.
 export type PasskeyApi = {
+  // Loads the browser side ahead of time, so opening a prompt needs no wait.
+  preload?(): Promise<unknown>;
   create(
     options: PublicKeyCredentialCreationOptionsJSON
   ): Promise<RegistrationResponseJSON>;
@@ -17,16 +19,24 @@ export type PasskeyApi = {
   ): Promise<AuthenticationResponseJSON>;
 };
 
-// Loaded when first used, so it isn't part of the main bundle.
+// Loaded on demand, so it isn't part of the main bundle. Once loaded, the
+// prompts open straight from the tap with nothing to wait for: Safari only
+// opens one close to the user's tap, and treats a late call as a refusal.
+let library: Promise<typeof import("@simplewebauthn/browser")> | undefined;
+let loaded: typeof import("@simplewebauthn/browser") | undefined;
+const load = () =>
+  (library ??= import("@simplewebauthn/browser").then((m) => (loaded = m)));
+
 export const browserPasskeys: PasskeyApi = {
-  async create(optionsJSON) {
-    const { startRegistration } = await import("@simplewebauthn/browser");
-    return startRegistration({ optionsJSON });
-  },
-  async get(optionsJSON) {
-    const { startAuthentication } = await import("@simplewebauthn/browser");
-    return startAuthentication({ optionsJSON });
-  },
+  preload: load,
+  create: (optionsJSON) =>
+    loaded
+      ? loaded.startRegistration({ optionsJSON })
+      : load().then((m) => m.startRegistration({ optionsJSON })),
+  get: (optionsJSON) =>
+    loaded
+      ? loaded.startAuthentication({ optionsJSON })
+      : load().then((m) => m.startAuthentication({ optionsJSON })),
 };
 
 export const passkeysSupported = () =>

@@ -16,6 +16,8 @@ import { Sheet } from "./chrome/Sheet";
 import { ThemePicker } from "./chrome/ThemeToggle";
 import { AccountMovedBanner } from "./chrome/AccountMovedBanner";
 import { AlsoYou } from "./AlsoYou";
+import { enqueueSnackbar } from "notistack";
+import { AddEmailSheet } from "./AddEmailSheet";
 import { DeleteAccountSheet } from "./DeleteAccountSheet";
 import { GuestPasskeyPrompt, PasskeysCard } from "./PasskeysCard";
 import { SetPasswordSheet } from "./SetPasswordSheet";
@@ -27,6 +29,7 @@ export const UserManager = () => {
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [emailOpen, setEmailOpen] = useState(false);
   const pending = usePendingCount();
 
   const { player: linkedPlayer, isLoading: isLoadingPlayer } = useMyPlayer();
@@ -224,6 +227,32 @@ export const UserManager = () => {
             label={user.hasPassword ? "Change password" : "Set a password"}
             sub="Used to log in on other phones"
             onClick={() => setPasswordOpen(true)}
+          />
+        )}
+        {!user.isGuest && !user.email && (
+          <Row
+            label="Add email and password (backup sign-in)"
+            sub="In case you lose your passkey"
+            onClick={() => setEmailOpen(true)}
+          />
+        )}
+        {emailOpen && <AddEmailSheet onClose={() => setEmailOpen(false)} />}
+        {!user.isGuest && (
+          <Row
+            label="Sign out other devices"
+            sub="Ends every other session on your account"
+            onClick={() =>
+              sync
+                .signOutOthers()
+                .then(() =>
+                  enqueueSnackbar("Signed out on your other devices", {
+                    variant: "success",
+                  })
+                )
+                .catch((e: Error) =>
+                  enqueueSnackbar(e.message, { variant: "error" })
+                )
+            }
           />
         )}
         {passwordOpen && (

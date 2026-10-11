@@ -46,6 +46,30 @@ const sameSecret = (a: string, b: string) =>
     createHash("sha256").update(b).digest()
   );
 
+// The RP ID must be a bare host name that every origin's host is, or is a
+// subdomain of; otherwise browsers refuse every passkey.
+function checkPasskeyConfig({
+  rpID,
+  origins,
+}: {
+  rpID: string;
+  origins: string[];
+}) {
+  if (!/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/i.test(rpID)) {
+    throw new Error(
+      `PASSKEY_RP_ID must be a bare host name like example.com (got "${rpID}").`
+    );
+  }
+  for (const origin of origins) {
+    const host = new URL(origin).hostname;
+    if (host !== rpID && !host.endsWith(`.${rpID}`)) {
+      throw new Error(
+        `PASSKEY_ORIGINS has ${origin}, whose host isn't ${rpID} or one of its subdomains, so its passkeys would never work.`
+      );
+    }
+  }
+}
+
 export async function startServer(opts: ServerOptions) {
   const db = openDb(opts.dataDir);
   const limiter = createLimiter();
@@ -60,15 +84,15 @@ export async function startServer(opts: ServerOptions) {
       "PUBLIC_URL must be a full URL, like https://example.com/contract-whist."
     );
   }
+  const passkey = {
+    rpID: opts.passkeyRpId || site.hostname,
+    origins: opts.passkeyOrigins?.length ? opts.passkeyOrigins : [site.origin],
+  };
+  checkPasskeyConfig(passkey);
   const auth = createAuth(db, sync, limiter, {
     adminBootstrapToken: opts.adminBootstrapToken || undefined,
     publicUrl,
-    passkey: {
-      rpID: opts.passkeyRpId || site.hostname,
-      origins: opts.passkeyOrigins?.length
-        ? opts.passkeyOrigins
-        : [site.origin],
-    },
+    passkey,
     now: opts.now,
   });
 
@@ -117,6 +141,8 @@ export async function startServer(opts: ServerOptions) {
     "GET /auth/me": (c) => auth.me(c.req),
     "DELETE /auth/me": (c) => auth.deleteAccount(c.req, c.ip),
     "POST /auth/password": (c) => auth.password(c.req, c.ip),
+    "POST /auth/email": (c) => auth.addEmail(c.req, c.ip),
+    "POST /auth/sessions/revoke-others": (c) => auth.revokeOthers(c.req, c.ip),
     "POST /auth/passkey/register/options": (c) =>
       auth.passkeyRegisterOptions(c.req, c.ip),
     "POST /auth/passkey/register/verify": (c) =>
@@ -137,8 +163,10 @@ export async function startServer(opts: ServerOptions) {
       return STREAMED;
     },
     "POST /sync/push": async (c) => {
-      const user = auth.requireUser(c.req);
+      auth.requireUser(c.req); // before reading a big body
       const body = await readJson(c.req, PUSH_MAX_BYTES);
+      // The session may have ended while the body arrived.
+      const user = auth.requireUser(c.req);
       return sync.push(
         {
           id: user.id,
