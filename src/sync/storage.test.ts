@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { IDBFactory } from "fake-indexeddb";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ChangeSet } from "../../shared/types";
 import { createMemoryStorage, openStorage } from "./storage";
 import type { PendingEntry, SyncStorage } from "./storage";
@@ -114,6 +114,7 @@ describe("openStorage", () => {
   });
 
   it("falls back to memory when IndexedDB is missing or broken", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     expect((await openStorage(null)).persistent).toBe(false);
     const broken = {
       open() {
