@@ -1,17 +1,11 @@
 import { enqueueSnackbar } from "notistack";
 import { useEffect, useState } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
-import {
-  createGame as createGuestGame,
-  listGames as listGuestGames,
-} from "../guest/guestStore";
-import { useGuestGames } from "../guest/useGuestGame";
 import { newId } from "../lib/dispatch";
 import { alpha, goldButton, t } from "../theme/tokens";
 import { claimPlayer, useMyPlayer } from "../players/account";
 import { sync, useAuth } from "../sync";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
-import { GuestMigrationDialog } from "./GuestMigrationDialog";
 import { AccountMovedBanner } from "./chrome/AccountMovedBanner";
 import { Shell } from "./chrome/Shell";
 
@@ -28,9 +22,11 @@ const HANDOFF_GRACE_MS = 1500;
 
 export const UserLogin = () => {
   const { user } = useAuth();
-  const guestGames = useGuestGames();
   const next = useNext();
   const [settling, setSettling] = useState(false);
+  // Set once "Play as guest" has been tapped: the guest then picks who they
+  // are and goes on, instead of seeing the "add an email" form.
+  const [playingAsGuest, setPlayingAsGuest] = useState(false);
 
   const { player: myPlayer, isLoading } = useMyPlayer();
 
@@ -41,7 +37,7 @@ export const UserLogin = () => {
   }, [settling]);
 
   // Guests (joined by QR) see the email form so they can add an account.
-  if (user && !user.isGuest) {
+  if (user && (!user.isGuest || playingAsGuest)) {
     if (isLoading || (settling && !myPlayer)) {
       return (
         <Shell>
@@ -52,18 +48,7 @@ export const UserLogin = () => {
     if (!myPlayer) {
       return <LinkPlayerToMe />;
     }
-    if (guestGames.length > 0) {
-      return (
-        <GuestMigrationDialog
-          userId={user.id}
-          games={guestGames}
-          onDone={() => {
-            /* subscribe will re-render with empty list → falls through to RedirectHome */
-          }}
-        />
-      );
-    }
-    // signed in + linked + no guest games — redirect out of /login
+    // signed in + linked — redirect out of /login
     return <Navigate to={next} replace />;
   }
 
@@ -79,47 +64,25 @@ export const UserLogin = () => {
         }
       >
         <PasswordStep onSignedIn={() => setSettling(true)} />
-        <GuestEntry />
+        {!user && <GuestEntry onStart={() => setPlayingAsGuest(true)} />}
       </LoginFrame>
     </Shell>
   );
 };
 
-const GuestEntry = () => {
-  const nav = useNavigate();
-  // Resume the most recent unfinished game, if any — otherwise start fresh.
-  const resume = () => {
-    const games = listGuestGames().filter((g) => !g.deletedAt);
-    const active = games.find((g) => {
-      if (g.players.length < 2) return true; // still in setup
-      return g.rounds.some(
-        (r) =>
-          r.turns.length !== g.players.length ||
-          r.turns.some((t) => t.score === null)
-      );
-    });
-    if (active) {
-      const inSetup =
-        active.players.length < 2 || active.initialDealerId === null;
-      nav(
-        inSetup
-          ? `/games/guest/${active.id}/manage`
-          : `/games/guest/${active.id}`
-      );
-      return;
+const GuestEntry = ({ onStart }: { onStart: () => void }) => {
+  const [busy, setBusy] = useState(false);
+  // A guest is a real (anonymous) account, so their games sync like anyone's.
+  const start = async () => {
+    setBusy(true);
+    try {
+      await sync.signInAsGuest();
+      onStart();
+    } catch (e) {
+      enqueueSnackbar((e as Error).message, { variant: "error" });
+      setBusy(false);
     }
-    const g = createGuestGame();
-    nav(`/games/guest/${g.id}/manage`);
   };
-  const games = listGuestGames().filter((g) => !g.deletedAt);
-  const hasActive = games.some((g) => {
-    if (g.players.length < 2) return true;
-    return g.rounds.some(
-      (r) =>
-        r.turns.length !== g.players.length ||
-        r.turns.some((t) => t.score === null)
-    );
-  });
   return (
     <div style={{ marginTop: 18, textAlign: "center" }}>
       <div
@@ -140,7 +103,8 @@ const GuestEntry = () => {
         <div style={{ flex: 1, height: 1, background: alpha(t.gold, 0.13) }} />
       </div>
       <button
-        onClick={resume}
+        onClick={start}
+        disabled={busy}
         style={{
           width: "100%",
           padding: "14px 0",
@@ -151,9 +115,10 @@ const GuestEntry = () => {
           fontFamily: t.display,
           fontSize: 15,
           fontWeight: 600,
+          opacity: busy ? 0.6 : 1,
         }}
       >
-        {hasActive ? "Resume guest game" : "Play as guest"}
+        Play as guest
       </button>
       <div
         style={{
@@ -163,7 +128,7 @@ const GuestEntry = () => {
           marginTop: 8,
         }}
       >
-        No account — saved on this device only
+        No account needed — games still sync
       </div>
     </div>
   );

@@ -23,8 +23,7 @@ export const useGuestGames = (): GuestGame[] => {
     listGames().filter((g) => !g.deletedAt)
   );
   useEffect(() => {
-    const refresh = () =>
-      setGames(listGames().filter((g) => !g.deletedAt));
+    const refresh = () => setGames(listGames().filter((g) => !g.deletedAt));
     return subscribe(refresh);
   }, []);
   return games;

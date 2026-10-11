@@ -4,6 +4,7 @@ import { selectHomeGames, useAuth, useSyncView } from "../sync";
 import { alpha, goldButton, suitColor, t } from "../theme/tokens";
 import { summarizeGame } from "../utils/gameStatus";
 import { AccountMovedBanner } from "./chrome/AccountMovedBanner";
+import { LocalGamesBanner } from "./chrome/LocalGamesBanner";
 
 export const Home = () => {
   const nav = useNavigate();
@@ -29,6 +30,7 @@ export const Home = () => {
   return (
     <>
       <AccountMovedBanner signedIn={!!user && !user.isGuest} />
+      <LocalGamesBanner />
       <div style={{ flex: 1, overflow: "auto", padding: "14px 16px 16px" }}>
         {myActive ? (
           <ContinueCard gameId={myActive.id} game={myActive} />

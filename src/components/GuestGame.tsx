@@ -1,14 +1,8 @@
 import { Fragment, useEffect, useState } from "react";
 import Confetti from "react-confetti";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { DEALS } from "../constants";
-import {
-  clearScore,
-  createGame,
-  deleteTurn,
-  setBid,
-  setScore,
-} from "../guest/guestStore";
+import { clearScore, deleteTurn, setBid, setScore } from "../guest/guestStore";
 import { useGuestGame } from "../guest/useGuestGame";
 import {
   alpha,
@@ -24,6 +18,7 @@ import { getBidOptions } from "../utils/getBidOptions";
 import { getCurrentPlayerIdFromRound } from "../utils/getCurrentPlayerIdFromRound";
 import { getDealerIdx } from "../utils/getDealerIdx";
 import { Crumb } from "./chrome/Crumb";
+import { LocalGamesBanner } from "./chrome/LocalGamesBanner";
 
 // Width of the round label column in the scorecard grid.
 const ROUND_COL = "clamp(40px, 11vw, 52px)";
@@ -32,6 +27,8 @@ export const GuestGameComp = () => {
   const { gameId } = useParams<{ gameId: string }>();
   const navigate = useNavigate();
   const game = useGuestGame(gameId);
+  // New games are always normal synced ones: use the app's deal flow.
+  const { onDeal } = useOutletContext<{ onDeal: () => void }>();
   const [isConfettiClosed, setIsClosed] = useState(false);
 
   useEffect(() => {
@@ -41,7 +38,7 @@ export const GuestGameComp = () => {
   if (!game) {
     return (
       <>
-        <Crumb trail={[{ label: "Guest", to: "/login" }, { label: "Game" }]} />
+        <Crumb trail={[{ label: "Home", to: "/" }, { label: "Game" }]} />
         <div style={{ padding: 20, opacity: 0.6 }}>Game not found.</div>
       </>
     );
@@ -182,10 +179,7 @@ export const GuestGameComp = () => {
         onClose={() => setIsClosed(true)}
         onUndo={undo}
         numRounds={rs.length}
-        onNewGame={() => {
-          const g = createGame();
-          navigate(`/games/guest/${g.id}/manage`);
-        }}
+        onNewGame={onDeal}
       />
     );
   }
@@ -209,7 +203,7 @@ export const GuestGameComp = () => {
     <>
       <Crumb
         trail={[
-          { label: "Guest", to: "/login" },
+          { label: "Home", to: "/" },
           {
             label: (
               <span>
@@ -251,6 +245,7 @@ export const GuestGameComp = () => {
           </div>
         }
       />
+      <LocalGamesBanner />
 
       {/* Hero */}
       <div
@@ -619,7 +614,7 @@ const WinScreen = ({
     <>
       <Confetti numberOfPieces={160} recycle={false} />
       <Crumb
-        trail={[{ label: "Guest", to: "/login" }, { label: "Final score" }]}
+        trail={[{ label: "Home", to: "/" }, { label: "Final score" }]}
         right={
           <button
             onClick={onUndo}

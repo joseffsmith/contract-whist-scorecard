@@ -7,7 +7,12 @@ import {
   GuestGame,
 } from "../guest/guestStore";
 import { newId } from "../lib/dispatch";
-import { selectActivePlayers, sync, useSyncView } from "../sync";
+import {
+  selectActivePlayers,
+  selectPlayersByClaim,
+  sync,
+  useSyncView,
+} from "../sync";
 import { alpha, goldButton, t } from "../theme/tokens";
 import { Shell } from "./chrome/Shell";
 
@@ -15,10 +20,13 @@ export const GuestMigrationDialog = ({
   userId,
   games,
   onDone,
+  onClose,
 }: {
   userId: string;
   games: GuestGame[];
   onDone: () => void;
+  // "Not now": leaves the games where they are.
+  onClose?: () => void;
 }) => {
   const { view } = useSyncView();
   const [busy, setBusy] = useState(false);
@@ -32,6 +40,10 @@ export const GuestMigrationDialog = ({
     for (const p of selectActivePlayers(view)) {
       const key = p.name.trim().toLowerCase();
       if (!known.has(key)) known.set(key, p.id);
+    }
+    // Your own player wins a name clash with someone else's.
+    for (const p of selectPlayersByClaim(view, userId)) {
+      known.set(p.name.trim().toLowerCase(), p.id);
     }
     const saved: GuestGame[] = [];
     try {
@@ -134,7 +146,7 @@ export const GuestMigrationDialog = ({
             fontWeight: 600,
           }}
         >
-          Welcome back
+          Saved on this phone
         </div>
         <div
           style={{
@@ -148,8 +160,7 @@ export const GuestMigrationDialog = ({
             lineHeight: 1.1,
           }}
         >
-          You played {games.length} guest game
-          {games.length === 1 ? "" : "s"}
+          {games.length} game{games.length === 1 ? "" : "s"} only on this phone
         </div>
         <div
           style={{
@@ -161,7 +172,8 @@ export const GuestMigrationDialog = ({
             marginBottom: 20,
           }}
         >
-          Save them to your account, or discard and start fresh.
+          Save {games.length === 1 ? "it" : "them"} so everyone can see{" "}
+          {games.length === 1 ? "it" : "them"}, or discard and start fresh.
         </div>
 
         <div style={{ flex: 1, overflow: "auto", marginBottom: 16 }}>
@@ -231,7 +243,7 @@ export const GuestMigrationDialog = ({
             opacity: busy ? 0.5 : 1,
           }}
         >
-          {busy ? "Saving…" : "Save to my account"}
+          {busy ? "Saving…" : "Save games"}
         </button>
         <button
           onClick={discard}
@@ -249,8 +261,25 @@ export const GuestMigrationDialog = ({
             fontWeight: 500,
           }}
         >
-          Discard guest games
+          Discard local games
         </button>
+        {onClose && (
+          <button
+            onClick={onClose}
+            disabled={busy}
+            style={{
+              width: "100%",
+              marginTop: 8,
+              padding: "10px 0",
+              background: "transparent",
+              border: "none",
+              color: t.gold,
+              fontSize: 13,
+            }}
+          >
+            Not now
+          </button>
+        )}
       </div>
     </Shell>
   );

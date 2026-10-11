@@ -1,9 +1,8 @@
 // Local-only game state for playing without an account / while offline.
 // Schema is intentionally denormalized — no player entities across games,
-// no relations. Names are strings. Migration to the cloud is a one-shot
+// no relations. Names are strings. Only used to view and finish games already
+// on a phone; new games are synced ones. Upload is a one-shot
 // dialog that matches names → cloud players.
-
-import { DEALS } from "../constants";
 
 export type GuestTurn = {
   id: string;
@@ -46,7 +45,9 @@ export const subscribe = (l: () => void): (() => void) => {
 
 // Cheap uuid for local-only entities. Not cryptographic — just unique enough.
 const uid = (prefix: string): string =>
-  `${prefix}-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`;
+  `${prefix}-${Math.random().toString(36).slice(2, 10)}${Date.now()
+    .toString(36)
+    .slice(-4)}`;
 
 export const listGames = (): GuestGame[] => {
   try {
@@ -59,8 +60,7 @@ export const listGames = (): GuestGame[] => {
   }
 };
 
-export const hasGames = (): boolean =>
-  listGames().some((g) => !g.deletedAt);
+export const hasGames = (): boolean => listGames().some((g) => !g.deletedAt);
 
 const save = (games: GuestGame[]) => {
   localStorage.setItem(KEY, JSON.stringify(games));
@@ -69,22 +69,6 @@ const save = (games: GuestGame[]) => {
 
 export const getGame = (id: string): GuestGame | undefined =>
   listGames().find((g) => g.id === id);
-
-export const createGame = (): GuestGame => {
-  const game: GuestGame = {
-    id: uid("guest"),
-    createdAt: new Date().toISOString(),
-    players: [],
-    initialDealerId: null,
-    rounds: DEALS.map((d) => ({
-      id: uid("gr"),
-      roundNumber: d.id,
-      turns: [],
-    })),
-  };
-  save([game, ...listGames()]);
-  return game;
-};
 
 const update = (id: string, updater: (g: GuestGame) => GuestGame) => {
   const games = listGames();
@@ -113,8 +97,7 @@ export const removePlayer = (gameId: string, playerId: string) => {
   update(gameId, (g) => ({
     ...g,
     players: g.players.filter((p) => p.id !== playerId),
-    initialDealerId:
-      g.initialDealerId === playerId ? null : g.initialDealerId,
+    initialDealerId: g.initialDealerId === playerId ? null : g.initialDealerId,
     rounds: g.rounds.map((r) => ({
       ...r,
       turns: r.turns.filter((tt) => tt.playerId !== playerId),
@@ -153,10 +136,7 @@ export const setBid = (
       r.id === roundId
         ? {
             ...r,
-            turns: [
-              ...r.turns,
-              { id: uid("gt"), playerId, bid, score: null },
-            ],
+            turns: [...r.turns, { id: uid("gt"), playerId, bid, score: null }],
           }
         : r
     ),

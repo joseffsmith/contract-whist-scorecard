@@ -44,9 +44,7 @@ export const GuestGameManager = () => {
   if (!game) {
     return (
       <>
-        <Crumb
-          trail={[{ label: "Guest", to: "/login" }, { label: "New game" }]}
-        />
+        <Crumb trail={[{ label: "Home", to: "/" }, { label: "New game" }]} />
         <div style={{ padding: 20, opacity: 0.6 }}>Game not found.</div>
       </>
     );
@@ -76,9 +74,7 @@ export const GuestGameManager = () => {
 
   return (
     <>
-      <Crumb
-        trail={[{ label: "Guest", to: "/login" }, { label: "New game" }]}
-      />
+      <Crumb trail={[{ label: "Home", to: "/" }, { label: "New game" }]} />
       <div style={{ flex: 1, overflow: "auto", padding: "16px 16px 16px" }}>
         <div
           style={{
