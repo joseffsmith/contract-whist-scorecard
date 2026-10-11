@@ -826,17 +826,23 @@ export function createSyncClient(
   let materialiseTimer: ReturnType<typeof setTimeout> | undefined;
   async function tryMaterialise(): Promise<boolean> {
     if (!session?.provisional) return true;
-    if (Date.now() < materialiseBlockedUntil) return false;
+    const wait = materialiseBlockedUntil - Date.now();
+    if (wait > 0) {
+      // (Re)arm the timer: the one set earlier may fire a hair too soon.
+      clearTimeout(materialiseTimer);
+      materialiseTimer = setTimeout(() => void push(), wait + 1);
+      return false;
+    }
     try {
       await materialise();
       return !session?.provisional;
     } catch (error) {
       const limited = error instanceof SyncError && error.status === 429;
       materialiseFailures += limited ? 3 : 1;
-      const wait = delayFor(materialiseFailures);
-      materialiseBlockedUntil = Date.now() + wait;
+      const delay = delayFor(materialiseFailures);
+      materialiseBlockedUntil = Date.now() + delay;
       clearTimeout(materialiseTimer);
-      materialiseTimer = setTimeout(() => void push(), wait);
+      materialiseTimer = setTimeout(() => void push(), delay + 1);
       return false;
     }
   }
