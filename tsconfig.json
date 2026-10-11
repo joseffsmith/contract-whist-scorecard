@@ -1,8 +1,14 @@
 {
   "compilerOptions": {
     "target": "ESNext",
-    "lib": ["DOM", "DOM.Iterable", "ESNext"],
-    "types": ["vite/client"],
+    "lib": [
+      "DOM",
+      "DOM.Iterable",
+      "ESNext"
+    ],
+    "types": [
+      "vite/client"
+    ],
     "allowJs": true,
     "strictNullChecks": true,
     "skipLibCheck": true,
@@ -20,5 +26,8 @@
     "jsx": "react-jsx",
     "experimentalDecorators": true
   },
-  "include": ["./src"]
+  "include": [
+    "./src",
+    "./shared"
+  ]
 }

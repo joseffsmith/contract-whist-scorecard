@@ -9,3 +9,4 @@ dist-ssr
 
 .claude
 pnpm-lock.yaml
+server/dist
