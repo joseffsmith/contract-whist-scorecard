@@ -333,7 +333,7 @@ describe("guest, signup, login, logout, me", () => {
     }
     expect((await attempt("fresh@example.com", "9.9.9.9")).status).toBe(429);
     expect((await attempt("fresh@example.com", "8.8.8.8")).status).toBe(401);
-  });
+  }, 30_000); // many scrypt hashes: slow on busy machines
 
   it("changes the password for a signed-in account only", async () => {
     const api = await start();

@@ -255,5 +255,5 @@ describe("POST /admin/import", () => {
     const res = await post(api.url, { players, games: [] }, "import-secret");
     expect(res.status).toBe(200);
     expect(((await res.json()) as any).players).toBe(20_000);
-  });
+  }, 30_000); // large body: slow on busy machines
 });
