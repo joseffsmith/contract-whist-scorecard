@@ -233,8 +233,9 @@ export const UserManager = () => {
               Sign out?
             </div>
             <div style={{ fontSize: 13, color: t.cream, opacity: 0.8 }}>
-              You have {pending} change{pending === 1 ? "" : "s"} that haven't
-              synced yet. Signing out will lose them.
+              You have {pending} change{pending === 1 ? "" : "s"} that{" "}
+              {pending === 1 ? "hasn't" : "haven't"} synced yet. Signing out
+              will lose them.
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
               <button
