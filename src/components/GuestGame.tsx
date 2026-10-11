@@ -18,6 +18,7 @@ import {
   suitColor,
   t,
 } from "../theme/tokens";
+import { MoreMenu } from "./chrome/MoreMenu";
 import { ThemeToggle } from "./chrome/ThemeToggle";
 import { getBidOptions } from "../utils/getBidOptions";
 import { getCurrentPlayerIdFromRound } from "../utils/getCurrentPlayerIdFromRound";
@@ -223,7 +224,6 @@ export const GuestGameComp = () => {
         ]}
         right={
           <div style={{ display: "flex", gap: 6 }}>
-            <ThemeToggle size={26} />
             <button
               onClick={undo}
               style={{
@@ -239,6 +239,15 @@ export const GuestGameComp = () => {
             >
               Undo
             </button>
+            <ThemeToggle size={26} />
+            <MoreMenu
+              items={[
+                {
+                  label: "Manage players",
+                  onClick: () => navigate(`/games/guest/${game.id}/manage`),
+                },
+              ]}
+            />
           </div>
         }
       />

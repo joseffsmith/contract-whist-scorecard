@@ -13,6 +13,7 @@ import {
   suitColor,
   t,
 } from "../theme/tokens";
+import { MoreMenu } from "./chrome/MoreMenu";
 import { ThemeToggle } from "./chrome/ThemeToggle";
 import { getBidOptions } from "../utils/getBidOptions";
 import { getCurrentPlayerIdFromRound } from "../utils/getCurrentPlayerIdFromRound";
@@ -26,7 +27,6 @@ export const GameComp = () => {
   const { gameId } = useParams<{ gameId: string }>();
   const navigate = useNavigate();
   const [isConfettiClosed, setIsClosed] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
 
   const { isLoading: isLoadingUser, user } = db.useAuth();
   const { isLoading, data } = db.useQuery(
@@ -210,7 +210,7 @@ export const GameComp = () => {
           },
         ]}
         right={
-          <div style={{ display: "flex", gap: 6, position: "relative" }}>
+          <div style={{ display: "flex", gap: 6 }}>
             {isOwnGame && (
               <button
                 onClick={undo}
@@ -229,54 +229,15 @@ export const GameComp = () => {
               </button>
             )}
             <ThemeToggle size={26} />
-            <button
-              onClick={() => setMoreOpen((v) => !v)}
-              aria-label="More"
-              style={{
-                width: 26,
-                height: 26,
-                borderRadius: 13,
-                border: `1px solid ${alpha(t.gold, 0.33)}`,
-                color: t.gold,
-                background: "transparent",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 14,
-              }}
-            >
-              ⋯
-            </button>
-            {moreOpen && isOwnGame && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: 32,
-                  right: 0,
-                  padding: 4,
-                  borderRadius: 8,
-                  background: t.feltDk,
-                  border: `1px solid ${alpha(t.gold, 0.33)}`,
-                  boxShadow: `0 10px 20px ${alpha(t.shade, 0.5)}`,
-                  minWidth: 140,
-                  zIndex: 10,
-                }}
-              >
-                <div
-                  onClick={() => {
-                    setMoreOpen(false);
-                    navigate(`/games/${gameId}/manage`);
-                  }}
-                  style={{
-                    padding: "8px 12px",
-                    fontSize: 13,
-                    color: t.cream,
-                    cursor: "pointer",
-                  }}
-                >
-                  Manage players
-                </div>
-              </div>
+            {isOwnGame && (
+              <MoreMenu
+                items={[
+                  {
+                    label: "Manage players",
+                    onClick: () => navigate(`/games/${gameId}/manage`),
+                  },
+                ]}
+              />
             )}
           </div>
         }
