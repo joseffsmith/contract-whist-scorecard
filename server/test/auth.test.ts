@@ -1,3 +1,5 @@
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
 import { importSnapshot, openDb } from "../src/db";
 import { action, newGame, start } from "./helpers";
@@ -214,7 +216,9 @@ describe("imported users and admin reset links", () => {
       password: "password123",
     });
     expect([login.status, login.body.code]).toEqual([401, "no_password"]);
-    expect(login.body.error).toBe("Ask the app admin for a set-password link.");
+    expect(login.body.error).toBe(
+      "This account doesn't have a password yet. Tap “Forgot password” to set one."
+    );
     const signup = await imported.post("/auth/signup", {
       email: "old@example.com",
       password: "password123",
@@ -381,5 +385,183 @@ describe("login with guestToken handoff", () => {
     // A guest token that belongs to a real account is ignored.
     const other = await api.signup("other@example.com");
     expect((await login(other.token)).status).toBe(200);
+  });
+});
+
+describe("forgot password", () => {
+  async function withMailbox(opts: Parameters<typeof start>[0] = {}) {
+    const sent: { to: string; url: string }[] = [];
+    const api = await start({
+      publicUrl: "https://example.test/app",
+      sendResetEmail: async (to, url) => {
+        sent.push({ to, url });
+      },
+      ...opts,
+    });
+    const tokenOf = (url: string) =>
+      url.replace("https://example.test/app/reset/", "");
+    return { api, sent, tokenOf };
+  }
+
+  it("emails a link that sets a new password", async () => {
+    const { api, sent, tokenOf } = await withMailbox();
+    const user = await api.signup("fo@example.com");
+    const res = await api.post("/auth/forgot", { email: " FO@example.com " });
+    expect([res.status, res.body]).toEqual([200, { ok: true }]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to).toBe("fo@example.com");
+
+    const reset = await api.post("/auth/reset", {
+      token: tokenOf(sent[0].url),
+      password: "brand-new-pw",
+    });
+    expect(reset.status).toBe(200);
+    expect(reset.body.user.id).toBe(user.user.id);
+    const login = await api.post("/auth/login", {
+      email: "fo@example.com",
+      password: "brand-new-pw",
+    });
+    expect(login.status).toBe(200);
+    expect(
+      (
+        await api.post("/auth/login", {
+          email: "fo@example.com",
+          password: "password123",
+        })
+      ).status
+    ).toBe(401);
+  });
+
+  it("answers ok but sends nothing for unknown emails, guests and junk", async () => {
+    const { api, sent } = await withMailbox();
+    for (const email of ["nobody@example.com", "not an email", undefined]) {
+      const res = await api.post("/auth/forgot", { email });
+      expect([res.status, res.body]).toEqual([200, { ok: true }]);
+    }
+    expect(sent).toEqual([]);
+  });
+
+  it("works for an imported user with no password", async () => {
+    const dir = (await start()).dir + "-forgot";
+    const db = openDb(dir);
+    importSnapshot(db, {
+      players: [],
+      games: [],
+      seats: [],
+      rounds: [],
+      turns: [],
+      users: [{ id: "u1", email: "old@example.com" }],
+    });
+    db.close();
+    const { api, sent, tokenOf } = await withMailbox({ dataDir: dir });
+    await api.post("/auth/forgot", { email: "old@example.com" });
+    expect(sent).toHaveLength(1);
+    const reset = await api.post("/auth/reset", {
+      token: tokenOf(sent[0].url),
+      password: "password123",
+    });
+    expect(reset.body.user.id).toBe("u1");
+  });
+
+  it("rate limits per IP and per email (5 an hour)", async () => {
+    const { api, sent } = await withMailbox();
+    const ask = (email: string, ip: string) =>
+      api.post("/auth/forgot", { email }, undefined, { "x-forwarded-for": ip });
+    await api.signup("rl@example.com");
+    for (let i = 0; i < 5; i++)
+      expect((await ask("rl@example.com", `10.0.0.${i}`)).status).toBe(200);
+    const blocked = await ask("rl@example.com", "10.0.0.99");
+    expect([blocked.status, blocked.body.code]).toEqual([429, "rate_limited"]);
+    expect(sent).toHaveLength(5);
+
+    for (let i = 0; i < 5; i++)
+      expect((await ask(`x${i}@example.com`, "7.7.7.7")).status).toBe(200);
+    expect((await ask("x9@example.com", "7.7.7.7")).status).toBe(429);
+  });
+
+  it("makes single-use links that also expire", async () => {
+    const { api, sent, tokenOf } = await withMailbox();
+    await api.signup("once@example.com");
+    await api.post("/auth/forgot", { email: "once@example.com" });
+    await api.post("/auth/forgot", { email: "once@example.com" });
+    const [first, second] = sent.map((m) => tokenOf(m.url));
+    expect(first).not.toBe(second);
+
+    const used = await api.post("/auth/reset", {
+      token: first,
+      password: "password-one",
+    });
+    expect(used.status).toBe(200);
+    const again = await api.post("/auth/reset", {
+      token: first,
+      password: "password-two",
+    });
+    expect([again.status, again.body.code]).toEqual([400, "invalid_token"]);
+
+    // Expire the second link by editing the database directly.
+    const db = openDb(api.dir);
+    db.sql.exec("UPDATE reset_tokens SET expires_at = 1");
+    db.close();
+    const expired = await api.post("/auth/reset", {
+      token: second,
+      password: "password-two",
+    });
+    expect([expired.status, expired.body.code]).toEqual([400, "invalid_token"]);
+    expect(
+      (
+        await api.post("/auth/login", {
+          email: "once@example.com",
+          password: "password-one",
+        })
+      ).status
+    ).toBe(200);
+  });
+
+  it("still answers ok when the mailer fails", async () => {
+    const api = await start({
+      sendResetEmail: async () => {
+        throw new Error("mail is down");
+      },
+    });
+    await api.signup("down@example.com");
+    const res = await api.post("/auth/forgot", { email: "down@example.com" });
+    expect([res.status, res.body]).toEqual([200, { ok: true }]);
+  });
+
+  it("sends through Resend's HTTP API", async () => {
+    const requests: { headers: http.IncomingHttpHeaders; body: any }[] = [];
+    const resend = http.createServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const c of req) chunks.push(c);
+      requests.push({
+        headers: req.headers,
+        body: JSON.parse(Buffer.concat(chunks).toString()),
+      });
+      res.end("{}");
+    });
+    await new Promise<void>((r) => resend.listen(0, "127.0.0.1", r));
+    try {
+      const { createMailer } = await import("../src/mail");
+      const send = createMailer({
+        apiKey: "re_key",
+        from: "Whist <w@example.com>",
+        apiUrl: `http://127.0.0.1:${
+          (resend.address() as AddressInfo).port
+        }/emails`,
+      });
+      await send("a@example.com", "https://example.test/reset/abc");
+      expect(requests).toHaveLength(1);
+      expect(requests[0].headers.authorization).toBe("Bearer re_key");
+      expect(requests[0].body).toMatchObject({
+        from: "Whist <w@example.com>",
+        to: ["a@example.com"],
+        subject: "Reset your Whist password",
+      });
+      expect(requests[0].body.text).toContain("https://example.test/reset/abc");
+      expect(requests[0].body.html).toContain("https://example.test/reset/abc");
+    } finally {
+      resend.closeAllConnections();
+      await new Promise((r) => resend.close(r));
+    }
   });
 });
