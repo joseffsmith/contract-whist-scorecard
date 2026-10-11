@@ -4,6 +4,7 @@ export type {
   AuthState,
   ConnectionStatus,
   NetworkSignal,
+  StorageHealth,
   SyncClient,
   SyncDeps,
 } from "./client";
@@ -11,6 +12,7 @@ export {
   useAuth,
   useConnectionStatus,
   usePendingCount,
+  useStorageHealth,
   useSyncView,
 } from "./react";
 export {

@@ -1,6 +1,6 @@
 import { useMemo, useSyncExternalStore } from "react";
 import { sync } from "./client";
-import type { AuthState, ConnectionStatus } from "./client";
+import type { AuthState, ConnectionStatus, StorageHealth } from "./client";
 import type { DataState } from "../../shared/types";
 
 // The engine lives outside React; these hooks just subscribe to it. Each one
@@ -33,5 +33,14 @@ export function usePendingCount(): number {
     subscribe,
     sync.getPendingCount,
     sync.getPendingCount
+  );
+}
+
+// "memory" or "failing" means changes may not survive a reload on this device.
+export function useStorageHealth(): StorageHealth {
+  return useSyncExternalStore(
+    subscribe,
+    sync.getStorageHealth,
+    sync.getStorageHealth
   );
 }
