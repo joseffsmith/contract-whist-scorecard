@@ -305,4 +305,32 @@ describe("against the real server", () => {
     await synced(reloaded);
     expect((await pull()).puts.games).toHaveLength(2);
   });
+
+  it("lets two tabs register the same provisional guest", async () => {
+    const storage = new IDBFactory();
+    const user = await offlineFirstUse(storage);
+    const a = newClient(storage, true);
+    const b = newClient(storage, true);
+    await Promise.all([a.start(), b.start()]);
+    a.setDown(false);
+    await Promise.all([synced(a), synced(b)]);
+    expect(a.getAuth().user).toEqual(user);
+    expect(b.getAuth().user).toEqual(user);
+    expect((await pull()).puts.games).toHaveLength(2);
+  });
+
+  it("can't be used to take over an imported creator's id", async () => {
+    const res = await fetch(`${server.url}/auth/guest`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "11111111-1111-4111-8111-111111111111" }),
+    });
+    expect(res.status).toBe(200); // nothing imported here, so it's free
+    const again = await fetch(`${server.url}/auth/guest`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "11111111-1111-4111-8111-111111111111" }),
+    });
+    expect(again.status).toBe(409);
+  });
 });

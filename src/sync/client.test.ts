@@ -1728,7 +1728,7 @@ describe("provisional guests, hardened", () => {
   it("goes provisional when the server is rate limiting or failing", async () => {
     for (const status of [429, 503]) {
       server.guestFail = { status, code: "x" };
-      const client = newClient();
+      const client = newClient({ storage: new IDBFactory() });
       await client.start();
       const user = await client.signInAsGuest();
       expect(client.getAuth().user).toEqual(user);
