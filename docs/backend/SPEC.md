@@ -80,17 +80,20 @@ every rebase. Ops must not depend on row iteration order (sort ids).
   pulls can return deletes). `meta(key, value)` holds the global version.
   `applied_actions(id PRIMARY KEY, user_id, version, at)` for idempotency.
 - Listens on `127.0.0.1:${PORT}` (default 3001); nginx proxies
-  `/contract-whist/api/*` → `/*`. Real client IP = last entry of
-  `X-Forwarded-For`.
+  `/contract-whist/api/*` → `/*`. Real client IP = the `TRUST_PROXY_HOPS`-th
+  entry from the end of `X-Forwarded-For` (default 1 = last; 0 = socket
+  address). IPv6 clients are rate limited by /64.
+- Daily `VACUUM INTO` backups in `${DATA_DIR}/backups` (`BACKUP_DAYS`,
+  default 14, 0 = off). See CUTOVER.md.
 - JSON in/out, `cache-control: no-store`. Errors: `{ error, code }`.
 
 ### Auth
 
 - Sessions: random 32-byte base64url token, stored as sha256 hash,
   `Authorization: Bearer <token>`. No expiry needed.
-- Passwords: scrypt as in the current `server/auth.mjs` (N=32768, r=8, p=1,
-  64-byte key, 16-byte salt); timing-safe compare; dummy hash for unknown
-  emails; rate limits as there.
+- Passwords: scrypt (N=32768, r=8, p=1, 64-byte key, 16-byte salt);
+  timing-safe compare; dummy hash for unknown emails; rate limits per IP and
+  per email.
 - `POST /auth/guest` → `AuthResponse` (new guest user).
 - `POST /auth/signup {email, password}` → `AuthResponse`. No email
   verification. If the request carries a **guest** session, upgrade that
@@ -101,18 +104,27 @@ every rebase. Ops must not depend on row iteration order (sort ids).
   `guestToken` belongs to a guest who claimed a player: if the account has
   no active claimed player, transfer the claim; otherwise run
   `mergePlayers(guestPlayer → accountPlayer)` with
-  `internal.allowClaimedFrom = guestUserId`. Failures here must not fail the
-  login. A user without a password can't log in (same generic
+  `internal.allowClaimedFrom = guestUserId`. Only one guest player is handed
+  over (most seats, then smallest id); a player that can't move is released,
+  as are any others. Games the guest hosted move to the account
+  (`createdBy`) in the same version. The guest's sessions end. Failures here
+  must not fail the login. A user without a password can't log in (same generic
   `bad_credentials` error).
-- `POST /auth/logout`, `GET /auth/me` → `{ user }`.
+- `POST /auth/logout` (a guest's claimed players are released first),
+  `GET /auth/me` → `{ user }`. `PublicUser.isAdmin` is set for admins.
 - `POST /auth/password {password}` (signed-in, non-guest) → set/change.
 - No email sending (no external services). Forgotten passwords: an admin
   creates a set-password link and shares it by hand.
-- Admin (session email in `ADMIN_EMAILS`, comma-separated env):
+- Admin: `users.is_admin`. The first admin is made with the secret env
+  `ADMIN_BOOTSTRAP_TOKEN`: a signed-in non-guest user opens
+  `${PUBLIC_URL}/admin#<token>` and `POST /auth/claim-admin {token}` sets
+  `is_admin` (timing-safe compare; once any admin exists it answers 403).
+  Admins pass every creator check in `applyAction` (`ctx.isAdmin`) and can:
   `POST /auth/reset-link {email}` → `{ url }` (one-time, 7 days,
-  `${PUBLIC_URL}/reset/<token>`, `PUBLIC_URL` default
-  `https://whist.joseffsmith.uk/contract-whist`). `POST /auth/reset
-  {token, password}` → `AuthResponse`.
+  `${PUBLIC_URL}/reset#<token>`; `PUBLIC_URL` default
+  `https://joseffsmith.uk/contract-whist`). `POST /auth/reset {token,
+  password}` → `AuthResponse`; it ends all the user's sessions and retires
+  their other links.
 
 ### Sync
 
@@ -125,17 +137,20 @@ every rebase. Ops must not depend on row iteration order (sort ids).
   each action in its own transaction, in order; already-applied ids → ok.
 - `GET /health` → `{ ok: true, version }`.
 
-### Migration from InstantDB (`server/scripts/`)
+### Migration from InstantDB
 
-- `export-instant`: dump all players/games/playersOrders/rounds/turns
-  (with link ids) to a JSON file. The InstantDB app is publicly readable, so
-  no admin token is needed: run the `@instantdb/core` client query in a
-  headless browser (as the orchestrator did for the duplicates audit) or
-  via the public HTTP API.
-- `import-instant`: load that JSON into an **empty** DB, keeping ids.
-  `playersOrders` → `seats`. **No users are imported** and every player's
-  `claimedBy` is cleared: after cutover everyone creates an account (or
-  joins as a guest) and claims their player again.
+- `server/scripts/export-instant.mjs`: dumps players/games/playersOrders/
+  rounds/turns (with link ids) to a JSON file. The InstantDB app is publicly
+  readable, so no admin token is needed: it runs the `@instantdb/core` query
+  in headless Chromium (Playwright and Chromium are installed separately).
+- `POST /admin/import` (only when `IMPORT_TOKEN` is set; header
+  `x-import-token`; body up to 20 MB): transforms that JSON
+  (`server/src/importInstant.ts`) and loads it into a database with no synced
+  rows, keeping ids (`importSnapshot`). `playersOrders` → `seats`. **No users
+  are imported** and every player's `claimedBy` is cleared: after cutover
+  everyone creates an account (or joins as a guest) and claims their player
+  again. Rows that don't hang together are skipped and counted in the
+  response.
 
 ## Client (`src/sync/`)
 

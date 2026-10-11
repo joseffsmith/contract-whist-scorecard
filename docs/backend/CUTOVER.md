@@ -48,5 +48,9 @@ redeploy the previous `main` commit in Coolify.
 
 ### Backups
 
-`/data/whist.db` (SQLite, WAL). Until something off-box exists, the server
-should keep daily `VACUUM INTO` copies in `/data/backups` (last 14).
+`/data/whist.db` (SQLite, WAL). On startup and then every 24h the server
+writes `/data/backups/whist-YYYY-MM-DD.db` (`VACUUM INTO`, mode 0600, skipped
+if today's exists) and keeps the newest `BACKUP_DAYS` (default 14; `0`
+disables). A failure is logged, never fatal. The copies share the volume with
+the live database, so also copy them off the box until something does that
+automatically.

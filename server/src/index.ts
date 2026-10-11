@@ -2,12 +2,12 @@ import { startServer } from "./app";
 
 // A failure to start (bad DATA_DIR, port in use, old Node) crashes with a
 // clear error. Once listening, request-scoped surprises are logged instead.
-const hops = process.env.TRUST_PROXY_HOPS;
+const hops = process.env.TRUST_PROXY_HOPS || undefined;
 if (hops !== undefined && !/^\d+$/.test(hops)) {
   throw new Error("TRUST_PROXY_HOPS must be a whole number (default 1).");
 }
 
-const backupDays = process.env.BACKUP_DAYS;
+const backupDays = process.env.BACKUP_DAYS || undefined;
 if (backupDays !== undefined && !/^\d+$/.test(backupDays)) {
   throw new Error("BACKUP_DAYS must be a whole number (default 14, 0 = off).");
 }

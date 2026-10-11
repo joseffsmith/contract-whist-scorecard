@@ -595,7 +595,7 @@ describe("pull and stream limits", () => {
     const ip = { "x-forwarded-for": "5.5.5.5" };
     const pull = (since: number) =>
       fetch(`${api.url}/sync/pull?since=${since}`, { headers: ip });
-    for (let i = 0; i < 20; i++) expect((await pull(0)).status).toBe(200);
+    for (let i = 0; i < 60; i++) expect((await pull(0)).status).toBe(200);
     const limited = await pull(0);
     expect(limited.status).toBe(429);
     expect(((await limited.json()) as any).code).toBe("rate_limited");
@@ -613,5 +613,113 @@ describe("pull and stream limits", () => {
     expect((await pull(1)).status).toBe(200);
     // Another client is unaffected.
     expect((await api.get("/sync/pull?since=0")).status).toBe(200);
+  });
+});
+
+describe("proxy hops", () => {
+  const attempts = async (
+    api: Api,
+    forwarded: (n: number) => string,
+    n: number
+  ) => {
+    const codes: number[] = [];
+    for (let i = 0; i < n; i++) {
+      const res = await api.post(
+        "/auth/login",
+        { email: `hop-${i}@example.com`, password: "x" },
+        undefined,
+        { "x-forwarded-for": forwarded(i) }
+      );
+      codes.push(res.status);
+    }
+    return codes;
+  };
+
+  it("uses the last X-Forwarded-For entry by default", async () => {
+    const api = await start();
+    // The client-supplied first entry varies; the proxy-appended last one doesn't.
+    const codes = await attempts(api, (i) => `9.9.9.${i}, 7.7.7.7`, 31);
+    expect(codes.slice(0, 30).every((c) => c === 401)).toBe(true);
+    expect(codes[30]).toBe(429);
+  });
+
+  it("uses the Nth entry from the end with trustProxyHops", async () => {
+    const api = await start({ trustProxyHops: 2 });
+    const codes = await attempts(
+      api,
+      (i) => `9.9.9.${i}, 7.7.7.7, 10.0.0.${i}`,
+      31
+    );
+    expect(codes[30]).toBe(429);
+    // A different client behind the same last proxy is not affected.
+    const other = await attempts(api, (i) => `8.8.8.8, 10.0.0.${i}`, 1);
+    expect(other).toEqual([401]);
+  });
+
+  it("can ignore the header and use the socket address", async () => {
+    const api = await start({ trustProxyHops: 0 });
+    const codes = await attempts(api, (i) => `1.1.1.${i}`, 31);
+    expect(codes[30]).toBe(429);
+  });
+});
+
+describe("guest logout", () => {
+  it("releases the guest's players so they can be claimed again", async () => {
+    const api = await start();
+    const guest = await api.guest();
+    const mine = newGame();
+    await api.push(guest.token, ...mine.actions);
+    const other = await api.guest();
+    const before = await api.push(
+      other.token,
+      action("claimPlayer", { playerId: mine.playerId })
+    );
+    expect(before.results[0]).toMatchObject({ ok: false, code: "claimed" });
+
+    expect((await api.post("/auth/logout", {}, guest.token)).status).toBe(200);
+    expect((await api.get("/auth/me", guest.token)).status).toBe(401);
+    const players = await claims(api);
+    expect(players[mine.playerId].claimedBy).toBeUndefined();
+    const after = await api.push(
+      other.token,
+      action("claimPlayer", { playerId: mine.playerId })
+    );
+    expect(after.results[0].ok).toBe(true);
+  });
+
+  it("leaves a signed-in user's claims alone on logout", async () => {
+    const api = await start();
+    const user = await api.signup("keep@example.com");
+    const mine = newGame();
+    await api.push(user.token, ...mine.actions);
+    await api.post("/auth/logout", {}, user.token);
+    expect((await claims(api))[mine.playerId].claimedBy).toBe(user.user.id);
+  });
+});
+
+describe("admin in pushes", () => {
+  it("lets the admin manage another user's game", async () => {
+    const api = await start({ adminBootstrapToken: "s3cret" });
+    const admin = await api.signup("admin@example.com");
+    await api.post("/auth/claim-admin", { token: "s3cret" }, admin.token);
+    const host = await api.signup("host@example.com");
+    const game = newGame();
+    await api.push(host.token, ...game.actions);
+    const bid = (token: string, turnId: string) =>
+      api.push(
+        token,
+        action("placeBid", {
+          turnId,
+          roundId: game.roundIds[0],
+          playerId: game.playerId,
+          bid: 1,
+        })
+      );
+    const stranger = await api.signup("stranger@example.com");
+    expect((await bid(stranger.token, "t1")).results[0]).toMatchObject({
+      ok: false,
+      code: "forbidden",
+    });
+    expect((await bid(admin.token, "t2")).results[0].ok).toBe(true);
   });
 });

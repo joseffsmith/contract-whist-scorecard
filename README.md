@@ -42,21 +42,39 @@ serving the app under `/contract-whist/` (`/` redirects there) and proxying
    (all games, accounts and sessions) lives there, so back it up.
 6. **Environment variables:**
    - `PUBLIC_URL`: the app's public URL, used in password reset links.
-     Default `https://whist.joseffsmith.uk/contract-whist`.
-   - `ADMIN_BOOTSTRAP_TOKEN`: a long random secret. After signing up, call
-     `POST /contract-whist/api/auth/claim-admin` with `{ "token": "..." }`
-     while signed in to make your account the admin. It works once, for the
-     first admin only; remove the variable afterwards.
+     Default `https://joseffsmith.uk/contract-whist`.
+   - `ADMIN_BOOTSTRAP_TOKEN`: a long random secret. Sign up, then open
+     `https://<your domain>/contract-whist/admin#<token>` while signed in and
+     tap **Make me the admin**. It works once, for the first admin only;
+     remove the variable afterwards. Admins can create password reset links
+     and manage any game.
    - `IMPORT_TOKEN` (optional, temporary): enables the one-off InstantDB
      import, `POST /contract-whist/api/admin/import` with the export JSON
      and an `x-import-token` header. It only works on an empty database, and
-     all players come across unclaimed. Remove the variable once done.
+     all players come across unclaimed. `server/scripts/export-instant.mjs`
+     makes the JSON (see the comment at its top). Remove the variable once
+     done.
+   - `TRUST_PROXY_HOPS` (default `1`): how many proxies sit in front of the
+     server. The client's IP, used for rate limiting, is the Nth entry from
+     the end of `X-Forwarded-For` (each proxy appends the address it saw), so
+     `1` means the last entry, as set by one host nginx using
+     `proxy_add_x_forwarded_for`. Use `2` if another proxy sits in front of
+     that, and `0` to ignore the header and use the connection's address.
+   - `BACKUP_DAYS` (default `14`, `0` turns backups off): see Backups below.
    - `DATA_DIR` (default `/data`), `PORT` (default 3001) and `HOST` (default
      `127.0.0.1`) rarely need changing.
 
-Password recovery is manual: the admin creates a one-time link for a user with
-`POST /contract-whist/api/auth/reset-link` (`{ "email": "..." }`) and sends it
-to them; the link opens `${PUBLIC_URL}/reset#<token>`.
+Password recovery is manual: an admin creates a one-time link for a user on
+the admin page (or `POST /contract-whist/api/auth/reset-link` with
+`{ "email": "..." }`) and sends it to them; the link opens
+`${PUBLIC_URL}/reset#<token>`. There is no email sending.
+
+**Backups.** On startup and then every 24 hours the server writes a copy of
+the database (`VACUUM INTO`) to `/data/backups/whist-YYYY-MM-DD.db`, skipping
+the day if its copy exists, and keeps the newest `BACKUP_DAYS` copies. Files
+are private (0600). A failed backup is logged and never stops the server.
+These live on the same volume, so they protect against mistakes, not against
+losing the disk: copy them elsewhere too.
 
 ### Cutting over from joseffsmith.uk/contract-whist
 
