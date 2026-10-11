@@ -1,9 +1,9 @@
 name: Mobile
 
 # Builds the Capacitor app in mobile/ (see mobile/README.md). The first two
-# jobs prove the app still compiles; `testflight` (experimental, see the
-# README) ships an iOS build and only runs when started by hand, with the App
-# Store Connect secrets set.
+# jobs prove the app still compiles. Started by hand ("Run workflow"),
+# `testflight` (experimental) ships an iOS build and `play` a signed Android
+# bundle to Play internal testing, each only when its secrets are set.
 on:
   push:
     branches: [main]
@@ -77,6 +77,18 @@ jobs:
         with:
           name: whist-debug-apk
           path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+      # Proves release signing works, with a throwaway key (the real upload key
+      # is only used by the `play` job).
+      - name: Signed release bundle (throwaway key)
+        working-directory: mobile/android
+        run: |
+          keytool -genkeypair -keystore "$RUNNER_TEMP/test.jks" -alias test \
+            -keyalg RSA -keysize 2048 -validity 1 -storepass testtest -keypass testtest \
+            -dname "CN=CI test"
+          ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/test.jks" ANDROID_KEYSTORE_PASSWORD=testtest \
+          ANDROID_KEY_ALIAS=test ANDROID_KEY_PASSWORD=testtest \
+            ./gradlew bundleRelease -PversionCode=${{ github.run_number }}
+          jarsigner -verify app/build/outputs/bundle/release/app-release.aab | grep "jar verified"
 
   ios:
     runs-on: macos-15
@@ -215,3 +227,91 @@ jobs:
       - name: Remove the API key
         if: always()
         run: rm -f "$ASC_KEY_PATH"
+
+  # Google Play: a signed release bundle with the real upload key, uploaded to
+  # the internal testing track when a Play service account is set (otherwise
+  # kept as an artifact to upload by hand). Started by hand, like TestFlight.
+  play-check:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+      upload: ${{ steps.check.outputs.upload }}
+    steps:
+      - id: check
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_B64" ] && [ -n "$ANDROID_KEYSTORE_PASSWORD" ] && [ -n "$ANDROID_KEY_ALIAS" ] && [ -n "$ANDROID_KEY_PASSWORD" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Play build skipped: set ANDROID_KEYSTORE_B64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD (see mobile/README.md)."
+          fi
+          if [ -n "$PLAY_SERVICE_ACCOUNT_JSON" ]; then
+            echo "upload=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "upload=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  play:
+    needs: play-check
+    if: needs.play-check.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci
+      - run: npm run build:mobile
+      - run: npm ci
+        working-directory: mobile
+      - run: npx cap sync android
+        working-directory: mobile
+      - name: Write the upload key
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          printf '%s' "$ANDROID_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/upload.jks" >> "$GITHUB_ENV"
+      # versionCode = run number + 100, so CI builds always outrank the first
+      # bundles uploaded by hand.
+      - name: Signed release bundle
+        working-directory: mobile/android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew bundleRelease -PversionCode=$(( ${{ github.run_number }} + 100 ))
+      - name: Remove the upload key
+        if: always()
+        run: rm -f "$ANDROID_KEYSTORE_PATH"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: whist-release-aab
+          path: mobile/android/app/build/outputs/bundle/release/app-release.aab
+      # Play only accepts API uploads once the app's first release was made in
+      # Play Console by hand (see mobile/README.md).
+      - name: Upload to Play (internal testing)
+        if: needs.play-check.outputs.upload == 'true'
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: uk.joseffsmith.whist
+          releaseFiles: mobile/android/app/build/outputs/bundle/release/app-release.aab
+          track: internal
+          status: completed

@@ -18,8 +18,28 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Release signing with the Play upload key, when one is given: CI sets the
+    // ANDROID_* env vars from secrets; locally put the same keys in
+    // keystore.properties (never committed). Without either, release builds are
+    // unsigned and Android Studio's "Generate Signed App Bundle" still works.
+    def keystoreProps = new Properties()
+    def keystoreFile = rootProject.file("keystore.properties")
+    if (keystoreFile.exists()) keystoreFile.withInputStream { keystoreProps.load(it) }
+    def signingValue = { String key -> (keystoreProps.getProperty(key) ?: System.getenv(key))?.toString() }
+    def releaseStore = signingValue("ANDROID_KEYSTORE_PATH")
+    signingConfigs {
+        if (releaseStore) {
+            release {
+                storeFile file(releaseStore)
+                storePassword signingValue("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias signingValue("ANDROID_KEY_ALIAS")
+                keyPassword signingValue("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
     buildTypes {
         release {
+            if (releaseStore) signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

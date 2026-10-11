@@ -117,21 +117,48 @@ uploads as an artifact for sideloading.
 
 **Google Play internal testing**
 
-1. In Play Console, Create app (name, language, App, Free) and accept the
-   declarations. Fill in what it asks before it lets you release: privacy
-   policy, data safety, content rating.
-2. In Android Studio, Build, Generate Signed App Bundle, Android App Bundle.
-   Make a new keystore and keep it and its passwords somewhere safe; Play's
-   "Play App Signing" holds the real signing key, so this is only the upload
-   key. Choose the `release` build.
-3. In Play Console, Testing, Internal testing, Create new release, upload the
-   `.aab`. Under the Testers tab, make an email list and add yourself and your
-   friends, then send them the opt-in link.
+1. Make the upload key once, on the Mac, and keep the file and passwords safe
+   (a password manager). Play holds the real signing key ("Play App Signing");
+   this one only proves uploads come from you, and Play can reset it if lost.
+   ```sh
+   keytool -genkeypair -v -keystore whist-upload.jks -alias upload \
+     -keyalg RSA -keysize 2048 -validity 10000
+   ```
+2. In Play Console, Create app (name, language, App, Free) and accept the
+   declarations. Before it lets you release, fill in the App content pages:
+   privacy policy (`https://joseffsmith.uk/contract-whist/privacy`), data
+   safety, content rating, target audience, ads (none).
+3. The first bundle has to go up by hand. Build it signed with your key:
+   put this in `mobile/android/keystore.properties` (ignored by git)
+   ```properties
+   ANDROID_KEYSTORE_PATH=/full/path/to/whist-upload.jks
+   ANDROID_KEYSTORE_PASSWORD=...
+   ANDROID_KEY_ALIAS=upload
+   ANDROID_KEY_PASSWORD=...
+   ```
+   then `cd mobile/android && ./gradlew bundleRelease -PversionCode=1` and
+   upload `app/build/outputs/bundle/release/app-release.aab` in Testing,
+   Internal testing, Create new release. Roll it out.
+4. Under Internal testing, Testers, make an email list with your friends'
+   Google account emails and send them the opt-in link.
 
-Every upload needs a higher version code. It defaults to 1; set it with
-`./gradlew bundleRelease -PversionCode=2` (or `VERSION_CODE=2`), or from the
-Android Studio terminal. `-PversionName=1.1` sets the name. Never commit the
-keystore (`*.jks`, `*.keystore` and `keystore.properties` are ignored).
+**Play builds from GitHub Actions** (after the first manual release)
+
+Add these repository secrets (Settings, Secrets and variables, Actions):
+
+| Secret | Value |
+|---|---|
+| `ANDROID_KEYSTORE_B64` | `base64 -i whist-upload.jks \| pbcopy` on the Mac, then paste |
+| `ANDROID_KEYSTORE_PASSWORD` | the keystore password |
+| `ANDROID_KEY_ALIAS` | `upload` |
+| `ANDROID_KEY_PASSWORD` | the key password |
+| `PLAY_SERVICE_ACCOUNT_JSON` | optional: the JSON key of a Google Cloud service account invited in Play Console (Users and permissions) with "Release to testing tracks" for this app |
+
+Then Actions, Mobile, Run workflow. The `play` job builds a signed bundle with
+versionCode = run number + 100 (so it outranks hand uploads), keeps it as an
+artifact, and with the service account uploads it straight to internal
+testing. Without the service account, download the artifact and upload it in
+Play Console yourself.
 
 ## After changing the web app
 

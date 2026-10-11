@@ -1,0 +1,85 @@
+name: Web
+
+# Tests every push and pull request. On main, once the checks pass, asks
+# Coolify to deploy (it builds the Dockerfile from main) and waits until the
+# site answers with the new deploy. Needs the COOLIFY_TOKEN secret: a Coolify
+# API token with the "deploy" permission (Coolify, Keys & Tokens, API tokens).
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "mobile/**"
+      - "docs/**"
+      - "**.md"
+      - ".github/workflows/mobile.yml"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Deploys run one at a time, in order; a newer push waits rather than
+# cancelling a deploy halfway.
+concurrency:
+  group: web-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  COOLIFY_URL: https://coolify.joseffsmith.uk
+  COOLIFY_APP: z13f9zmzwcb65mbt7cxub853
+  HEALTH_URL: https://joseffsmith.uk/contract-whist/api/health
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm run build:server
+
+  deploy:
+    needs: check
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+    steps:
+      - name: Deploy on Coolify
+        run: |
+          if [ -z "$COOLIFY_TOKEN" ]; then
+            echo "::warning::COOLIFY_TOKEN isn't set, so nothing was deployed."
+            exit 0
+          fi
+          api() {
+            curl -sS --fail-with-body -m 60 "$COOLIFY_URL/api/v1$1" \
+              -H "Authorization: Bearer $COOLIFY_TOKEN" -H "Accept: application/json"
+          }
+          dep=$(api "/deploy?uuid=$COOLIFY_APP&force=false" \
+            | jq -r '.deployments[0].deployment_uuid')
+          echo "Coolify deployment $dep"
+          for i in $(seq 1 90); do
+            status=$(api "/deployments/$dep" | jq -r '.status')
+            case "$status" in
+              finished) echo "Deployed."; break ;;
+              failed|cancelled*) echo "::error::Coolify deployment $status"; exit 1 ;;
+            esac
+            sleep 10
+          done
+          [ "$status" = finished ] || { echo "::error::Timed out ($status)"; exit 1; }
+      - name: Check the site
+        if: env.COOLIFY_TOKEN != ''
+        run: |
+          for i in $(seq 1 12); do
+            if curl -sS -m 10 "$HEALTH_URL" | jq -e '.ok == true'; then exit 0; fi
+            sleep 5
+          done
+          echo "::error::$HEALTH_URL isn't healthy after the deploy"
+          exit 1
