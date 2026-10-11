@@ -102,19 +102,12 @@ every rebase. Ops must not depend on row iteration order (sort ids).
   no active claimed player, transfer the claim; otherwise run
   `mergePlayers(guestPlayer → accountPlayer)` with
   `internal.allowClaimedFrom = guestUserId`. Failures here must not fail the
-  login. Migrated users with no password yet → 401 `no_password`
-  ("Ask the app admin for a set-password link.").
+  login. A user without a password can't log in (same generic
+  `bad_credentials` error).
 - `POST /auth/logout`, `GET /auth/me` → `{ user }`.
 - `POST /auth/password {password}` (signed-in, non-guest) → set/change.
-- `POST /auth/forgot {email}` → always `{ ok: true }` (never reveal whether
-  the email exists). If a non-guest user has that email, create a one-time
-  reset token (7 days, `reset_tokens`) and email the link
-  `${PUBLIC_URL}/reset/<token>` via Resend (`POST https://api.resend.com/emails`
-  with `Authorization: Bearer ${RESEND_API_KEY}`, from `MAIL_FROM`, plain
-  text + simple HTML). Without `RESEND_API_KEY`, log the link instead.
-  Rate limit per IP and per email (e.g. 5 / hour). This is how migrated
-  accounts (no password yet) and forgotten passwords get a password; the
-  login `no_password` message points users to "Forgot password".
+- No email sending (no external services). Forgotten passwords: an admin
+  creates a set-password link and shares it by hand.
 - Admin (session email in `ADMIN_EMAILS`, comma-separated env):
   `POST /auth/reset-link {email}` → `{ url }` (one-time, 7 days,
   `${PUBLIC_URL}/reset/<token>`, `PUBLIC_URL` default
@@ -134,16 +127,15 @@ every rebase. Ops must not depend on row iteration order (sort ids).
 
 ### Migration from InstantDB (`server/scripts/`)
 
-- `export-instant.mjs`: with `INSTANT_ADMIN_TOKEN`, dump all
-  players/games/playersOrders/rounds/turns (with link ids) and `$users`
-  (id, email) via the admin HTTP API to a JSON file. Reference
-  implementation of the API: `@instantdb/admin` source at
-  `/tmp/claude-0/-home-user-contract-whist-scorecard/124f8969-fc18-5cf2-8f9c-745539210695/scratchpad/admin-sdk/node_modules/@instantdb/admin/dist/esm/index.js`
-  (`query` → `POST /admin/query`).
+- `export-instant`: dump all players/games/playersOrders/rounds/turns
+  (with link ids) to a JSON file. The InstantDB app is publicly readable, so
+  no admin token is needed: run the `@instantdb/core` client query in a
+  headless browser (as the orchestrator did for the duplicates audit) or
+  via the public HTTP API.
 - `import-instant`: load that JSON into an **empty** DB, keeping ids.
-  `playersOrders` → `seats`. Users with an email → non-guest users with no
-  password. Guest users are dropped and their players' `claimedBy` cleared
-  (their phones can't authenticate to the new server).
+  `playersOrders` → `seats`. **No users are imported** and every player's
+  `claimedBy` is cleared: after cutover everyone creates an account (or
+  joins as a guest) and claims their player again.
 
 ## Client (`src/sync/`)
 
