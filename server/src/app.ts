@@ -15,12 +15,13 @@ export type ServerOptions = {
   host?: string;
   adminBootstrapToken?: string; // POST /auth/claim-admin; the first admin only
   importToken?: string; // enables POST /admin/import (one-off migration)
+  trustProxyHops?: number; // proxies in front (default 1); see README
   pingMs?: number; // SSE heartbeat interval (tests only)
   maxStreams?: number;
   maxStreamsPerIp?: number;
 };
 
-const DEFAULT_PUBLIC_URL = "https://whist.joseffsmith.uk/contract-whist";
+const DEFAULT_PUBLIC_URL = "https://joseffsmith.uk/contract-whist";
 const PUSH_MAX_BYTES = 256 * 1024;
 const IMPORT_MAX_BYTES = 20 * 1024 * 1024;
 const STREAMED = Symbol("streamed");
@@ -91,7 +92,14 @@ export async function startServer(opts: ServerOptions) {
     "POST /sync/push": async (c) => {
       const user = auth.requireUser(c.req);
       const body = await readJson(c.req, PUSH_MAX_BYTES);
-      return sync.push({ id: user.id, isGuest: !!user.is_guest }, body);
+      return sync.push(
+        {
+          id: user.id,
+          isGuest: !!user.is_guest,
+          isAdmin: !!user.is_admin,
+        },
+        body
+      );
     },
 
     "POST /admin/import": adminImport,
@@ -108,7 +116,12 @@ export async function startServer(opts: ServerOptions) {
       const path = url.pathname.replace(/\/+$/, "") || "/";
       const handler = routes[`${req.method} ${path}`];
       if (!handler) throw new HttpError(404, "Not found.", "not_found");
-      const result = await handler({ req, res, url, ip: clientIp(req) });
+      const result = await handler({
+        req,
+        res,
+        url,
+        ip: clientIp(req, opts.trustProxyHops ?? 1),
+      });
       if (result !== STREAMED) send(res, 200, result);
     } catch (e) {
       // Too late for a JSON error once an event stream has started.

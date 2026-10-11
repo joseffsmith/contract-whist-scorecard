@@ -1,8 +1,9 @@
 # Production image for Coolify (or any Docker host).
 # nginx serves the Vite build at /contract-whist/ on port 80 and proxies
 # /contract-whist/api/ to the Node server (server/src, SQLite in /data).
-# Mount a persistent volume at /data. First-time setup: see docs/backend/SPEC.md
-# (ADMIN_BOOTSTRAP_TOKEN, IMPORT_TOKEN).
+# Mount a persistent volume at /data. Environment variables (PUBLIC_URL,
+# ADMIN_BOOTSTRAP_TOKEN, IMPORT_TOKEN, TRUST_PROXY_HOPS) are in the README,
+# "Deploying (Coolify)".
 
 FROM node:22-alpine AS build
 WORKDIR /app
@@ -23,4 +24,6 @@ COPY server/docker-entrypoint.sh /docker-entrypoint.sh
 ENV DATA_DIR=/data
 VOLUME /data
 EXPOSE 80
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
+  CMD wget -qO- http://127.0.0.1/contract-whist/api/health || exit 1
 ENTRYPOINT ["/docker-entrypoint.sh"]

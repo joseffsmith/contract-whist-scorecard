@@ -4,7 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { DEALS } from "../constants";
 import { act, newId } from "../lib/dispatch";
 import { useGame } from "../lib/offline";
-import { useAuth } from "../sync";
+import { useAuth, useConnectionStatus } from "../sync";
 import {
   alpha,
   fluid,
@@ -32,6 +32,7 @@ export const GameComp = () => {
 
   const { isLoading: isLoadingUser, user } = useAuth();
   const { isLoading, game } = useGame(gameId);
+  const connecting = useConnectionStatus() === "connecting";
 
   useEffect(() => {
     if (!gameId) navigate("/");
@@ -42,15 +43,21 @@ export const GameComp = () => {
       <>
         <Crumb trail={[{ label: "Home", to: "/" }, { label: "Game" }]} />
         <div style={{ padding: 20, opacity: 0.6 }}>
-          {isLoading || isLoadingUser ? "Loading…" : "Game not found."}
+          {isLoading || isLoadingUser || connecting
+            ? "Loading…"
+            : "Game not found."}
         </div>
       </>
     );
   }
   const initialDealerId = game.initialDealerId;
-  const initialDealerIdx =
-    game.playersOrders.find((po) => po.player?.id === initialDealerId)
-      ?.orderNumber ?? null;
+  // The dealer's position among the seated players (not its orderNumber,
+  // which can have gaps after a removal).
+  const seated = [...game.playersOrders]
+    .sort((a, b) => a.orderNumber - b.orderNumber)
+    .filter((po) => po.player);
+  const dealerSeat = seated.findIndex((po) => po.player!.id === initialDealerId);
+  const initialDealerIdx = dealerSeat === -1 ? null : dealerSeat;
 
   const rs = game.rounds.sort((a, b) => a.roundNumber - b.roundNumber);
   // Skip a seat whose player hasn't loaded rather than crashing.
@@ -95,7 +102,8 @@ export const GameComp = () => {
   const scores = players.map((p) => getScoreForPlayer(p!.id));
   const leadScore = Math.max(...scores, 0);
   const winningScorerIdx = scores.findIndex((s) => s === leadScore);
-  const isOwnGame = user?.id === game.createdBy;
+  // The host (or the app admin) runs the game.
+  const isOwnGame = user?.id === game.createdBy || !!user?.isAdmin;
 
   const handleBid = async (opt: { number: number; disabled: boolean }) => {
     if (!opt.disabled && currentPlayerId !== null) {

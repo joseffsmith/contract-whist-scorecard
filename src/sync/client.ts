@@ -269,6 +269,7 @@ export function createSyncClient(
     return {
       userId: entry.userId,
       isGuest: user ? user.isGuest : entry.isGuest,
+      isAdmin: !!user?.isAdmin,
       now: entry.action.clientTime ?? new Date(0).toISOString(),
     };
   }
@@ -858,6 +859,7 @@ export function createSyncClient(
     const ops = applyAction(memoryReadState(view), action, {
       userId: user.id,
       isGuest: user.isGuest,
+      isAdmin: !!user.isAdmin,
       now,
     });
     lastAt = Math.max(lastAt, nowMs);

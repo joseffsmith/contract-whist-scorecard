@@ -15,7 +15,7 @@ import type { Db } from "./db";
 import { HttpError } from "./http";
 import type { Limiter } from "./http";
 
-export type Actor = { id: string; isGuest: boolean };
+export type Actor = { id: string; isGuest: boolean; isAdmin?: boolean };
 
 // One step of `apply`: an action, or a server-internal row update (never
 // built from client input). `internal` is only ever set by the server.
@@ -29,7 +29,7 @@ export type Step =
 
 const MAX_ACTIONS_PER_PUSH = 500;
 const MAX_STREAM_BACKLOG = 2 * 1024 * 1024; // bytes a slow client may fall behind
-const SNAPSHOTS_PER_MINUTE = 20;
+const SNAPSHOTS_PER_MINUTE = 60; // a whole table may share one Wi-Fi IP
 
 export type SyncOptions = {
   pingMs?: number;
@@ -41,7 +41,7 @@ const busy = () =>
   new HttpError(503, "Something went wrong. Try again.", "server_error");
 
 export function createSync(db: Db, limiter: Limiter, opts: SyncOptions = {}) {
-  const { pingMs = 20_000, maxStreams = 500, maxStreamsPerIp = 10 } = opts;
+  const { pingMs = 20_000, maxStreams = 500, maxStreamsPerIp = 50 } = opts;
   const streams = new Set<ServerResponse>();
   const perIp = new Map<string, number>();
 
@@ -86,6 +86,7 @@ export function createSync(db: Db, limiter: Limiter, opts: SyncOptions = {}) {
             const ctx = {
               userId: actor.id,
               isGuest: actor.isGuest,
+              isAdmin: actor.isAdmin,
               now,
               internal,
             };

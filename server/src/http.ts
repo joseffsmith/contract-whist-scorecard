@@ -59,13 +59,19 @@ export function ipKey(ip: string): string {
   return `${first.join(":")}::/64`;
 }
 
-// The host's nginx appends the real client IP last; earlier entries could be
-// spoofed by the client.
-export function clientIp(req: IncomingMessage): string {
-  const forwarded = String(req.headers["x-forwarded-for"] ?? "").split(",");
-  return ipKey(
-    forwarded[forwarded.length - 1].trim() || req.socket.remoteAddress || ""
-  );
+// The client's address as seen through `hops` trusted proxies, each of which
+// appends the address it received the request from to X-Forwarded-For. So the
+// real client is the `hops`-th entry from the end; earlier entries could be
+// spoofed. hops = 0 ignores the header and uses the socket address.
+export function clientIp(req: IncomingMessage, hops = 1): string {
+  const socketIp = req.socket.remoteAddress || "";
+  if (hops < 1) return ipKey(socketIp);
+  const forwarded = String(req.headers["x-forwarded-for"] ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const entry = forwarded[Math.max(forwarded.length - hops, 0)];
+  return ipKey(entry || socketIp);
 }
 
 export function bearerToken(req: IncomingMessage): string {

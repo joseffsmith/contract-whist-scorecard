@@ -2,6 +2,11 @@ import { startServer } from "./app";
 
 // A failure to start (bad DATA_DIR, port in use, old Node) crashes with a
 // clear error. Once listening, request-scoped surprises are logged instead.
+const hops = process.env.TRUST_PROXY_HOPS;
+if (hops !== undefined && !/^\d+$/.test(hops)) {
+  throw new Error("TRUST_PROXY_HOPS must be a whole number (default 1).");
+}
+
 const server = await startServer({
   port: Number(process.env.PORT ?? 3001),
   host: process.env.HOST || "127.0.0.1",
@@ -9,6 +14,7 @@ const server = await startServer({
   publicUrl: process.env.PUBLIC_URL,
   adminBootstrapToken: process.env.ADMIN_BOOTSTRAP_TOKEN,
   importToken: process.env.IMPORT_TOKEN,
+  trustProxyHops: hops === undefined ? undefined : Number(hops),
 });
 console.log(`whist server listening on ${server.url}`);
 

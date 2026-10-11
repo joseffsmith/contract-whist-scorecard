@@ -173,6 +173,22 @@ export function createAuth(
     return `${opts.publicUrl.replace(/\/+$/, "")}/reset#${token}`;
   }
 
+  const action = (name: ActionName, args: object) =>
+    ({ id: newActionId(), name, args } as Action);
+
+  // A guest leaving: their players become claimable again.
+  function releaseClaims(guestId: string): void {
+    const actor = { id: guestId, isGuest: true };
+    const steps = db
+      .readState()
+      .where("players", "claimedBy", guestId)
+      .map((p) => ({
+        action: action("unclaimPlayer", { playerId: p.id }),
+        actor,
+      }));
+    if (steps.length) sync.apply(newActionId(), steps);
+  }
+
   // ── Guest → account handoff ───────────────────────────────────────────
 
   // The guest's claimed player moves to the account: transferred if the
@@ -185,7 +201,11 @@ export function createAuth(
       const guest = userForToken(guestToken);
       if (!guest || !guest.is_guest || guest.id === account.id) return;
       const guestActor = { id: guest.id, isGuest: true };
-      const accountActor = { id: account.id, isGuest: false };
+      const accountActor = {
+        id: account.id,
+        isGuest: false,
+        isAdmin: !!account.is_admin,
+      };
       const state = db.readState();
       // Most seats first, then smallest id.
       const claimed = (userId: string) =>
@@ -198,8 +218,6 @@ export function createAuth(
           }))
           .sort((a, b) => b.seats - a.seats || (a.p.id < b.p.id ? -1 : 1))
           .map(({ p }) => p);
-      const action = (name: ActionName, args: object) =>
-        ({ id: newActionId(), name, args } as Action);
       const release = (playerId: string) =>
         sync.apply(newActionId(), [
           { action: action("unclaimPlayer", { playerId }), actor: guestActor },
@@ -288,7 +306,7 @@ export function createAuth(
       if (!validEmail(email))
         throw new HttpError(400, "Enter a valid email.", "invalid_email");
       const password = validPassword(body.password);
-      tooMany(`signup:${ip}`, 10);
+      tooMany(`signup:${ip}`, 30);
       const hasAccount = () =>
         new HttpError(
           409,
@@ -349,8 +367,16 @@ export function createAuth(
 
     async logout(req: IncomingMessage) {
       const token = bearerToken(req);
-      if (token)
-        db.stmt("DELETE FROM sessions WHERE token_hash = ?").run(sha256(token));
+      if (!token) return { ok: true };
+      const user = userForToken(token);
+      if (user?.is_guest) {
+        try {
+          releaseClaims(user.id);
+        } catch (e) {
+          console.error("Releasing a guest's players failed:", e);
+        }
+      }
+      db.stmt("DELETE FROM sessions WHERE token_hash = ?").run(sha256(token));
       return { ok: true };
     },
 

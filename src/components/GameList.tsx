@@ -59,7 +59,7 @@ export const GameList = () => {
           g.rounds
         );
         const sorted = [...totals].sort((a, b) => b.score - a.score);
-        const canDelete = g.createdBy === user?.id;
+        const canDelete = g.createdBy === user?.id || !!user?.isAdmin;
         const when = new Date(g.createdAt).toLocaleString();
         return (
           <div

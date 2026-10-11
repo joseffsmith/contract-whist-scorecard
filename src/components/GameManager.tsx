@@ -20,6 +20,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { act, newId } from "../lib/dispatch";
 import { useGame } from "../lib/offline";
 import { useMyPlayer } from "../players/account";
+import { useAuth, useConnectionStatus } from "../sync";
 import { alpha, goldButton, t } from "../theme/tokens";
 import { Player, PlayersOrdersWithPlayers } from "../types";
 import {
@@ -37,6 +38,8 @@ export const GameManager = () => {
   const [addingOpen, setAddingOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
 
+  const { user } = useAuth();
+  const connecting = useConnectionStatus() === "connecting";
   const { isLoading, game } = useGame(gameId);
   const { player: myPlayer } = useMyPlayer();
 
@@ -52,12 +55,14 @@ export const GameManager = () => {
       <>
         <Crumb trail={[{ label: "Home", to: "/" }, { label: "New game" }]} />
         <div style={{ padding: 20, opacity: 0.6 }}>
-          {isLoading ? "Loading…" : "Game not found."}
+          {isLoading || connecting ? "Loading…" : "Game not found."}
         </div>
       </>
     );
   }
 
+  // Only the host (or the app admin) can change who's playing.
+  const canManage = user?.id === game.createdBy || !!user?.isAdmin;
   const playerOrders = game.playersOrders;
   const hasStarted = game.rounds.some((r) => r.turns.length > 0);
   const playerOrdersInGame = [...playerOrders].sort(
@@ -122,13 +127,28 @@ export const GameManager = () => {
                   player={player}
                   isDealer={dealerIdx === idx}
                   canChangeDealer={!hasStarted}
+                  readOnly={!canManage}
                 />
               );
             })}
           </SortableContext>
         </DndContext>
 
-        {addingOpen ? (
+        {!canManage && (
+          <div
+            style={{
+              marginTop: 10,
+              fontSize: 13,
+              color: t.cream,
+              opacity: 0.65,
+              textAlign: "center",
+            }}
+          >
+            Only the host can change players.
+          </div>
+        )}
+
+        {canManage && addingOpen ? (
           <div style={{ marginTop: 10 }}>
             <ChoosePlayerOrCreate
               createPlayer={async (name) => {
@@ -175,7 +195,7 @@ export const GameManager = () => {
               Cancel
             </button>
           </div>
-        ) : (
+        ) : canManage ? (
           <button
             onClick={() => setAddingOpen(true)}
             style={{
@@ -193,7 +213,8 @@ export const GameManager = () => {
           >
             + Add player
           </button>
-        )}
+        ) : null}
+        {canManage && (
         <button
           onClick={() => setInviteOpen(true)}
           style={{
@@ -211,6 +232,7 @@ export const GameManager = () => {
         >
           ▦ Let players join from their phones
         </button>
+        )}
       </div>
       {inviteOpen && (
         <InviteSheet gameId={gameId!} onClose={() => setInviteOpen(false)} />
@@ -223,7 +245,7 @@ export const GameManager = () => {
         }}
       >
         <button
-          disabled={playerOrdersInGame.length < 2}
+          disabled={canManage && playerOrdersInGame.length < 2}
           onClick={() => nav(`/games/${gameId}`)}
           style={{
             ...goldButton,
@@ -231,10 +253,12 @@ export const GameManager = () => {
             borderRadius: 12,
             padding: "14px",
             fontSize: 16,
-            opacity: playerOrdersInGame.length < 2 ? 0.5 : 1,
+            opacity: canManage && playerOrdersInGame.length < 2 ? 0.5 : 1,
           }}
         >
-          {playerOrdersInGame.length < 2
+          {!canManage
+            ? "View game →"
+            : playerOrdersInGame.length < 2
             ? "Minimum 2 players"
             : "Deal · start game →"}
         </button>
@@ -249,12 +273,14 @@ const PlayerRow = ({
   player,
   isDealer,
   canChangeDealer,
+  readOnly,
 }: {
   isSelf: boolean;
   playerOrderId: string;
   player: Player;
   isDealer: boolean;
   canChangeDealer: boolean;
+  readOnly: boolean;
 }) => {
   const { gameId } = useParams<{ gameId: string }>();
   const { attributes, listeners, setNodeRef, transform, transition } =
@@ -302,6 +328,7 @@ const PlayerRow = ({
         gap: 12,
       }}
     >
+      {!readOnly && (
       <div
         {...listeners}
         {...attributes}
@@ -315,6 +342,7 @@ const PlayerRow = ({
       >
         ⋮⋮
       </div>
+      )}
       <div
         style={{
           width: 32,
@@ -359,7 +387,7 @@ const PlayerRow = ({
           </div>
         )}
       </div>
-      {!isDealer && (
+      {!isDealer && !readOnly && (
         <button
           onClick={makeDealer}
           style={{
@@ -373,7 +401,7 @@ const PlayerRow = ({
           Make dealer
         </button>
       )}
-      {!isSelf && (
+      {!isSelf && !readOnly && (
         <button
           onClick={remove}
           aria-label="Remove"
