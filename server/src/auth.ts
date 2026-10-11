@@ -36,6 +36,7 @@ type UserRow = {
   id: string;
   email: string | null;
   is_guest: number;
+  is_admin: number;
   password_salt: string | null;
   password_hash: string | null;
 };
@@ -91,7 +92,7 @@ const publicUser = (u: UserRow): PublicUser => ({
 });
 
 export type AuthOptions = {
-  adminEmails: string[];
+  adminBootstrapToken?: string; // lets the first admin claim the role
   publicUrl: string;
 };
 
@@ -145,6 +146,13 @@ export function createAuth(
     ).run(h.salt, h.hash, userId);
   }
 
+  function deleteSessions(userId: string, exceptToken = ""): void {
+    db.stmt("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?").run(
+      userId,
+      exceptToken ? sha256(exceptToken) : ""
+    );
+  }
+
   /** The signed-in user for this request, or undefined. */
   const sessionUser = (req: IncomingMessage) => userForToken(bearerToken(req));
 
@@ -161,30 +169,44 @@ export function createAuth(
     db.stmt(
       "INSERT INTO reset_tokens (token_hash, user_id, expires_at) VALUES (?, ?, ?)"
     ).run(sha256(token), userId, Date.now() + RESET_LINK_MS);
-    return `${opts.publicUrl.replace(/\/+$/, "")}/reset/${token}`;
+    return `${opts.publicUrl.replace(/\/+$/, "")}/reset#${token}`;
   }
 
   // ── Guest → account handoff ───────────────────────────────────────────
 
   // The guest's claimed player moves to the account: transferred if the
   // account has none, otherwise merged into the account's player. Goes through
-  // the normal action pipeline. Never throws.
+  // the normal action pipeline. Only one player is handed over (the one with
+  // the most seats); any others the guest claimed are released. A guest player
+  // that can't move is released too, so it stays claimable. Never throws.
   async function handoff(guestToken: string, account: UserRow): Promise<void> {
     try {
       const guest = userForToken(guestToken);
       if (!guest || !guest.is_guest || guest.id === account.id) return;
       const guestActor = { id: guest.id, isGuest: true };
       const accountActor = { id: account.id, isGuest: false };
+      const state = db.readState();
+      // Most seats first, then smallest id.
       const claimed = (userId: string) =>
-        db
-          .readState()
+        state
           .where("players", "claimedBy", userId)
-          .filter((p) => !p.mergedInto);
+          .filter((p) => !p.mergedInto)
+          .map((p) => ({
+            p,
+            seats: state.where("seats", "playerId", p.id).length,
+          }))
+          .sort((a, b) => b.seats - a.seats || (a.p.id < b.p.id ? -1 : 1))
+          .map(({ p }) => p);
+      const action = (name: ActionName, args: object) =>
+        ({ id: newActionId(), name, args } as Action);
+      const release = (playerId: string) =>
+        sync.apply(newActionId(), [
+          { action: action("unclaimPlayer", { playerId }), actor: guestActor },
+        ]);
 
-      for (const theirs of claimed(guest.id)) {
-        const mine = claimed(account.id)[0];
-        const action = (name: ActionName, args: object) =>
-          ({ id: newActionId(), name, args } as Action);
+      const [theirs, ...others] = claimed(guest.id);
+      const mine = claimed(account.id)[0];
+      if (theirs) {
         const result = mine
           ? sync.apply(newActionId(), [
               {
@@ -206,10 +228,20 @@ export function createAuth(
                 actor: accountActor,
               },
             ]);
-        if (!result.ok) console.error("Guest handoff failed:", result.error);
+        if (!result.ok) {
+          console.error("Guest handoff rejected:", result.error);
+          release(theirs.id);
+        }
       }
+      for (const p of others) release(p.id);
     } catch (e) {
       console.error("Guest handoff failed:", e);
+    } finally {
+      // The phone now uses the account's session.
+      const guest = userForToken(guestToken);
+      if (guest?.is_guest && guest.id !== account.id) {
+        deleteSessions(guest.id);
+      }
     }
   }
 
@@ -250,12 +282,15 @@ export function createAuth(
       const current = sessionUser(req);
       try {
         if (current?.is_guest) {
-          db.stmt("UPDATE users SET email = ?, is_guest = 0 WHERE id = ?").run(
-            email,
-            current.id
-          );
-          setPassword(current.id, hashed);
-          return respond(userById(current.id)!, bearerToken(req));
+          const upgraded = db
+            .stmt(
+              "UPDATE users SET email = ?, is_guest = 0, password_salt = ?, password_hash = ? WHERE id = ? AND is_guest = 1"
+            )
+            .run(email, hashed.salt, hashed.hash, current.id);
+          if (!upgraded.changes) throw hasAccount();
+          // Same user, new session: the guest token is retired.
+          deleteSessions(current.id);
+          return respond(userById(current.id)!, createSession(current.id));
         }
         const id = randomUUID();
         db.stmt(
@@ -273,7 +308,7 @@ export function createAuth(
       const body = await readJson(req);
       const email = normEmail(body.email);
       tooMany(`login:${ip}`, 30);
-      tooMany(`login:${email}`, 10);
+      tooMany(`login:${email.slice(0, 254)}`, 10);
       const user = userByEmail(email);
       const stored =
         user?.password_salt && user.password_hash
@@ -311,13 +346,38 @@ export function createAuth(
       }
       const password = validPassword((await readJson(req)).password);
       setPassword(user.id, await hashPassword(password));
+      deleteSessions(user.id, bearerToken(req)); // sign out everywhere else
+      return { ok: true };
+    },
+
+    // The first admin proves they run the server by knowing the bootstrap
+    // token. Works once: after that, admins are only made by hand in the DB.
+    async claimAdmin(req: IncomingMessage, ip: string) {
+      const user = requireUser(req);
+      tooMany(`claim-admin:${ip}`, 10);
+      const secret = opts.adminBootstrapToken;
+      if (!secret) throw new HttpError(404, "Not found.", "not_found");
+      if (user.is_guest) {
+        throw new HttpError(403, "Create an account first.", "guest");
+      }
+      const given = String((await readJson(req)).token ?? "");
+      const matches = timingSafeEqual(
+        createHash("sha256").update(given).digest(),
+        createHash("sha256").update(secret).digest()
+      );
+      const taken = db.stmt("SELECT 1 FROM users WHERE is_admin = 1").get();
+      if (taken) {
+        throw new HttpError(403, "An admin already exists.", "admin_exists");
+      }
+      if (!matches) throw new HttpError(403, "Wrong token.", "forbidden");
+      db.stmt("UPDATE users SET is_admin = 1 WHERE id = ?").run(user.id);
       return { ok: true };
     },
 
     // Admin: one-time link (7 days) for setting a password.
     async resetLink(req: IncomingMessage) {
       const admin = requireUser(req);
-      if (!admin.email || !opts.adminEmails.includes(admin.email)) {
+      if (!admin.is_admin) {
         throw new HttpError(
           403,
           "Only the app admin can do that.",
@@ -354,10 +414,11 @@ export function createAuth(
       // Re-check: the token may have been used while we were hashing.
       const found = find();
       if (!found) throw invalid();
-      db.stmt("UPDATE reset_tokens SET used_at = ? WHERE token_hash = ?").run(
-        new Date().toISOString(),
-        sha256(String(body.token))
-      );
+      // Retire every link and session: whoever had access before is out.
+      db.stmt(
+        "UPDATE reset_tokens SET used_at = ? WHERE user_id = ? AND used_at IS NULL"
+      ).run(new Date().toISOString(), found.user_id);
+      deleteSessions(found.user_id);
       setPassword(found.user_id, hashed);
       return respond(userById(found.user_id)!, createSession(found.user_id));
     },

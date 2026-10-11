@@ -10,18 +10,17 @@ Demo: https://joseffsmith.uk/contract-whist
 ## Offline first
 
 Anyone who has opened the app before must be able to use it with no signal.
-The service worker serves the app shell; InstantDB serves data from its
-local cache and queues writes until it reconnects. InstantDB can only answer
-queries it has run before, so:
+The service worker serves the app shell; the sync engine (`src/sync`) keeps a
+full local copy of the data in IndexedDB. Screens only read that copy
+(`useSyncView` and the selectors) and every write is an action
+(`sync.dispatch`, rules in `shared/actions.ts`) that is applied locally at
+once and queued. The server (`server/`) is the authority: it runs the same
+rules, rejects what isn't allowed (shown as a toast) and streams changes to
+every phone. See `docs/backend/SPEC.md`.
 
-- Screens read from the broad, always-subscribed queries (`queryHomeGames`,
-  `queryPlayerDirectory`; see `src/lib/offline.ts`) and pick out what they
-  need, rather than querying one record by id.
-- Don't use `db.queryOnce` in core flows (dealing, scoring, adding players).
-  Server-only actions (merging, joining by QR) go through `online()` so they
-  fail fast with a clear message.
-- Find "my player" by `claimedBy`, not the `$user` link (the server-only
-  `$users` table can't be resolved from the cache).
+Everything works offline except signing in as a guest, signing up, logging in
+and joining a game that isn't on this phone yet. Those need the server and
+say so.
 
 Test offline with a production build (`npm run build && npm run serve`) and
 Playwright's `context.setOffline(true)`.

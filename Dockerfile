@@ -1,22 +1,26 @@
 # Production image for Coolify (or any Docker host).
-# Builds the Vite app and serves it with nginx at /contract-whist/ on port 80,
-# plus the password sign-in service (server/auth.mjs) at /contract-whist/api/.
-# Password hashes live in /data — mount a persistent volume there and set
-# INSTANT_ADMIN_TOKEN.
+# nginx serves the Vite build at /contract-whist/ on port 80 and proxies
+# /contract-whist/api/ to the Node server (server/src, SQLite in /data).
+# Mount a persistent volume at /data. First-time setup: see docs/backend/SPEC.md
+# (ADMIN_BOOTSTRAP_TOKEN, IMPORT_TOKEN).
 
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY . .
-RUN npm run build
+RUN npm run build && npm run build:server
 
-FROM nginx:1.27-alpine
-RUN apk add --no-cache nodejs
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# node:sqlite needs Node 22.13+; node:22-alpine tracks the latest 22.x.
+FROM node:22-alpine
+RUN apk add --no-cache nginx \
+  && ln -sf /dev/stdout /var/log/nginx/access.log \
+  && ln -sf /dev/stderr /var/log/nginx/error.log
+COPY nginx.conf /etc/nginx/http.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html/contract-whist
-COPY server/auth.mjs /srv/auth/auth.mjs
-COPY server/start-auth.sh /docker-entrypoint.d/40-start-auth.sh
+COPY --from=build /app/server/dist/index.mjs /srv/whist/index.mjs
+COPY server/docker-entrypoint.sh /docker-entrypoint.sh
 ENV DATA_DIR=/data
 VOLUME /data
 EXPOSE 80
+ENTRYPOINT ["/docker-entrypoint.sh"]

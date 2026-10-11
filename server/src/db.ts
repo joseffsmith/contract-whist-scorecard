@@ -1,8 +1,8 @@
 // SQLite storage: synced tables (with version + tombstones), users, sessions.
-import { mkdirSync } from "node:fs";
+import { closeSync, mkdirSync, openSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
-import { TABLES } from "../../shared/types";
+import { StateError, TABLES } from "../../shared/types";
 import type {
   ChangeSet,
   GameRow,
@@ -17,7 +17,13 @@ import type {
 } from "../../shared/types";
 
 // Not a static import: vite (vitest) can't resolve "node:sqlite" yet.
-const { DatabaseSync } = process.getBuiltinModule("node:sqlite");
+const sqlite = process.getBuiltinModule?.("node:sqlite");
+if (!sqlite) {
+  throw new Error(
+    "This server needs Node 22.13 or newer (it uses the built-in node:sqlite)."
+  );
+}
+const { DatabaseSync } = sqlite;
 type DatabaseSync = DatabaseSyncType;
 
 type SqlValue = string | number | null;
@@ -42,30 +48,30 @@ const COLUMNS: Record<TableName, string[]> = {
 
 const MIGRATIONS = [
   `
-  CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  CREATE TABLE meta (key TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL);
   INSERT INTO meta (key, value) VALUES ('version', '0');
 
   CREATE TABLE players (
-    id TEXT PRIMARY KEY, name TEXT NOT NULL, "claimedBy" TEXT, "mergedInto" TEXT,
+    id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, "claimedBy" TEXT, "mergedInto" TEXT,
     "mergedAt" TEXT, "mergeLog" TEXT, "createdAt" TEXT,
     version INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0
   );
   CREATE TABLE games (
-    id TEXT PRIMARY KEY, "createdAt" TEXT NOT NULL, "createdBy" TEXT NOT NULL,
+    id TEXT NOT NULL PRIMARY KEY, "createdAt" TEXT NOT NULL, "createdBy" TEXT NOT NULL,
     "deletedAt" TEXT, "initialDealerId" TEXT,
     version INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0
   );
   CREATE TABLE seats (
-    id TEXT PRIMARY KEY, "gameId" TEXT NOT NULL, "playerId" TEXT NOT NULL,
+    id TEXT NOT NULL PRIMARY KEY, "gameId" TEXT NOT NULL, "playerId" TEXT NOT NULL,
     "orderNumber" INTEGER NOT NULL,
     version INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0
   );
   CREATE TABLE rounds (
-    id TEXT PRIMARY KEY, "gameId" TEXT NOT NULL, "roundNumber" INTEGER NOT NULL,
+    id TEXT NOT NULL PRIMARY KEY, "gameId" TEXT NOT NULL, "roundNumber" INTEGER NOT NULL,
     version INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0
   );
   CREATE TABLE turns (
-    id TEXT PRIMARY KEY, "roundId" TEXT NOT NULL, "playerId" TEXT NOT NULL,
+    id TEXT NOT NULL PRIMARY KEY, "roundId" TEXT NOT NULL, "playerId" TEXT NOT NULL,
     bid INTEGER, score INTEGER,
     version INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0
   );
@@ -83,18 +89,18 @@ const MIGRATIONS = [
   CREATE INDEX turns_version ON turns (version);
 
   CREATE TABLE applied_actions (
-    id TEXT PRIMARY KEY, user_id TEXT, version INTEGER NOT NULL, at TEXT NOT NULL
+    id TEXT NOT NULL PRIMARY KEY, user_id TEXT, version INTEGER NOT NULL, at TEXT NOT NULL
   );
   CREATE TABLE users (
-    id TEXT PRIMARY KEY, email TEXT UNIQUE, is_guest INTEGER NOT NULL DEFAULT 0,
+    id TEXT NOT NULL PRIMARY KEY, email TEXT UNIQUE, is_guest INTEGER NOT NULL DEFAULT 0, is_admin INTEGER NOT NULL DEFAULT 0,
     password_salt TEXT, password_hash TEXT, created_at TEXT NOT NULL
   );
   CREATE TABLE sessions (
-    token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL
+    token_hash TEXT NOT NULL PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL
   );
   CREATE INDEX sessions_user_id ON sessions (user_id);
   CREATE TABLE reset_tokens (
-    token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at INTEGER NOT NULL,
+    token_hash TEXT NOT NULL PRIMARY KEY, user_id TEXT NOT NULL, expires_at INTEGER NOT NULL,
     used_at TEXT
   );
   `,
@@ -142,10 +148,12 @@ export type Snapshot = {
 };
 
 export function openDb(dataDir: string) {
-  mkdirSync(dataDir, { recursive: true });
-  const sql = new DatabaseSync(join(dataDir, "whist.db"));
+  mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+  const file = join(dataDir, "whist.db");
+  closeSync(openSync(file, "a", 0o600)); // private from the start
+  const sql = new DatabaseSync(file);
   sql.exec(
-    "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;"
+    "PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000;"
   );
   migrate(sql);
 
@@ -167,30 +175,46 @@ export function openDb(dataDir: string) {
   const setVersion = (v: number) =>
     stmt("UPDATE meta SET value = ? WHERE key = 'version'").run(String(v));
 
+  // SQLite failures while running an action are transient, not the client's fault.
+  function guard<T>(fn: () => T): T {
+    try {
+      return fn();
+    } catch (e) {
+      if (e instanceof StateError) throw e;
+      throw new StateError(`Database error: ${(e as Error).message}`);
+    }
+  }
+
   // Reads live (non-tombstoned) rows. Sees writes made earlier in the same transaction.
   function readState(): ReadState {
     return {
-      get: (table, id) => {
-        const r = stmt(
-          `SELECT * FROM ${table} WHERE id = ? AND deleted = 0`
-        ).get(id) as SqlRow | undefined;
-        return r ? toRow(table, r) : undefined;
-      },
-      where: (table, field, value) => {
-        const col = String(field);
-        if (!COLUMNS[table].includes(col))
-          throw new Error(`Unknown column ${table}.${col}`);
-        const where = value == null ? `"${col}" IS NULL` : `"${col}" = ?`;
-        const args = value == null ? [] : [toValue(col, value)];
-        const rows = stmt(
-          `SELECT * FROM ${table} WHERE ${where} AND deleted = 0`
-        ).all(...args) as SqlRow[];
-        return rows.map((r) => toRow(table, r));
-      },
+      get: (table, id) =>
+        guard(() => {
+          const r = stmt(
+            `SELECT * FROM ${table} WHERE id = ? AND deleted = 0`
+          ).get(id) as SqlRow | undefined;
+          return r ? toRow(table, r) : undefined;
+        }),
+      where: (table, field, value) =>
+        guard(() => {
+          const col = String(field);
+          if (!COLUMNS[table].includes(col))
+            throw new Error(`Unknown column ${table}.${col}`);
+          const where = value == null ? `"${col}" IS NULL` : `"${col}" = ?`;
+          const args = value == null ? [] : [toValue(col, value)];
+          const rows = stmt(
+            `SELECT * FROM ${table} WHERE ${where} AND deleted = 0`
+          ).all(...args) as SqlRow[];
+          return rows.map((r) => toRow(table, r));
+        }),
     };
   }
 
   function writeOps(ops: RowOp[], v: number): void {
+    guard(() => writeAll(ops, v));
+  }
+
+  function writeAll(ops: RowOp[], v: number): void {
     for (const op of ops) {
       if (op.op === "delete") {
         stmt(
@@ -252,7 +276,12 @@ export function openDb(dataDir: string) {
       sql.exec("COMMIT");
       return result;
     } catch (e) {
-      sql.exec("ROLLBACK");
+      // SQLite may already have rolled back; don't mask the original error.
+      try {
+        sql.exec("ROLLBACK");
+      } catch {
+        /* no transaction left */
+      }
       throw e;
     }
   }
@@ -267,8 +296,11 @@ export function openDb(dataDir: string) {
     changesAt,
     changesSince,
     transaction,
-    isApplied: (id: string) =>
-      !!stmt("SELECT 1 FROM applied_actions WHERE id = ?").get(id),
+    // Who applied this action id, or undefined if it hasn't been applied.
+    appliedBy: (id: string) =>
+      stmt("SELECT user_id FROM applied_actions WHERE id = ?").get(id) as
+        | { user_id: string | null }
+        | undefined,
     recordApplied: (id: string, userId: string | null, v: number) =>
       stmt(
         "INSERT INTO applied_actions (id, user_id, version, at) VALUES (?, ?, ?, ?)"
@@ -278,16 +310,17 @@ export function openDb(dataDir: string) {
 }
 export type Db = ReturnType<typeof openDb>;
 
-// Bulk-loads rows and users into an EMPTY database, keeping ids (InstantDB
-// migration). Users get no password; everything lands at version 1.
+// Bulk-loads rows (and optionally users) into a database with no synced rows,
+// keeping ids (InstantDB migration). Users get no password; everything lands
+// at version 1.
 export function importSnapshot(db: Db, snapshot: Snapshot): void {
   db.transaction(() => {
-    const counts = [...TABLES, "users" as const].map(
+    const rows = TABLES.map(
       (t) =>
         (db.stmt(`SELECT COUNT(*) AS n FROM ${t}`).get() as { n: number }).n
     );
-    if (counts.some((n) => n > 0) || db.version() > 0) {
-      throw new Error("importSnapshot needs an empty database.");
+    if (rows.some((n) => n > 0) || db.version() > 0) {
+      throw new NotEmptyError();
     }
     for (const table of TABLES) {
       const ops: RowOp[] = snapshot[table].map(
@@ -303,4 +336,10 @@ export function importSnapshot(db: Db, snapshot: Snapshot): void {
     }
     db.setVersion(1);
   });
+}
+
+export class NotEmptyError extends Error {
+  constructor() {
+    super("importSnapshot needs an empty database.");
+  }
 }

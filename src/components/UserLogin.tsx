@@ -1,25 +1,15 @@
-import { id } from "@instantdb/react";
 import { enqueueSnackbar } from "notistack";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
-import { db } from "../db";
 import {
   createGame as createGuestGame,
   listGames as listGuestGames,
 } from "../guest/guestStore";
 import { useGuestGames } from "../guest/useGuestGame";
+import { newId } from "../lib/dispatch";
 import { alpha, goldButton, t } from "../theme/tokens";
-import {
-  claimPlayer,
-  useAccountReconcile,
-  useMyPlayer,
-} from "../players/account";
-import {
-  AuthError,
-  passwordLogIn,
-  passwordSignUp,
-  usePasswordsAvailable,
-} from "../lib/passwordAuth";
+import { claimPlayer, useMyPlayer } from "../players/account";
+import { sync, useAuth } from "../sync";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
 import { GuestMigrationDialog } from "./GuestMigrationDialog";
 import { Shell } from "./chrome/Shell";
@@ -31,22 +21,27 @@ const useNext = () => {
   return next && next.startsWith("/") ? next : "/";
 };
 
+// After logging in, the server may move a guest's player onto the account.
+// Give that change a moment to arrive before asking "which player is you?".
+const HANDOFF_GRACE_MS = 1500;
+
 export const UserLogin = () => {
-  const { user } = db.useAuth();
-  const [sentEmail, setSentEmail] = useState("");
+  const { user } = useAuth();
   const guestGames = useGuestGames();
   const next = useNext();
-  const reconciling = useAccountReconcile();
-  const passwordsOn = usePasswordsAvailable();
-  const [method, setMethod] = useState<"password" | "code">("password");
-  const [codeEmail, setCodeEmail] = useState("");
-  const usePassword = !!passwordsOn && method === "password";
+  const [settling, setSettling] = useState(false);
 
   const { player: myPlayer, isLoading } = useMyPlayer();
 
+  useEffect(() => {
+    if (!settling) return;
+    const tmr = setTimeout(() => setSettling(false), HANDOFF_GRACE_MS);
+    return () => clearTimeout(tmr);
+  }, [settling]);
+
   // Guests (joined by QR) see the email form so they can add an account.
   if (user && !user.isGuest) {
-    if (isLoading || reconciling) {
+    if (isLoading || (settling && !myPlayer)) {
       return (
         <Shell>
           <div style={{ padding: 20, opacity: 0.6 }}>Loading…</div>
@@ -81,42 +76,8 @@ export const UserLogin = () => {
             : "Log in, or create an account in seconds."
         }
       >
-        {sentEmail ? (
-          <MagicCodeStep sentEmail={sentEmail} />
-        ) : (
-          <>
-            {usePassword ? (
-              <PasswordStep
-                onUseCode={(email) => {
-                  setCodeEmail(email);
-                  setMethod("code");
-                }}
-              />
-            ) : (
-              <EmailStep onSent={setSentEmail} initialEmail={codeEmail} />
-            )}
-            {passwordsOn && (
-              <button
-                onClick={() =>
-                  setMethod(method === "code" ? "password" : "code")
-                }
-                style={{
-                  display: "block",
-                  margin: "14px auto 0",
-                  background: "transparent",
-                  border: "none",
-                  color: t.gold,
-                  fontSize: 13,
-                }}
-              >
-                {usePassword
-                  ? "Email me a code instead"
-                  : "Use a password instead"}
-              </button>
-            )}
-            <GuestEntry />
-          </>
-        )}
+        <PasswordStep onSignedIn={() => setSettling(true)} />
+        <GuestEntry />
       </LoginFrame>
     </Shell>
   );
@@ -206,7 +167,7 @@ const GuestEntry = () => {
   );
 };
 
-const LoginFrame = ({
+export const LoginFrame = ({
   children,
   title,
   subtitle,
@@ -310,14 +271,12 @@ const LoginFrame = ({
   </div>
 );
 
-const Field = ({
+export const Field = ({
   label,
   value,
   onChange,
   type = "text",
   autoComplete,
-  inputMode,
-  pattern,
   autoFocus = true,
   passwordManager = false,
   right,
@@ -327,8 +286,6 @@ const Field = ({
   onChange: (v: string) => void;
   type?: string;
   autoComplete?: string;
-  inputMode?: "numeric" | "text";
-  pattern?: string;
   autoFocus?: boolean;
   // Let password managers fill this field (they're told to ignore the rest).
   passwordManager?: boolean;
@@ -359,8 +316,6 @@ const Field = ({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         autoComplete={autoComplete}
-        inputMode={inputMode}
-        pattern={pattern}
         data-1p-ignore={passwordManager ? undefined : true}
         autoFocus={autoFocus}
         style={{
@@ -379,7 +334,7 @@ const Field = ({
   </div>
 );
 
-const Submit = ({
+export const Submit = ({
   children,
   disabled,
 }: {
@@ -403,17 +358,18 @@ const Submit = ({
   </button>
 );
 
-const PasswordStep = ({
-  onUseCode,
-}: {
-  onUseCode: (email: string) => void;
-}) => {
-  const [mode, setMode] = useState<"login" | "signup">("login");
+const PasswordStep = ({ onSignedIn }: { onSignedIn: () => void }) => {
+  const [params] = useSearchParams();
+  const [mode, setMode] = useState<"login" | "signup">(
+    params.get("mode") === "signup" ? "signup" : "login"
+  );
   const [email, setEmail] = useState("");
   const [password, setPasswordValue] = useState("");
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<AuthError | null>(null);
+  const [error, setError] = useState<{ message: string; code?: string } | null>(
+    null
+  );
   const signup = mode === "signup";
 
   // On success UserLogin re-renders with the user and takes it from there.
@@ -422,13 +378,13 @@ const PasswordStep = ({
     setBusy(true);
     setError(null);
     try {
-      if (signup) await passwordSignUp(email, password);
-      else await passwordLogIn(email, password);
+      if (signup) await sync.signUp(email, password);
+      else await sync.logIn(email, password);
+      onSignedIn();
     } catch (err) {
-      const ae =
-        err instanceof AuthError ? err : new AuthError((err as Error).message);
-      setError(ae);
-      if (ae.code === "has_password") setMode("login");
+      const e = err as Error & { code?: string };
+      setError({ message: e.message, code: e.code });
+      if (e.code === "has_account") setMode("login");
     } finally {
       setBusy(false);
     }
@@ -526,122 +482,41 @@ const PasswordStep = ({
           }}
         >
           {error.message}
-          {(error.code === "has_account" ||
-            error.code === "bad_credentials") && (
-            <button
-              type="button"
-              onClick={() => onUseCode(email)}
-              style={{
-                display: "block",
-                marginTop: 6,
-                padding: 0,
-                background: "transparent",
-                border: "none",
-                color: t.gold,
-                fontSize: 13,
-                fontWeight: 600,
-              }}
-            >
-              Email me a code instead →
-            </button>
-          )}
         </div>
       )}
       <Submit disabled={busy || !email || !password}>
         {busy ? "…" : signup ? "Create account" : "Log in"}
       </Submit>
-    </form>
-  );
-};
-
-const EmailStep = ({
-  onSent,
-  initialEmail = "",
-}: {
-  onSent: (email: string) => void;
-  initialEmail?: string;
-}) => {
-  const [email, setEmail] = useState(initialEmail);
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email) return;
-    onSent(email);
-    db.auth.sendMagicCode({ email }).catch((err) => {
-      enqueueSnackbar("Uh oh: " + (err?.body?.message ?? err), {
-        variant: "error",
-      });
-      onSent("");
-    });
-  };
-  return (
-    <form onSubmit={submit}>
-      <Field
-        label="Email"
-        value={email}
-        onChange={setEmail}
-        type="email"
-        autoComplete="email"
-      />
-      <Submit disabled={!email}>Send code</Submit>
-    </form>
-  );
-};
-
-const MagicCodeStep = ({ sentEmail }: { sentEmail: string }) => {
-  const [code, setCode] = useState("");
-  // Once signed in, UserLogin re-renders and takes it from there (linking a
-  // player, carrying over a guest player, then redirecting to ?next).
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    db.auth.signInWithMagicCode({ email: sentEmail, code }).catch((err) => {
-      enqueueSnackbar("Uh oh: " + (err?.body?.message ?? err), {
-        variant: "error",
-      });
-      setCode("");
-    });
-  };
-  return (
-    <form onSubmit={submit}>
       <div
         style={{
           fontSize: 12,
           color: t.cream,
-          opacity: 0.6,
-          marginBottom: 8,
+          opacity: 0.5,
+          marginTop: 12,
           textAlign: "center",
         }}
       >
-        Check {sentEmail}
+        Forgot your password? Ask whoever runs the app for a reset link.
       </div>
-      <Field
-        label="Verification code"
-        value={code}
-        onChange={setCode}
-        inputMode="numeric"
-        pattern="[0-9]*"
-        autoComplete="one-time-code"
-      />
-      <Submit disabled={!code}>Verify</Submit>
     </form>
   );
 };
 
-export const LinkPlayerToMe = () => {
-  const { user } = db.useAuth();
+const showError = (e: Error) =>
+  enqueueSnackbar(e.message, { variant: "error" });
 
+export const LinkPlayerToMe = () => {
   const createPlayer = async (name: string) => {
-    if (!user) throw new Error("No user");
     if (!name) {
       enqueueSnackbar("Name is required", { variant: "error" });
       return;
     }
-    const playerId = id();
-    await db.transact([db.tx.players[playerId].update({ name })]);
-    await claimPlayer(playerId, user.id);
+    await sync
+      .dispatch("createPlayer", { playerId: newId(), name, claim: true })
+      .catch(showError);
   };
   const choosePlayer = async (player: { id: string }) => {
-    if (!user) throw new Error("No user");
-    await claimPlayer(player.id, user.id);
+    await claimPlayer(player.id).catch(showError);
   };
 
   return (

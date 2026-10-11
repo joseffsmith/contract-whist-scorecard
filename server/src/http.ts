@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { isIPv6 } from "node:net";
 
 export class HttpError extends Error {
   constructor(public status: number, message: string, public code?: string) {
@@ -41,11 +42,28 @@ export async function readJson(
   return body as Record<string, unknown>;
 }
 
+// Rate-limit bucket for an address: IPv6 clients are grouped by /64, since one
+// household can use billions of addresses.
+export function ipKey(ip: string): string {
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(ip);
+  if (mapped) return mapped[1];
+  const addr = ip.split("%")[0];
+  if (!isIPv6(addr) || addr.includes(".")) return ip;
+  const [head, tail = ""] = addr.split("::");
+  const left = head ? head.split(":") : [];
+  const right = tail ? tail.split(":") : [];
+  const groups = addr.includes("::")
+    ? [...left, ...Array(8 - left.length - right.length).fill("0"), ...right]
+    : left;
+  const first = groups.slice(0, 4).map((g) => parseInt(g, 16).toString(16));
+  return `${first.join(":")}::/64`;
+}
+
 // The host's nginx appends the real client IP last; earlier entries could be
 // spoofed by the client.
 export function clientIp(req: IncomingMessage): string {
   const forwarded = String(req.headers["x-forwarded-for"] ?? "").split(",");
-  return (
+  return ipKey(
     forwarded[forwarded.length - 1].trim() || req.socket.remoteAddress || ""
   );
 }

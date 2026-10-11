@@ -1,13 +1,15 @@
-import { id } from "@instantdb/react";
 import { enqueueSnackbar } from "notistack";
 import { useState } from "react";
-import { db } from "../db";
-import { clearAll, GuestGame } from "../guest/guestStore";
-import { queryAllPlayers } from "../queries";
+import type { RoundRow, SeatRow, TurnRow } from "../../shared/types";
+import {
+  clearAll,
+  deleteGame as deleteGuestGame,
+  GuestGame,
+} from "../guest/guestStore";
+import { newId } from "../lib/dispatch";
+import { selectActivePlayers, sync, useSyncView } from "../sync";
 import { alpha, goldButton, t } from "../theme/tokens";
 import { Shell } from "./chrome/Shell";
-
-type Player = { id: string; name: string };
 
 export const GuestMigrationDialog = ({
   userId,
@@ -18,74 +20,77 @@ export const GuestMigrationDialog = ({
   games: GuestGame[];
   onDone: () => void;
 }) => {
-  const { data: playersData } = db.useQuery(queryAllPlayers);
-  const allPlayers: Player[] = playersData?.players ?? [];
+  const { view } = useSyncView();
   const [busy, setBusy] = useState(false);
-
-  const findOrMint = (name: string, txs: any[]): string => {
-    const needle = name.trim().toLowerCase();
-    const match = allPlayers.find(
-      (p) => p.name.trim().toLowerCase() === needle
-    );
-    if (match) return match.id;
-    const newId = id();
-    txs.push(db.tx.players[newId].update({ name: name.trim() }));
-    return newId;
-  };
 
   const migrate = async () => {
     setBusy(true);
+    // Players matched by name (case-insensitive) onto existing ones; names
+    // nobody has used yet become new players. Remembered across games so a
+    // new name is only created once.
+    const known = new Map<string, string>();
+    for (const p of selectActivePlayers(view)) {
+      const key = p.name.trim().toLowerCase();
+      if (!known.has(key)) known.set(key, p.id);
+    }
+    const saved: GuestGame[] = [];
     try {
-      const txs: any[] = [];
       for (const game of games) {
-        // Build a name→cloud-player-id map for this game's players.
-        const mappedIds = game.players.map((gp) => findOrMint(gp.name, txs));
-        const initialDealerCloudId = game.initialDealerId
-          ? mappedIds[
-              game.players.findIndex((p) => p.id === game.initialDealerId)
-            ] ?? null
-          : null;
-
-        const newGameId = id();
-        txs.push(
-          db.tx.games[newGameId].update({
-            createdAt: game.createdAt,
-            createdBy: userId,
-            initialDealerId: initialDealerCloudId ?? undefined,
-          })
+        const newPlayers: { id: string; name: string }[] = [];
+        const mappedIds = game.players.map((gp) => {
+          const key = gp.name.trim().toLowerCase();
+          let playerId = known.get(key);
+          if (!playerId) {
+            playerId = newId();
+            known.set(key, playerId);
+            newPlayers.push({ id: playerId, name: gp.name.trim() });
+          }
+          return playerId;
+        });
+        const dealerIdx = game.players.findIndex(
+          (p) => p.id === game.initialDealerId
         );
-        // playersOrders
-        for (let i = 0; i < mappedIds.length; i++) {
-          txs.push(
-            db.tx.playersOrders[id()]
-              .update({ orderNumber: i })
-              .link({ player: mappedIds[i], game: newGameId })
-          );
-        }
-        // rounds + turns
+
+        const gameId = newId();
+        const seats: SeatRow[] = mappedIds.map((playerId, i) => ({
+          id: newId(),
+          gameId,
+          playerId,
+          orderNumber: i,
+        }));
+        const rounds: RoundRow[] = [];
+        const turns: TurnRow[] = [];
         for (const round of game.rounds) {
-          const newRoundId = id();
-          txs.push(
-            db.tx.rounds[newRoundId]
-              .update({ roundNumber: round.roundNumber })
-              .link({ game: newGameId })
-          );
+          const roundId = newId();
+          rounds.push({ id: roundId, gameId, roundNumber: round.roundNumber });
           for (const turn of round.turns) {
-            const cloudPlayerId =
+            const playerId =
               mappedIds[game.players.findIndex((p) => p.id === turn.playerId)];
-            if (!cloudPlayerId) continue;
-            const payload: { bid?: number; score?: number } = {};
-            if (turn.bid !== null) payload.bid = turn.bid;
-            if (turn.score !== null) payload.score = turn.score;
-            txs.push(
-              db.tx.turns[id()]
-                .update(payload)
-                .link({ round: newRoundId, player: cloudPlayerId })
-            );
+            if (!playerId) continue;
+            turns.push({
+              id: newId(),
+              roundId,
+              playerId,
+              bid: turn.bid,
+              score: turn.score,
+            });
           }
         }
+
+        await sync.dispatch("importGame", {
+          game: {
+            id: gameId,
+            createdAt: game.createdAt,
+            createdBy: userId,
+            initialDealerId: dealerIdx >= 0 ? mappedIds[dealerIdx] : null,
+          },
+          newPlayers,
+          seats,
+          rounds,
+          turns,
+        });
+        saved.push(game);
       }
-      await db.transact(txs);
       clearAll();
       enqueueSnackbar(
         `Migrated ${games.length} guest game${games.length === 1 ? "" : "s"}`,
@@ -94,9 +99,12 @@ export const GuestMigrationDialog = ({
       onDone();
     } catch (err) {
       console.error(err);
-      enqueueSnackbar("Migration failed — your guest games were not touched", {
-        variant: "error",
-      });
+      // Don't offer the ones that did make it again.
+      saved.forEach((g) => deleteGuestGame(g.id));
+      enqueueSnackbar(
+        `Couldn't save every guest game: ${(err as Error).message}`,
+        { variant: "error" }
+      );
       setBusy(false);
     }
   };

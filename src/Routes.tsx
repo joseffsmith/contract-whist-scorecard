@@ -9,12 +9,15 @@ import { Home } from "./components/Home";
 import { Leaderboard } from "./components/Leaderboard";
 import { JoinGame } from "./components/JoinGame";
 import { Players } from "./components/Players";
+import { ResetPassword } from "./components/ResetPassword";
 import { UserLogin } from "./components/UserLogin";
 import { UserManager } from "./components/UserManager";
 
 export const router = createBrowserRouter(
   [
     { path: "/login", element: <UserLogin /> },
+    { path: "/reset", element: <ResetPassword /> },
+    { path: "/reset/:token", element: <ResetPassword /> },
     {
       path: "/",
       element: <App />,

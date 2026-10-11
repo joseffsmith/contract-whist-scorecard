@@ -1,7 +1,6 @@
 import { enqueueSnackbar } from "notistack";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { db } from "../db";
 import {
   activePlayers,
   describePlayer,
@@ -12,6 +11,7 @@ import {
   usePlayerDirectory,
 } from "../players/directory";
 import { mergePlayers, undoMerge } from "../players/merge";
+import { sync, useAuth } from "../sync";
 import { alpha, goldButton, t } from "../theme/tokens";
 import { PlayerOption } from "./ChoosePlayerOrCreate";
 import { Crumb } from "./chrome/Crumb";
@@ -41,7 +41,7 @@ const smallButton = {
 // Find and merge duplicate players. Merging moves games and scores onto one
 // player; it can be undone from the "Merged" list.
 export const Players = () => {
-  const { user } = db.useAuth();
+  const { user } = useAuth();
   const { directory, isLoading } = usePlayerDirectory();
   const [query, setQuery] = useState("");
   const [mergingFrom, setMergingFrom] = useState<PlayerInfo | null>(null);
@@ -238,6 +238,8 @@ export const Players = () => {
             </div>
           </>
         )}
+
+        {canEdit && <ResetLink />}
       </div>
 
       {mergingFrom && (
@@ -351,6 +353,119 @@ const ConfirmMerge = ({
       >
         Merge into {keep.name}
       </button>
+    </>
+  );
+};
+
+// Admins hand out a one-time link so someone who forgot their password can
+// set a new one. Everyone else gets the server's "not allowed" message.
+const ResetLink = () => {
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [url, setUrl] = useState("");
+  const [error, setError] = useState("");
+
+  const create = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    setUrl("");
+    try {
+      setUrl(await sync.createResetLink(email.trim()));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const share = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "Reset your password", url });
+        return;
+      } catch {
+        // cancelled — fall through to copy
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      enqueueSnackbar("Link copied", { variant: "success" });
+    } catch {
+      enqueueSnackbar(url);
+    }
+  };
+
+  return (
+    <>
+      <div style={sectionLabel}>Password reset link</div>
+      <form onSubmit={create} style={{ display: "flex", gap: 8 }}>
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="Their account email"
+          autoComplete="off"
+          data-1p-ignore
+          style={{
+            flex: 1,
+            minWidth: 0,
+            padding: "10px 12px",
+            borderRadius: 10,
+            border: `1px solid ${alpha(t.gold, 0.2)}`,
+            background: alpha(t.shade, 0.25),
+            color: t.cream,
+            fontSize: 16,
+            outline: "none",
+          }}
+        />
+        <button
+          type="submit"
+          disabled={busy || !email.trim()}
+          style={{
+            ...smallButton,
+            opacity: busy || !email.trim() ? 0.5 : 1,
+          }}
+        >
+          {busy ? "…" : "Create link"}
+        </button>
+      </form>
+      {error && (
+        <div style={{ color: t.red, fontSize: 13, marginTop: 8 }}>{error}</div>
+      )}
+      {url && (
+        <div
+          style={{
+            marginTop: 8,
+            padding: "10px 12px",
+            borderRadius: 10,
+            border: `1px solid ${alpha(t.gold, 0.2)}`,
+            background: alpha(t.shade, 0.25),
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
+          <div
+            style={{
+              flex: 1,
+              minWidth: 0,
+              fontSize: 12,
+              color: t.cream,
+              opacity: 0.8,
+              wordBreak: "break-all",
+            }}
+          >
+            {url}
+          </div>
+          <button style={smallButton} onClick={share}>
+            {typeof navigator.share === "function" ? "Share" : "Copy"}
+          </button>
+        </div>
+      )}
+      <div style={{ fontSize: 11, color: t.cream, opacity: 0.5, marginTop: 8 }}>
+        The link works once and lasts 7 days. Only admins can create them.
+      </div>
     </>
   );
 };

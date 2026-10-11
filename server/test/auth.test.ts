@@ -197,7 +197,7 @@ describe("admin reset links", () => {
     url.replace("https://example.test/app/reset/", "");
   async function setup() {
     const api = await start({
-      adminEmails: ["Admin@example.com"],
+      
       publicUrl: "https://example.test/app/",
     });
     return {
