@@ -121,8 +121,8 @@ every rebase. Ops must not depend on row iteration order (sort ids).
 - `POST /auth/email {email, password}` (signed-in, non-guest, **no email
   yet**, i.e. a passkey-only account) → `AuthResponse` (same session). Sets
   both as a backup sign-in. Same validation as signup; 409 `has_account` for
-  a taken email, 409 `has_email` if it already has one; rate limited with
-  signup.
+  a taken email, 409 `has_email` if it already has one; its own rate limit;
+  the session is checked again after hashing.
 - `POST /auth/sessions/revoke-others` (signed in) → `{ ok }`: deletes every
   session of the user except the one making the request.
 - **Passkeys** (WebAuthn, `@simplewebauthn/server`). Table `passkeys(id =
@@ -133,32 +133,44 @@ every rebase. Ops must not depend on row iteration order (sort ids).
   needs no username. RP name "Whist". Config: `PASSKEY_RP_ID` (default: host
   of `PUBLIC_URL`) and `PASSKEY_ORIGINS` (comma list; default: origin of
   `PUBLIC_URL`); the browser's reported origin and RP ID must match. At
-  startup the RP ID must be a bare host name that every origin's host equals
-  or is a subdomain of, else the server refuses to start. The authenticator's user
+  startup the RP ID (lower-cased) must be a bare host name, not an IP
+  address, that every origin's host equals or is a subdomain of, else the server refuses to start. The authenticator's user
   handle is a random 32-byte `users.webauthn_user_id`, made on first use
   (never the user id), and checked on sign-in. A user has at most 20 passkeys.
-  - Challenges are kept in memory (single process): random id → challenge,
-    single-use (spent even by a failed attempt), 5-minute expiry, bound to the
-    kind of ceremony and, for registration, to the user. Limits: 2000
-    outstanding registration challenges, 5000 sign-in ones (separate, so
-    one kind can't flood out the other), and 20 per client IP (both kinds);
-    past a limit the oldest of that kind or IP go first. Every `…/options` answer is `{ challengeId, options }` and the
-    client sends `challengeId` back with the browser's response. A missing,
-    spent or expired id → 400 `challenge_expired`.
-  - `POST /auth/passkey/register/options` (signed in, guest or account) →
-    options. `user.name`/`displayName` = the email, else the name of the
-    user's claimed player, else "Whist player". `excludeCredentials` = the
-    user's passkeys.
+  - Challenges are **stateless**: the `challengeId` is an HMAC-SHA256-signed
+    token over `{challenge (32 random bytes), kind, userId or null,
+    newAccount?: {id, handle}, expires}` (5-minute expiry). The key is made
+    once and kept in `settings('challenge_secret')`, so tokens survive
+    restarts (and a token from another database is refused). Only tokens
+    already used are remembered, in memory, until they would have expired;
+    verify is rate limited, so that set stays small. A token is single-use
+    (spent even by a failed attempt) and bound to its kind and its user. Every
+    `…/options` answer is `{ challengeId, options }` and the client sends
+    `challengeId` back with the browser's response. A tampered, spent, expired
+    or mismatched token → 400 `challenge_expired`.
+  - `POST /auth/passkey/register/options`. **Signed in** (guest or account):
+    options for that user; `user.name`/`displayName` = the email, else the
+    name of the user's claimed player, else "Whist player";
+    `excludeCredentials` = the user's passkeys. **No session**: options for a
+    brand-new account ("create account" mode): a server-made user id and
+    random user handle go into the signed token, and nothing is stored until
+    verify. A session that is sent but no longer exists → 401.
   - `POST /auth/passkey/register/verify {challengeId, response, name?}` →
-    `AuthResponse`. A guest is upgraded in place exactly as signup does it
-    (`is_guest = 0`, id kept so claims stay, email stays null, no password,
-    guest token retired and a new session returned); an account keeps its
-    session. The request's own session must still exist when the passkey is
-    stored (checked in the same transaction), else 401 `not_signed_in`: a
-    sign-out, a password change or another tab upgrading the same guest in
-    the meantime wins (that second tab is told to sign in again, never handed
-    the retired guest token). A credential id that already exists (anyone's) →
-    409 `passkey_exists`. Bad attestation → 400 `passkey_failed`.
+    `AuthResponse`. With a session: a guest is upgraded in place exactly as
+    signup does it (`is_guest = 0`, id kept so claims stay, email stays null,
+    no password, guest token retired and a new session returned); an account
+    keeps its session. The request's own session must still exist when the
+    passkey is stored (checked in the same transaction), else 401
+    `not_signed_in`: a sign-out, a password change or another tab upgrading
+    the same guest in the meantime wins (that second tab is told to sign in
+    again, never handed the retired guest token). Without a session, for a
+    "create account" token: makes the user (email null, no password, the
+    handle from the token) with the passkey and a session, in one
+    transaction. A token made for a session can't make an account and the
+    reverse. Sessions made here (the guest upgrade, the new account) record
+    the new passkey in `sessions.passkey_id`. A credential id that already
+    exists (anyone's) → 409 `passkey_exists`. Bad attestation → 400
+    `passkey_failed`.
   - `POST /auth/passkey/login/options` (no session; empty `allowCredentials`)
     and `POST /auth/passkey/login/verify {challengeId, response, guestToken?}`
     → `AuthResponse`. The credential is looked up by id, verified (signature,
@@ -174,7 +186,8 @@ every rebase. Ops must not depend on row iteration order (sort ids).
     deviceType, backedUp }] }` (never the key). `DELETE /auth/passkeys/:id`
     removes one of the caller's; 409 `last_sign_in` if the account would be
     left with no way in (no email+password and no other passkey).
-  - Rate limits per IP: options 60 and verify 30 per 15 minutes.
+  - Rate limits per IP: options 300 (they are cheap, and prepared ahead) and
+    verify 30 per 15 minutes.
 - **Delete account**: `DELETE /auth/me {confirm: "DELETE"}` (signed in; guests
   too). In one go: the user's claimed players are released through the same
   `unclaimPlayer` action as a guest logout (so it syncs); sessions, passkeys and
@@ -254,9 +267,18 @@ every rebase. Ops must not depend on row iteration order (sort ids).
   fetches the options (and loads the browser library) beforehand, and the
   tap uses them with no network wait before the prompt; the guest push and
   handoff, and `ensureReal`, come after it. `usePreparedPasskeys` refreshes
-  them when older than 4 minutes, on `visibilitychange` and when a session
-  appears. The login page makes a guest on arrival (when signed out) so
-  registration options can be prepared. `addEmail(email, password)` and
+  them when older than 4 minutes, on `visibilitychange` (to visible) and when
+  a session appears. The login page makes no guest. `registerPasskey` upgrades a signed-in
+  account, or a guest with something to keep (a claimed player, games or
+  queued work), in place; anyone else (signed out, or an empty guest) makes a
+  new account, and the post-login flow is signup's ("Which player is you?").
+  `preparePasskey("register")` prepares whichever of the two applies. Nothing
+  is prepared while `document.hidden`, and only for the pages that show the
+  prompts (the signed-out login page: sign-in plus new-account options; the
+  passkeys card). If the server refuses a passkey the device already made
+  (401, or the session changed), the client calls
+  `PublicKeyCredential.signalUnknownCredential` where supported so the
+  device drops it. `addEmail(email, password)` and
   `signOutOthers()` call the two routes above. They
   go through `SyncDeps.passkeys` (`@simplewebauthn/browser`, loaded on first
   use) so tests can stub the prompt. The UI only offers passkeys when

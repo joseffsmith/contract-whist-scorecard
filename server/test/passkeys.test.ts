@@ -88,14 +88,20 @@ describe("passkey options", () => {
     expect(options.user.displayName).toBe("Whist player");
   });
 
-  it("needs a session to register, not to sign in", async () => {
+  it("needs no session to sign in or to make a new account", async () => {
     const api = await start();
     expect((await api.post("/auth/passkey/register/options", {})).status).toBe(
-      401
+      200
     );
-    expect((await api.post("/auth/passkey/register/verify", {})).status).toBe(
-      401
-    );
+    // A session that no longer exists is an error, not "no session".
+    expect(
+      (await api.post("/auth/passkey/register/options", {}, "stale")).status
+    ).toBe(401);
+    const verify = await api.post("/auth/passkey/register/verify", {});
+    expect([verify.status, verify.body.code]).toEqual([
+      400,
+      "challenge_expired",
+    ]);
     const res = await api.post("/auth/passkey/login/options", {});
     expect(res.status).toBe(200);
     // No credentials listed: the device offers whatever it holds.
@@ -237,28 +243,6 @@ describe("passkey challenges", () => {
       guest.token
     );
     expect(slow.body.code).toBe("challenge_expired");
-  });
-
-  it("keeps each address to 20 outstanding challenges, oldest first", async () => {
-    const api = await start();
-    const device = phone();
-    await passkeyAccount(api, device);
-    const ask = (ip: string) =>
-      api.post("/auth/passkey/login/options", {}, undefined, {
-        "x-forwarded-for": `1.1.1.1, ${ip}`,
-      });
-    const flooder = [];
-    for (let n = 0; n < 21; n++) flooder.push((await ask("10.0.0.1")).body);
-    const other = (await ask("10.0.0.2")).body;
-    const verify = (c: any) =>
-      api.post("/auth/passkey/login/verify", {
-        challengeId: c.challengeId,
-        response: device.get(c.options),
-      });
-    expect((await verify(flooder[0])).body.code).toBe("challenge_expired");
-    expect((await verify(flooder[1])).status).toBe(200);
-    expect((await verify(flooder[20])).status).toBe(200);
-    expect((await verify(other)).status).toBe(200);
   });
 
   it("belongs to the user who asked and to one kind of ceremony", async () => {
@@ -740,17 +724,17 @@ describe("listing and removing passkeys", () => {
       account.token
     );
     expect(gone.status).toBe(200);
-    expect(
-      (await api.get("/auth/me", account.token)).body.user.passkeyCount
-    ).toBe(1);
+    // (The session that registering the first one made went with it.)
     expect((await signIn(api, first)).status).toBe(401);
-    expect((await signIn(api, second)).status).toBe(200);
+    const viaSecond = await signIn(api, second);
+    expect(viaSecond.status).toBe(200);
+    expect(viaSecond.body.user.passkeyCount).toBe(1);
     // ...but not the one that's left.
     const [last] = [...second.credentials.keys()];
     const stuck = await api.delete(
       `/auth/passkeys/${last}`,
       undefined,
-      account.token
+      viaSecond.body.token
     );
     expect(stuck.body.code).toBe("last_sign_in");
   });
@@ -1075,7 +1059,7 @@ describe("account details", () => {
   it("rate limits the passkey endpoints", async () => {
     const api = await start();
     let last = 0;
-    for (let i = 0; i < 61; i++) {
+    for (let i = 0; i < 301; i++) {
       last = (await api.post("/auth/passkey/login/options", {})).status;
     }
     expect(last).toBe(429);
@@ -1087,69 +1071,143 @@ describe("account details", () => {
   });
 });
 
-describe("the challenge store", () => {
-  const limits = { register: 3, login: 4, perIp: 2 };
-  const clock = () => {
-    let at = 0;
-    return { now: () => new Date(at), tick: (ms: number) => (at += ms) };
-  };
+describe("stateless challenges", () => {
+  const fresh = async (api: Api) =>
+    (await api.post("/auth/passkey/login/options", {})).body;
+  const signInWith = (api: Api, c: any, device: Authenticator) =>
+    api.post("/auth/passkey/login/verify", {
+      challengeId: c.challengeId,
+      response: device.get(c.options),
+    });
+  const [payloadOf, withPayload] = [
+    (token: string) =>
+      JSON.parse(Buffer.from(token.split(".")[0], "base64url").toString()),
+    (token: string, change: object) =>
+      Buffer.from(
+        JSON.stringify({
+          ...JSON.parse(
+            Buffer.from(token.split(".")[0], "base64url").toString()
+          ),
+          ...change,
+        })
+      ).toString("base64url") +
+      "." +
+      token.split(".")[1],
+  ];
 
-  it("has separate limits for sign-in and registration challenges", () => {
-    const store = createChallenges(clock().now, { ...limits, perIp: 100 });
-    const register = [0, 1, 2].map((n) =>
-      store.put("register", `r${n}`, "u1", `10.0.0.${n}`)
+  it("refuses a token that was altered or isn't ours", async () => {
+    const api = await start();
+    const device = phone();
+    await passkeyAccount(api, device);
+    const c = await fresh(api);
+    const [body, signature] = c.challengeId.split(".");
+    expect(payloadOf(c.challengeId)).toMatchObject({
+      kind: "login",
+      userId: null,
+    });
+    const tampered = [
+      withPayload(c.challengeId, { kind: "register" }),
+      withPayload(c.challengeId, { expires: Date.now() + 3_600_000 }),
+      withPayload(c.challengeId, { userId: "someone" }),
+      `${body}.${signature.slice(0, -2)}AA`,
+      `${body}.`,
+      `.${signature}`,
+      `${body}.${signature}.x`,
+      body,
+      "",
+    ];
+    for (const challengeId of tampered) {
+      const res = await api.post("/auth/passkey/login/verify", {
+        challengeId,
+        response: device.get(c.options),
+      });
+      expect([challengeId.slice(-6), res.body.code]).toEqual([
+        challengeId.slice(-6),
+        "challenge_expired",
+      ]);
+    }
+    // A token another server made (another secret) isn't ours either.
+    const other = await start();
+    const foreign = await fresh(other);
+    expect((await signInWith(api, foreign, device)).body.code).toBe(
+      "challenge_expired"
     );
-    // Many sign-in challenges don't push registration ones out.
-    const login = Array.from({ length: 6 }, (_, n) =>
-      store.put("login", `l${n}`, null, `10.1.0.${n}`)
-    );
-    expect(register.map((id) => store.take(id, "register", "u1"))).toEqual([
-      "r0",
-      "r1",
-      "r2",
-    ]);
-    // ...and only the newest 4 sign-in challenges are left.
-    expect(login.map((id) => store.take(id, "login", null))).toEqual([
-      undefined,
-      undefined,
-      "l2",
-      "l3",
-      "l4",
-      "l5",
-    ]);
-    // A fourth registration pushes out the oldest registration.
-    const ids = [0, 1, 2, 3].map((n) =>
-      store.put("register", `r${n}`, "u1", `10.2.0.${n}`)
-    );
-    expect(ids.map((id) => store.take(id, "register", "u1"))).toEqual([
-      undefined,
-      "r1",
-      "r2",
-      "r3",
-    ]);
+    // The genuine one still works: nothing above spent it.
+    expect((await signInWith(api, c, device)).status).toBe(200);
   });
 
-  it("limits one address, whichever kind, and never touches others'", () => {
-    const store = createChallenges(clock().now, limits);
-    const a1 = store.put("login", "a1", null, "1.1.1.1");
-    const b1 = store.put("login", "b1", null, "2.2.2.2");
-    const a2 = store.put("register", "a2", "u", "1.1.1.1");
-    const a3 = store.put("login", "a3", null, "1.1.1.1");
-    expect(store.take(a1, "login", null)).toBeUndefined();
-    expect(store.take(b1, "login", null)).toBe("b1");
-    expect(store.take(a2, "register", "u")).toBe("a2");
-    expect(store.take(a3, "login", null)).toBe("a3");
+  it("refuses a token that is used again, even after success", async () => {
+    const api = await start();
+    const device = phone();
+    await passkeyAccount(api, device);
+    const c = await fresh(api);
+    const response = device.get(c.options);
+    const send = () =>
+      api.post("/auth/passkey/login/verify", {
+        challengeId: c.challengeId,
+        response,
+      });
+    expect((await send()).status).toBe(200);
+    expect((await send()).body.code).toBe("challenge_expired");
   });
 
-  it("forgets expired ones and spent ones", () => {
-    const time = clock();
-    const store = createChallenges(time.now, limits);
-    const id = store.put("login", "x", null, "1.1.1.1");
-    expect(store.take(id, "login", null)).toBe("x");
-    expect(store.take(id, "login", null)).toBeUndefined();
-    const late = store.put("login", "y", null, "1.1.1.1");
-    time.tick(5 * 60 * 1000 + 1);
-    expect(store.take(late, "login", null)).toBeUndefined();
+  it("is for one kind of ceremony", async () => {
+    const api = await start();
+    const device = phone();
+    const account = await passkeyAccount(api, device);
+    const asked = (
+      await api.post("/auth/passkey/register/options", {}, account.token)
+    ).body;
+    const res = await api.post("/auth/passkey/login/verify", {
+      challengeId: asked.challengeId,
+      response: device.get((await fresh(api)).options),
+    });
+    expect(res.body.code).toBe("challenge_expired");
+  });
+
+  it("survives a restart", async () => {
+    const dir = tempDir();
+    let api = await start({ dataDir: dir });
+    const device = phone();
+    const account = await passkeyAccount(api, device);
+    const login = await fresh(api);
+    const register = (
+      await api.post("/auth/passkey/register/options", {}, account.token)
+    ).body;
+    await api.close();
+
+    api = await start({ dataDir: dir });
+    expect((await signInWith(api, login, device)).status).toBe(200);
+    const added = await api.post(
+      "/auth/passkey/register/verify",
+      {
+        challengeId: register.challengeId,
+        response: phone().create(register.options),
+      },
+      account.token
+    );
+    expect(added.status).toBe(200);
+  });
+
+  it("keeps working for a crowd on one address", async () => {
+    // Nothing is held per challenge, so many outstanding ones lose none.
+    const api = await start();
+    const device = phone();
+    await passkeyAccount(api, device);
+    const all = [];
+    for (let n = 0; n < 60; n++) all.push(await fresh(api));
+    expect((await signInWith(api, all[0], device)).status).toBe(200);
+    expect((await signInWith(api, all[59], device)).status).toBe(200);
+  });
+
+  it("only remembers tokens that were used", () => {
+    const store = createChallenges(Buffer.from("k".repeat(32)));
+    const a = store.mint("login", null);
+    expect(store.take(a.token, "login", null)?.challenge).toBe(a.challenge);
+    expect(store.take(a.token, "login", null)).toBeUndefined();
+    for (const junk of [undefined, null, 5, {}, "a.b.c.d"]) {
+      expect(store.take(junk, "login", null)).toBeUndefined();
+    }
   });
 });
 
@@ -1175,6 +1233,16 @@ describe("passkey config checks", () => {
         passkeyOrigins: ["https://notexample.com"],
       })
     ).rejects.toThrow(/never work/);
+    // Not an address, and any case is fine.
+    await expect(boot({ passkeyRpId: "127.0.0.1" })).rejects.toThrow(
+      /not an address/
+    );
+    await expect(
+      boot({
+        passkeyRpId: "Example.COM",
+        passkeyOrigins: ["https://Whist.Example.com"],
+      })
+    ).resolves.toBeDefined();
     // The default RP ID doesn't fit an origin of another site either.
     await expect(
       boot({ passkeyOrigins: ["https://example.com"] })
@@ -1357,9 +1425,9 @@ describe("revoking access", () => {
     );
     expect(res.status).toBe(200);
     expect((await api.get("/auth/me", viaFirst)).status).toBe(401);
-    // The other passkey's session, and the one made by registering, stay.
+    // So is the session that registering it made; the other passkey's stays.
+    expect((await api.get("/auth/me", account.token)).status).toBe(401);
     expect((await api.get("/auth/me", viaSecond)).status).toBe(200);
-    expect((await api.get("/auth/me", account.token)).status).toBe(200);
   });
 
   it("removes the passkeys when an admin resets the password", async () => {
@@ -1438,7 +1506,7 @@ describe("a backup email and password for a passkey-only account", () => {
     // Now the only passkey can go, and the password can be changed.
     const [id] = [...device.credentials.keys()];
     expect(
-      (await api.delete(`/auth/passkeys/${id}`, undefined, account.token))
+      (await api.delete(`/auth/passkeys/${id}`, undefined, login.body.token))
         .status
     ).toBe(200);
     expect(
@@ -1446,7 +1514,7 @@ describe("a backup email and password for a passkey-only account", () => {
         await api.post(
           "/auth/password",
           { password: "newpassword1" },
-          account.token
+          login.body.token
         )
       ).status
     ).toBe(200);
@@ -1487,7 +1555,7 @@ describe("a backup email and password for a passkey-only account", () => {
     expect([again.status, again.body.code]).toEqual([409, "has_email"]);
   }, 30_000);
 
-  it("shares signup's rate limit", async () => {
+  it("has its own rate limit", async () => {
     const api = await start();
     const guest = await api.guest();
     let last = 0;
@@ -1506,5 +1574,157 @@ describe("a backup email and password for a passkey-only account", () => {
       account.token
     );
     expect([res.status, res.body.code]).toEqual([400, "no_email"]);
+  });
+});
+
+describe("making an account with a passkey, signed out", () => {
+  const create = async (
+    api: Api,
+    device: Authenticator,
+    over: Override = {}
+  ) => {
+    const { body } = await api.post("/auth/passkey/register/options", {});
+    return {
+      options: body,
+      res: await api.post("/auth/passkey/register/verify", {
+        challengeId: body.challengeId,
+        response: device.create(body.options, over),
+        name: "New phone",
+      }),
+    };
+  };
+
+  it("asks for a brand-new user with a handle made by the server", async () => {
+    const api = await start();
+    const first = (await api.post("/auth/passkey/register/options", {})).body;
+    const second = (await api.post("/auth/passkey/register/options", {})).body;
+    expect(first.options).toMatchObject({
+      rp: { id: "joseffsmith.uk", name: "Whist" },
+      authenticatorSelection: {
+        residentKey: "required",
+        userVerification: "required",
+      },
+      excludeCredentials: [],
+      user: { name: "Whist player", displayName: "Whist player" },
+    });
+    expect(Buffer.from(first.options.user.id, "base64url").length).toBe(32);
+    expect(second.options.user.id).not.toBe(first.options.user.id);
+    expect(second.options.challenge).not.toBe(first.options.challenge);
+  });
+
+  it("makes the account and signs it in, only once the passkey checks out", async () => {
+    const dir = tempDir();
+    const api = await start({ dataDir: dir });
+    const device = phone();
+    // Asking makes no user.
+    await api.post("/auth/passkey/register/options", {});
+    const { options, res } = await create(api, device);
+    expect(res.status).toBe(200);
+    expect(res.body.user).toEqual({
+      id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      email: null,
+      isGuest: false,
+      hasPassword: false,
+      passkeyCount: 1,
+    });
+    const me = await api.get("/auth/me", res.body.token);
+    expect(me.body.user).toEqual(res.body.user);
+    expect(
+      (await api.get("/auth/passkeys", res.body.token)).body.passkeys
+    ).toEqual([expect.objectContaining({ name: "New phone" })]);
+    // It signs in again as the same user (the handle the server chose).
+    const back = await signIn(api, device);
+    expect(back.body.user).toEqual(res.body.user);
+    expect(options.options.user.id).toBeTruthy();
+    await api.close();
+    const db = openDb(dir);
+    expect(db.stmt("SELECT COUNT(*) AS n FROM users").get()).toEqual({ n: 1 });
+    expect(db.stmt("SELECT webauthn_user_id AS h FROM users").get()).toEqual({
+      h: options.options.user.id,
+    });
+    db.close();
+  });
+
+  it("makes no user when the passkey doesn't check out", async () => {
+    const dir = tempDir();
+    const api = await start({ dataDir: dir });
+    const bad = await create(api, phone(), { origin: "https://evil.example" });
+    expect([bad.res.status, bad.res.body.code]).toEqual([
+      400,
+      "passkey_failed",
+    ]);
+    // A credential id that exists already.
+    const device = phone();
+    await passkeyAccount(api, device);
+    const [id] = [...device.credentials.keys()];
+    const dup = await create(api, phone(), {
+      credentialId: Buffer.from(id, "base64url"),
+    });
+    expect([dup.res.status, dup.res.body.code]).toEqual([
+      409,
+      "passkey_exists",
+    ]);
+    await api.close();
+    const db = openDb(dir);
+    expect(db.stmt("SELECT COUNT(*) AS n FROM users").get()).toEqual({ n: 1 });
+    db.close();
+  });
+
+  it("keeps the two kinds of registration token apart", async () => {
+    const api = await start();
+    const guest = await api.guest();
+    const device = phone();
+    const forAccount = (await api.post("/auth/passkey/register/options", {}))
+      .body;
+    const forGuest = (
+      await api.post("/auth/passkey/register/options", {}, guest.token)
+    ).body;
+    // A new-account token can't be used with a session...
+    const withSession = await api.post(
+      "/auth/passkey/register/verify",
+      {
+        challengeId: forAccount.challengeId,
+        response: device.create(forAccount.options),
+      },
+      guest.token
+    );
+    expect(withSession.body.code).toBe("challenge_expired");
+    // ...and a session's token can't make an account.
+    const without = await api.post("/auth/passkey/register/verify", {
+      challengeId: forGuest.challengeId,
+      response: device.create(forGuest.options),
+    });
+    expect(without.body.code).toBe("challenge_expired");
+    // Each is spent now, whichever way it failed.
+    const retry = await api.post("/auth/passkey/register/verify", {
+      challengeId: forAccount.challengeId,
+      response: device.create(forAccount.options),
+    });
+    expect(retry.body.code).toBe("challenge_expired");
+  });
+
+  it("makes sessions that end with the passkey that made them", async () => {
+    const api = await start();
+    const first = phone();
+    const { res } = await create(api, first);
+    const second = phone();
+    expect((await register(api, res.body.token, second)).status).toBe(200);
+    const viaSecond = (await signIn(api, second)).body.token;
+    const [firstId] = [...first.credentials.keys()];
+    expect(
+      (await api.delete(`/auth/passkeys/${firstId}`, undefined, viaSecond))
+        .status
+    ).toBe(200);
+    expect((await api.get("/auth/me", res.body.token)).status).toBe(401);
+    expect((await api.get("/auth/me", viaSecond)).status).toBe(200);
+  });
+
+  it("is limited like the other verify calls", async () => {
+    const api = await start();
+    let last = 0;
+    for (let i = 0; i < 31; i++) {
+      last = (await api.post("/auth/passkey/register/verify", {})).status;
+    }
+    expect(last).toBe(429);
   });
 });

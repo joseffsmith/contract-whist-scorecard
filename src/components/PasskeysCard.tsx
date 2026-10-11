@@ -34,7 +34,7 @@ const outlineButton = {
 // awaited first, because Safari only opens the prompt close to the tap.
 function useAddPasskey() {
   const [busy, setBusy] = useState(false);
-  usePreparedPasskeys(["register"]);
+  usePreparedPasskeys(["register"], passkeysSupported());
   const add = () => {
     setBusy(true);
     sync
@@ -53,6 +53,16 @@ function useAddPasskey() {
 
 // The account's passkeys: add another, or remove one.
 export const PasskeysCard = () => {
+  const { user } = useAuth();
+  if (!user || user.isGuest) return null;
+  // On a browser without passkeys there is nothing to add; still show (and let
+  // people remove) the ones they have.
+  if (!passkeysSupported() && !user.passkeyCount) return null;
+  // Its own component, so nothing is fetched or prepared unless it's shown.
+  return <PasskeysList />;
+};
+
+const PasskeysList = () => {
   const { user } = useAuth();
   const [list, setList] = useState<PasskeyInfo[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -76,9 +86,6 @@ export const PasskeysCard = () => {
   const { busy, add } = useAddPasskey();
 
   if (!user || user.isGuest) return null;
-  // On a browser without passkeys there is nothing to add; still show (and let
-  // people remove) the ones they have.
-  if (!passkeysSupported() && !count) return null;
 
   // The last way to sign in can't go.
   const onlyWayIn = !user.hasPassword && count < 2;

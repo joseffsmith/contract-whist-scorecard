@@ -252,6 +252,29 @@ describe("against the real server", () => {
     expect(gone.code).toBe("unknown_passkey");
   });
 
+  it("makes an account with a passkey when signed out, without making a guest", async () => {
+    const device = createAuthenticator({
+      rpID: "joseffsmith.uk",
+      origin: "https://joseffsmith.uk",
+    });
+    const passkeys: PasskeyApi = {
+      create: async (options) => device.create(options) as never,
+      get: async (options) => device.get(options) as never,
+    };
+    const client = newClient(new IDBFactory(), true, passkeys);
+    await client.start();
+    await client.preparePasskey("register");
+    const user = await client.registerPasskey("Fresh phone");
+    expect(user).toMatchObject({
+      isGuest: false,
+      email: null,
+      passkeyCount: 1,
+    });
+    await client.logOut();
+    const back = await client.logInWithPasskey();
+    expect(back?.id).toBe(user!.id);
+  });
+
   const pull = async () =>
     (await (await fetch(`${server.url}/sync/pull`)).json()) as {
       puts: Record<string, any[]>;

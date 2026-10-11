@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { isIP } from "node:net";
 import type { AddressInfo } from "node:net";
 import { createAuth } from "./auth";
 import { createBackups } from "./backup";
@@ -55,9 +56,9 @@ function checkPasskeyConfig({
   rpID: string;
   origins: string[];
 }) {
-  if (!/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/i.test(rpID)) {
+  if (!/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(rpID) || isIP(rpID)) {
     throw new Error(
-      `PASSKEY_RP_ID must be a bare host name like example.com (got "${rpID}").`
+      `PASSKEY_RP_ID must be a bare host name like example.com, not an address (got "${rpID}").`
     );
   }
   for (const origin of origins) {
@@ -85,7 +86,7 @@ export async function startServer(opts: ServerOptions) {
     );
   }
   const passkey = {
-    rpID: opts.passkeyRpId || site.hostname,
+    rpID: (opts.passkeyRpId || site.hostname).toLowerCase(),
     origins: opts.passkeyOrigins?.length ? opts.passkeyOrigins : [site.origin],
   };
   checkPasskeyConfig(passkey);

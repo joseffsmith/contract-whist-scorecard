@@ -142,7 +142,21 @@ export function createAuth(
     if (limiter.limited(key, max))
       throw new HttpError(429, TOO_MANY, "rate_limited");
   };
-  const challenges = createChallenges(opts.now);
+  // Signs the passkey challenges. Made once and kept, so tokens survive a restart.
+  db.stmt(
+    "INSERT OR IGNORE INTO settings (key, value) VALUES ('challenge_secret', ?)"
+  ).run(randomBytes(32).toString("hex"));
+  const challenges = createChallenges(
+    Buffer.from(
+      (
+        db
+          .stmt("SELECT value FROM settings WHERE key = 'challenge_secret'")
+          .get() as { value: string }
+      ).value,
+      "hex"
+    ),
+    opts.now
+  );
 
   // ── Storage helpers ───────────────────────────────────────────────────
 
@@ -577,7 +591,7 @@ export function createAuth(
     // A passkey-only account adds an email and password as a backup way in.
     async addEmail(req: IncomingMessage, ip: string) {
       const user = requireUser(req);
-      tooMany(`signup:${ip}`, 30);
+      tooMany(`email:${ip}`, 30);
       if (user.is_guest) {
         throw new HttpError(403, "Create an account first.", "guest");
       }
@@ -597,6 +611,10 @@ export function createAuth(
         );
       if (userByEmail(email)) throw hasAccount();
       const hashed = await hashPassword(password);
+      // Signed out (or revoked) while hashing.
+      if (sessionUser(req)?.id !== user.id) {
+        throw new HttpError(401, "Please sign in again.", "not_signed_in");
+      }
       try {
         const set = db
           .stmt(
@@ -623,20 +641,31 @@ export function createAuth(
 
     // ── Passkeys ──
 
-    // Options for making a passkey for the signed-in user (account or guest).
-    // Discoverable, so signing in later needs no username.
+    // Options for making a passkey. Signed in (account or guest): for that
+    // user, who then gets it added or, for a guest, is upgraded. Not signed
+    // in: for a brand-new account (its id and the authenticator's user handle
+    // are made now, and signed into the challenge). Discoverable, so signing
+    // in later needs no username.
     async passkeyRegisterOptions(req: IncomingMessage, ip: string) {
-      const user = requireUser(req);
-      tooMany(`passkey-options:${ip}`, 60);
-      const existing = passkeysOf(user.id);
+      // A session that is sent but no longer exists is an error, not "none".
+      const user = bearerToken(req) ? requireUser(req) : undefined;
+      tooMany(`passkey-options:${ip}`, 300);
+      const existing = user ? passkeysOf(user.id) : [];
       if (existing.length >= MAX_PASSKEYS) throw tooManyPasskeys();
-      const name = passkeyLabel(user);
+      const name = user ? passkeyLabel(user) : "Whist player";
+      const newAccount = user
+        ? undefined
+        : { id: randomUUID(), handle: newToken() };
+      const minted = challenges.mint("register", user?.id ?? null, newAccount);
       const options = await generateRegistrationOptions({
         rpName: RP_NAME,
         rpID: opts.passkey.rpID,
         userName: name,
         userDisplayName: name,
-        userID: webauthnHandle(user),
+        userID: user
+          ? webauthnHandle(user)
+          : Buffer.from(newAccount!.handle, "base64url"),
+        challenge: Buffer.from(minted.challenge, "base64url"),
         excludeCredentials: existing.map((p) => ({
           id: p.id,
           transports: parseTransports(p.transports),
@@ -646,30 +675,31 @@ export function createAuth(
           userVerification: "required",
         },
       });
-      const challengeId = challenges.put(
-        "register",
-        options.challenge,
-        user.id,
-        ip
-      );
-      return { challengeId, options };
+      return { challengeId: minted.token, options };
     },
 
     // Checks the new passkey and keeps it. A guest becomes a real account
-    // (same user id, so the same players), as when signing up by email.
+    // (same user id, so the same players), as when signing up by email. With
+    // no session it makes a new account and signs it in.
     async passkeyRegisterVerify(req: IncomingMessage, ip: string) {
-      const user = requireUser(req);
+      const user = bearerToken(req) ? requireUser(req) : undefined;
       tooMany(`passkey-register:${ip}`, 30);
       const body = await readJson(req);
-      const challenge = challenges.take(body.challengeId, "register", user.id);
-      if (!challenge) throw challengeGone();
+      const challenge = challenges.take(
+        body.challengeId,
+        "register",
+        user?.id ?? null
+      );
+      // A token made for a session can't make an account, or the reverse.
+      if (!challenge || !!challenge.newAccount === !!user)
+        throw challengeGone();
       const response = asObject(body.response);
       if (!response) throw new HttpError(400, "Bad request.", "bad_request");
       let verified;
       try {
         verified = await verifyRegistrationResponse({
           response: response as unknown as RegistrationResponseJSON,
-          expectedChallenge: challenge,
+          expectedChallenge: challenge.challenge,
           expectedOrigin: opts.passkey.origins,
           expectedRPID: opts.passkey.rpID,
           requireUserVerification: true,
@@ -682,10 +712,41 @@ export function createAuth(
         verified.registrationInfo;
       const name =
         typeof body.name === "string" ? body.name.trim().slice(0, 40) : "";
+      const keep = (userId: string) =>
+        db
+          .stmt(
+            "INSERT INTO passkeys (id, user_id, public_key, counter, transports, device_type, backed_up, name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+          )
+          .run(
+            credential.id,
+            userId,
+            credential.publicKey,
+            credential.counter,
+            credential.transports
+              ? JSON.stringify(credential.transports)
+              : null,
+            credentialDeviceType,
+            credentialBackedUp ? 1 : 0,
+            name || null,
+            new Date().toISOString()
+          );
+
+      const { newAccount } = challenge;
+      if (newAccount) {
+        const created = db.transaction(() => {
+          if (passkeyById(credential.id)) throw exists();
+          db.stmt(
+            "INSERT INTO users (id, is_guest, webauthn_user_id, created_at) VALUES (?, 0, ?, ?)"
+          ).run(newAccount.id, newAccount.handle, new Date().toISOString());
+          keep(newAccount.id);
+          return createSession(newAccount.id, credential.id);
+        });
+        return respond(userById(newAccount.id)!, created);
+      }
 
       const token = db.transaction(() => {
         // Signed out, or deleted, while the browser was asking for the passkey.
-        const current = liveUserById(user.id);
+        const current = liveUserById(user!.id);
         if (!current) {
           throw new HttpError(401, "Please sign in again.", "not_signed_in");
         }
@@ -699,45 +760,34 @@ export function createAuth(
         }
         if (passkeyById(credential.id)) throw exists();
         if (passkeyCount(current.id) >= MAX_PASSKEYS) throw tooManyPasskeys();
-        db.stmt(
-          "INSERT INTO passkeys (id, user_id, public_key, counter, transports, device_type, backed_up, name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        ).run(
-          credential.id,
-          current.id,
-          credential.publicKey,
-          credential.counter,
-          credential.transports ? JSON.stringify(credential.transports) : null,
-          credentialDeviceType,
-          credentialBackedUp ? 1 : 0,
-          name || null,
-          new Date().toISOString()
-        );
+        keep(current.id);
         // Upgraded by another request while this one was waiting: this session
         // was a guest's, so give the account a new one.
         if (!current.is_guest) {
-          return user.is_guest ? createSession(current.id) : bearerToken(req);
+          return user!.is_guest
+            ? createSession(current.id, credential.id)
+            : bearerToken(req);
         }
         db.stmt(
           "UPDATE users SET is_guest = 0 WHERE id = ? AND is_guest = 1"
         ).run(current.id);
         // Same user, new session: the guest token is retired.
         deleteSessions(current.id);
-        return createSession(current.id);
+        return createSession(current.id, credential.id);
       });
-      return respond(userById(user.id)!, token);
+      return respond(userById(user!.id)!, token);
     },
 
     // Options for signing in with any passkey the device offers.
     async passkeyLoginOptions(_req: IncomingMessage, ip: string) {
-      tooMany(`passkey-options:${ip}`, 60);
+      tooMany(`passkey-options:${ip}`, 300);
+      const minted = challenges.mint("login", null);
       const options = await generateAuthenticationOptions({
         rpID: opts.passkey.rpID,
         userVerification: "required",
+        challenge: Buffer.from(minted.challenge, "base64url"),
       });
-      return {
-        challengeId: challenges.put("login", options.challenge, null, ip),
-        options,
-      };
+      return { challengeId: minted.token, options };
     },
 
     async passkeyLoginVerify(req: IncomingMessage, ip: string) {
@@ -764,7 +814,7 @@ export function createAuth(
       try {
         verified = await verifyAuthenticationResponse({
           response: response as unknown as AuthenticationResponseJSON,
-          expectedChallenge: challenge,
+          expectedChallenge: challenge.challenge,
           expectedOrigin: opts.passkey.origins,
           expectedRPID: opts.passkey.rpID,
           requireUserVerification: true,

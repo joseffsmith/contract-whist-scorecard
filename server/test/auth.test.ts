@@ -169,6 +169,7 @@ describe("guest, signup, login, logout, me", () => {
       "DROP INDEX users_webauthn_user_id",
       "ALTER TABLE users DROP COLUMN webauthn_user_id",
       "ALTER TABLE users DROP COLUMN deleted_at",
+      "DROP TABLE settings",
       "DROP INDEX sessions_passkey_id",
       "ALTER TABLE sessions DROP COLUMN passkey_id",
       "PRAGMA user_version = 2",

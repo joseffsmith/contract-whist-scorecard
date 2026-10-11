@@ -48,11 +48,17 @@ export function useStorageHealth(): StorageHealth {
 // Keeps passkey prompts ready for the tap while the component is on screen:
 // the options are fetched ahead (see SyncClient.preparePasskey), and again when
 // they get old, when the page becomes visible, or when a session appears.
-export function usePreparedPasskeys(kinds: ("login" | "register")[]): void {
+export function usePreparedPasskeys(
+  kinds: ("login" | "register")[],
+  enabled = true
+): void {
   const { user } = useAuth();
   const key = kinds.join();
   useEffect(() => {
+    if (!enabled) return;
+    // Nothing is fetched for a page nobody is looking at.
     const prepare = () => {
+      if (document.hidden) return;
       for (const kind of key.split(",") as typeof kinds) {
         void sync.preparePasskey(kind);
       }
@@ -67,5 +73,5 @@ export function usePreparedPasskeys(kinds: ("login" | "register")[]): void {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [key, user?.id]);
+  }, [key, user?.id, enabled]);
 }

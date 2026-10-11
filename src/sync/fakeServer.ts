@@ -410,13 +410,36 @@ export function createFakeServer() {
         }
         return json(200, { ok: true });
       case "/auth/passkey/register/options":
-        if (!user) return fail(401, "Sign in to do that.", "not_signed_in");
+        // No session at all makes a new account; a stale one is an error.
+        if (token && !user)
+          return fail(401, "Sign in to do that.", "not_signed_in");
         return json(200, {
           challengeId: `c-${++challengeCounter}`,
-          options: { challenge: "x", user: { id: "h", name: "n" } },
+          options: {
+            challenge: "x",
+            rp: { id: "localhost", name: "Whist" },
+            user: { id: "h", name: "n" },
+          },
         });
       case "/auth/passkey/register/verify": {
-        if (!user) return fail(401, "Sign in to do that.", "not_signed_in");
+        if (token && !user)
+          return fail(401, "Sign in to do that.", "not_signed_in");
+        if (!user) {
+          const made = {
+            id: `u-${++userCounter}`,
+            email: null,
+            isGuest: false,
+            hasPassword: false,
+            passkeyCount: 1,
+          };
+          knownIds.add(made.id);
+          passkeys.set(body.response.id, {
+            userId: made.id,
+            name: body.name ?? null,
+          });
+          accounts.push(made);
+          return json(200, { token: server.tokenFor(made), user: made });
+        }
         passkeys.set(body.response.id, {
           userId: user.id,
           name: body.name ?? null,

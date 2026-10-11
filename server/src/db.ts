@@ -138,6 +138,10 @@ const MIGRATIONS = [
   ALTER TABLE sessions ADD COLUMN passkey_id TEXT;
   CREATE INDEX sessions_passkey_id ON sessions (passkey_id);
   `,
+  `
+  -- Server-made values that must survive restarts (the challenge signing key).
+  CREATE TABLE settings (key TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL);
+  `,
 ];
 
 function migrate(sql: DatabaseSync): void {

@@ -798,25 +798,94 @@ describe("passkeys", () => {
     expect(prompts.get).toBe(2);
   });
 
-  it("prepares registration for the session it asked as, and not before there is one", async () => {
+  it("prepares a new account when signed out, with no guest involved", async () => {
     const { api, prompts } = fakePasskeys();
     const client = newClient({ deps: { passkeys: api } });
     await client.start();
     await client.preparePasskey("register");
-    expect(server.requests.some((r) => r.path.includes("/register/"))).toBe(
-      false
-    );
-    await client.signInAsGuest();
-    await client.preparePasskey("register");
     const options = () =>
       server.requests.filter((r) => r.path.endsWith("/register/options"));
     expect(options()).toHaveLength(1);
+    expect(options()[0].token).toBeUndefined();
     await client.preparePasskey("register"); // still fresh: no second request
     expect(options()).toHaveLength(1);
+
     const tap = client.registerPasskey();
-    expect(prompts.create).toBe(1);
-    await tap;
+    expect(prompts.create).toBe(1); // straight from the tap
+    const user = await tap;
+    expect(user).toMatchObject({
+      isGuest: false,
+      email: null,
+      passkeyCount: 1,
+    });
+    expect(client.getAuth().user).toEqual(user);
+    // No guest was ever made, and the verify carried no session.
+    expect(server.requests.some((r) => r.path === "/auth/guest")).toBe(false);
+    const sent = server.requests.find(
+      (r) => r.path === "/auth/passkey/register/verify"
+    )!;
+    expect(sent.token).toBeUndefined();
     expect(options()).toHaveLength(1);
+  });
+
+  it("upgrades a guest who has something to keep, in place", async () => {
+    const { api } = fakePasskeys();
+    const client = await signedInClient({ deps: { passkeys: api } });
+    const guest = client.getAuth().user!;
+    await client.dispatch("createPlayer", {
+      playerId: "p1",
+      name: "Ann",
+      claim: true,
+    });
+    await client.preparePasskey("register");
+    const user = await client.registerPasskey();
+    expect(user?.id).toBe(guest.id);
+    const sent = server.requests.filter((r) =>
+      r.path.startsWith("/auth/passkey/register/")
+    );
+    expect(sent.map((r) => !!r.token)).toEqual([true, true]);
+  });
+
+  it("starts a new account instead of upgrading an empty guest", async () => {
+    const { api } = fakePasskeys();
+    const client = await signedInClient({ deps: { passkeys: api } });
+    const guest = client.getAuth().user!;
+    await client.preparePasskey("register");
+    const user = await client.registerPasskey();
+    expect(user?.id).not.toBe(guest.id);
+    expect(user?.isGuest).toBe(false);
+    // The guest's own session is ended on the way out.
+    await waitFor(() => server.requests.some((r) => r.path === "/auth/logout"));
+    expect(
+      server.requests.find((r) => r.path === "/auth/logout")?.token
+    ).toBeTruthy();
+    expect(
+      server.requests.find((r) => r.path === "/auth/passkey/register/verify")
+        ?.token
+    ).toBeUndefined();
+  });
+
+  it("tells the device to forget a passkey the server wouldn't keep", async () => {
+    const { api } = fakePasskeys("cred-9");
+    const forgot: [string, string][] = [];
+    const client = await signedInClient({
+      deps: {
+        passkeys: {
+          ...api,
+          signalUnknown: (rp: string, id: string) => forgot.push([rp, id]),
+        },
+      },
+    });
+    await client.dispatch("createPlayer", {
+      playerId: "p1",
+      name: "Ann",
+      claim: true,
+    });
+    await client.preparePasskey("register");
+    server.forgetTokens(); // the session ended while the prompt was open
+    const error = await client.registerPasskey().catch((e) => e);
+    expect(error.status).toBe(401);
+    expect(forgot).toEqual([["localhost", "cred-9"]]);
   });
 
   it("asks again when the prepared options are old", async () => {

@@ -76,7 +76,8 @@ export const ResetPassword = () => {
                 marginTop: 8,
               }}
             >
-              At least 8 characters.
+              At least 8 characters. Setting a new password also signs out every
+              device and removes any passkeys on the account.
             </div>
             {error && <ErrorBox>{error}</ErrorBox>}
             <Submit disabled={busy || password.length < 8}>

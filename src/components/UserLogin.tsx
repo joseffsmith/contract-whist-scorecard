@@ -39,10 +39,6 @@ export const UserLogin = () => {
     return () => clearTimeout(tmr);
   }, [settling]);
 
-  // A guest with a player has games to keep; one made only so a passkey can be
-  // registered (see PasskeyEntry) has nothing, and sees the signed-out page.
-  const keeping = !!user?.isGuest && !!myPlayer;
-
   // Guests (joined by QR) see the email form so they can add an account.
   if (user && (!user.isGuest || playingAsGuest)) {
     if (isLoading || (settling && !myPlayer)) {
@@ -63,9 +59,9 @@ export const UserLogin = () => {
     <Shell>
       <AccountMovedBanner signedIn={false} />
       <LoginFrame
-        title={keeping ? "Keep your games" : "Welcome back"}
+        title={user?.isGuest ? "Keep your games" : "Welcome back"}
         subtitle={
-          keeping
+          user?.isGuest
             ? passkeysSupported()
               ? "Create a passkey to keep your player on any phone."
               : "Add an email to keep your player on any phone."
@@ -80,8 +76,8 @@ export const UserLogin = () => {
         ) : (
           <PasswordStep onSignedIn={() => setSettling(true)} />
         )}
-        {!keeping && <GuestEntry onStart={() => setPlayingAsGuest(true)} />}
-        {!keeping && localGames.length > 0 && (
+        {!user && <GuestEntry onStart={() => setPlayingAsGuest(true)} />}
+        {!user && localGames.length > 0 && (
           <div
             style={{
               marginTop: 14,
@@ -111,17 +107,13 @@ const showError = (e: Error) =>
 //
 // Safari only opens a passkey prompt close to the user's tap, so the prompts'
 // options are fetched before it (usePreparedPasskeys) and the tap handlers
-// below call straight into sync with nothing awaited first. Registering needs
-// a session to ask as, so a signed-out visitor gets a guest on arrival; the
-// passkey then upgrades that guest.
+// below call straight into sync with nothing awaited first. A signed-out
+// visitor makes a new account (no guest is made for them); a guest with games
+// to keep is upgraded in place, and sync decides which.
 const PasskeyEntry = ({ onSignedIn }: { onSignedIn: () => void }) => {
-  const { user } = useAuth();
   const [busy, setBusy] = useState(false);
 
   usePreparedPasskeys(["login", "register"]);
-  useEffect(() => {
-    if (!user) sync.signInAsGuest().catch(() => {});
-  }, [user]);
 
   // Each attempt spends its options: get new ones ready.
   const attempt = (run: Promise<unknown | null>) => {
@@ -158,7 +150,7 @@ const PasskeyEntry = ({ onSignedIn }: { onSignedIn: () => void }) => {
       </button>
       <button
         onClick={create}
-        disabled={busy || !user}
+        disabled={busy}
         style={{
           width: "100%",
           marginTop: 8,
@@ -170,7 +162,7 @@ const PasskeyEntry = ({ onSignedIn }: { onSignedIn: () => void }) => {
           fontFamily: t.display,
           fontSize: 15,
           fontWeight: 600,
-          opacity: busy || !user ? 0.6 : 1,
+          opacity: busy ? 0.6 : 1,
         }}
       >
         Create an account with a passkey

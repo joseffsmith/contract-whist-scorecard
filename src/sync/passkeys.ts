@@ -11,6 +11,9 @@ import { SyncError } from "./transport";
 export type PasskeyApi = {
   // Loads the browser side ahead of time, so opening a prompt needs no wait.
   preload?(): Promise<unknown>;
+  // Tells the device a passkey it made isn't kept by the server, where the
+  // browser supports it, so it stops offering it.
+  signalUnknown?(rpId: string, credentialId: string): void;
   create(
     options: PublicKeyCredentialCreationOptionsJSON
   ): Promise<RegistrationResponseJSON>;
@@ -29,6 +32,18 @@ const load = () =>
 
 export const browserPasskeys: PasskeyApi = {
   preload: load,
+  signalUnknown(rpId, credentialId) {
+    try {
+      const pkc = window.PublicKeyCredential as unknown as {
+        signalUnknownCredential?: (o: object) => Promise<void>;
+      };
+      void pkc
+        .signalUnknownCredential?.({ rpId, credentialId })
+        ?.catch(() => {});
+    } catch {
+      /* not supported */
+    }
+  },
   create: (optionsJSON) =>
     loaded
       ? loaded.startRegistration({ optionsJSON })

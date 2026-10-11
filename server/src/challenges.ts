@@ -1,94 +1,82 @@
-// WebAuthn challenges: single-use, short-lived, kept in memory (one process).
-import { randomBytes } from "node:crypto";
+// WebAuthn challenges, stateless: the "challenge id" the client holds is a
+// signed token carrying the challenge, what it is for and when it expires, so
+// a restart or a crowd of phones on one network can't lose anyone's. Only
+// tokens already used are remembered (until they would have expired anyway).
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 const CHALLENGE_MS = 5 * 60 * 1000;
 
 export type ChallengeKind = "register" | "login";
-export type ChallengeLimits = {
-  register: number; // outstanding challenges of each kind, all addresses
-  login: number;
-  perIp: number; // outstanding challenges for one address (both kinds)
-};
-// Past a limit the oldest go first, so one address can't push out others'.
-const LIMITS: ChallengeLimits = { register: 2000, login: 5000, perIp: 20 };
-
-type Entry = {
-  challenge: string;
-  userId: string | null; // who asked, for registration
-  ip: string;
+// What a token vouches for.
+export type Challenge = {
+  challenge: string; // base64url, what the authenticator signs
+  kind: ChallengeKind;
+  userId: string | null; // who asked: a signed-in user, else nobody
+  // Registration with no session makes a new account: its id and the
+  // authenticator's user handle (base64url) are fixed here, by the server.
+  newAccount?: { id: string; handle: string };
   expires: number;
 };
 
 export function createChallenges(
-  now: () => Date = () => new Date(),
-  limits: ChallengeLimits = LIMITS
+  secret: Buffer,
+  now: () => Date = () => new Date()
 ) {
-  // Insertion order is age order, so the oldest entry is always first.
-  const entries: Record<ChallengeKind, Map<string, Entry>> = {
-    register: new Map(),
-    login: new Map(),
-  };
-  const perIp = new Map<string, Set<string>>(); // ids, oldest first
-
-  function remove(kind: ChallengeKind, id: string): Entry | undefined {
-    const e = entries[kind].get(id);
-    if (!e) return undefined;
-    entries[kind].delete(id);
-    const ids = perIp.get(e.ip);
-    ids?.delete(id);
-    if (ids && !ids.size) perIp.delete(e.ip);
-    return e;
-  }
-  const kindOf = (id: string): ChallengeKind =>
-    entries.register.has(id) ? "register" : "login";
+  const sign = (body: string) =>
+    createHmac("sha256", secret).update(body).digest("base64url");
+  // Spent tokens (their signatures), oldest first.
+  const used = new Map<string, number>();
 
   return {
-    // Remembers `challenge` and returns the id the client sends back with it.
-    put(
+    // A new random challenge and the token to hand to the client with it.
+    mint(
       kind: ChallengeKind,
-      challenge: string,
       userId: string | null,
-      ip: string
-    ): string {
-      const at = now().getTime();
-      // Expired ones go, then the oldest of this kind if it has no room.
-      for (const k of ["register", "login"] as const) {
-        for (const [id, e] of entries[k]) {
-          if (e.expires > at && (k !== kind || entries[k].size < limits[k]))
-            break;
-          remove(k, id);
-        }
-      }
-      for (const id of perIp.get(ip) ?? []) {
-        if ((perIp.get(ip)?.size ?? 0) < limits.perIp) break;
-        remove(kindOf(id), id);
-      }
-      const id = randomBytes(16).toString("base64url");
-      entries[kind].set(id, {
+      newAccount?: Challenge["newAccount"]
+    ): { challenge: string; token: string } {
+      const challenge = randomBytes(32).toString("base64url");
+      const payload: Challenge = {
         challenge,
+        kind,
         userId,
-        ip,
-        expires: at + CHALLENGE_MS,
-      });
-      let ids = perIp.get(ip);
-      if (!ids) perIp.set(ip, (ids = new Set()));
-      ids.add(id);
-      return id;
+        ...(newAccount ? { newAccount } : {}),
+        expires: now().getTime() + CHALLENGE_MS,
+      };
+      const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+      return { challenge, token: `${body}.${sign(body)}` };
     },
 
-    // The challenge for `id`, or undefined if it is unknown, expired, of
-    // another kind or asked for by someone else. Whatever the answer, it
-    // can't be used again.
+    // What the token vouches for, or undefined if it isn't ours, was altered,
+    // has expired, is for another kind of ceremony or another user, or was
+    // used before. Whatever the answer for a genuine token, it can't be used
+    // again.
     take(
-      id: unknown,
+      token: unknown,
       kind: ChallengeKind,
       userId: string | null
-    ): string | undefined {
-      if (typeof id !== "string") return undefined;
-      const e = remove(kind, id);
-      if (!e) return undefined;
-      return e.expires > now().getTime() && e.userId === userId
-        ? e.challenge
+    ): Challenge | undefined {
+      if (typeof token !== "string") return undefined;
+      const [body, signature, ...rest] = token.split(".");
+      if (!body || !signature || rest.length) return undefined;
+      const expected = Buffer.from(sign(body));
+      const given = Buffer.from(signature);
+      if (given.length !== expected.length || !timingSafeEqual(given, expected))
+        return undefined;
+      let payload: Challenge;
+      try {
+        payload = JSON.parse(Buffer.from(body, "base64url").toString());
+      } catch {
+        return undefined;
+      }
+      const at = now().getTime();
+      for (const [sig, expires] of used) {
+        if (expires > at) break;
+        used.delete(sig);
+      }
+      if (payload.expires <= at || used.has(signature)) return undefined;
+      used.set(signature, payload.expires);
+      return payload.kind === kind && payload.userId === userId
+        ? payload
         : undefined;
     },
   };

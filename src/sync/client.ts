@@ -1083,6 +1083,7 @@ export function createSyncClient(
 
   // What the server sends before a passkey prompt.
   type Ceremony = { challengeId: string; options: any };
+  // `token`: the session it was asked for, or null for a new account.
   type Prepared = Ceremony & { at: number; token: string | null };
   const isCeremony = (json: any) =>
     typeof json.challengeId === "string" &&
@@ -1120,9 +1121,11 @@ export function createSyncClient(
       try {
         await begin();
         await deps.passkeys.preload?.();
-        // Registering needs a real session to ask for options as.
-        const token = kind === "register" ? session?.token ?? null : null;
-        if (kind === "register" && !token) return;
+        // Registering as a session needs it to be real; one that isn't yet
+        // (made offline) waits for the tap.
+        const mode = kind === "register" ? registerMode() : undefined;
+        if (mode?.waits) return;
+        const token = mode ? mode.token : null;
         if (usable(prepared[kind], token) || !deps.network.isOnline()) return;
         prepared[kind] = await fetchCeremony(kind, token);
       } catch {
@@ -1131,6 +1134,24 @@ export function createSyncClient(
         delete preparing[kind];
       }
     })());
+  }
+
+  // Does this guest have anything worth keeping?
+  const worthKeeping = (userId: string) =>
+    pending.some((entry) => entry.userId === userId) ||
+    [...view.players.values()].some((p) => p.claimedBy === userId) ||
+    [...view.games.values()].some((g) => g.createdBy === userId);
+
+  // What a passkey registration would do right now. An account, or a guest with
+  // something to keep, is added to or upgraded in place (`token`: its session).
+  // Anyone else, including a guest with nothing, gets a new account (token
+  // null) and the old empty guest is simply left behind.
+  function registerMode(): { token: string | null; waits: boolean } {
+    const here = session;
+    if (!here || (here.user.isGuest && !worthKeeping(here.user.id))) {
+      return { token: null, waits: false };
+    }
+    return { token: here.token, waits: !here.token };
   }
 
   // Shows the browser's passkey prompt. Null when the person dismisses it. A
@@ -1182,31 +1203,49 @@ export function createSyncClient(
   }
 
   async function registerPasskey(name?: string) {
-    let asked = session;
+    let mode = registerMode();
     const taken = prepared.register;
     delete prepared.register;
-    let ready = usable(taken, asked?.token ?? null) ? taken : undefined;
+    let ready = !mode.waits && usable(taken, mode.token) ? taken : undefined;
     if (!ready) {
-      await ensureReal();
-      asked = session;
-      if (!asked?.token) throw new SyncError("Sign in first.", "not_signed_in");
-      ready = await fetchCeremony("register", asked.token);
+      if (mode.waits) {
+        // A guest made offline, with work to keep: it has to be real first.
+        await ensureReal();
+        mode = registerMode();
+      }
+      ready = await fetchCeremony("register", mode.token);
     }
-    const token = asked!.token!;
+    const token = mode.token;
     const { challengeId, options } = ready;
     const response = await prompt(() => deps.passkeys.create(options));
     if (!response) return null;
+    // The device now holds a passkey. If the server won't keep it, tell the
+    // device to forget it.
+    const orphan = () =>
+      deps.passkeys.signalUnknown?.(options.rp?.id, response.id);
     // The prompt can stay open a long time.
-    if (session?.token !== token) {
-      throw new SyncError("You signed out. Try again.", "not_signed_in");
+    if (registerMode().token !== token) {
+      orphan();
+      throw new SyncError("Your session changed. Try again.", "not_signed_in");
     }
-    return adopt(
-      await authRequest(
-        "/auth/passkey/register/verify",
-        { challengeId, response, name },
-        token
-      )
-    );
+    const left = session;
+    try {
+      const done = adopt(
+        await authRequest(
+          "/auth/passkey/register/verify",
+          { challengeId, response, name },
+          token ?? undefined
+        )
+      );
+      // A new account replaces an empty guest; end its session if it had one.
+      if (!token && left?.token) {
+        transport.post("/auth/logout", {}, left.token).catch(() => {});
+      }
+      return done;
+    } catch (error) {
+      if (error instanceof SyncError && error.status === 401) orphan();
+      throw error;
+    }
   }
 
   return {
