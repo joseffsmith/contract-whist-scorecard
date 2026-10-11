@@ -1,14 +1,12 @@
 import { enqueueSnackbar } from "notistack";
 import { useState } from "react";
-import { db } from "../db";
-import { AuthError, setPassword } from "../lib/passwordAuth";
+import { sync, useAuth } from "../sync";
 import { alpha, goldButton, t } from "../theme/tokens";
 import { Sheet } from "./chrome/Sheet";
 
-// Lets a signed-in email account set (or change) a password, so they can
-// log in with email + password next time instead of waiting for a code.
+// Lets a signed-in email account change its password.
 export const SetPasswordSheet = ({ onClose }: { onClose: () => void }) => {
-  const { user } = db.useAuth();
+  const { user } = useAuth();
   const [password, setValue] = useState("");
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -20,11 +18,11 @@ export const SetPasswordSheet = ({ onClose }: { onClose: () => void }) => {
     setBusy(true);
     setError("");
     try {
-      await setPassword(password, user.refresh_token);
+      await sync.setPassword(password);
       enqueueSnackbar("Password saved", { variant: "success" });
       onClose();
     } catch (err) {
-      setError(err instanceof AuthError ? err.message : String(err));
+      setError((err as Error).message);
     } finally {
       setBusy(false);
     }
@@ -41,7 +39,7 @@ export const SetPasswordSheet = ({ onClose }: { onClose: () => void }) => {
             color: t.cream,
           }}
         >
-          Set a password
+          Change password
         </div>
         <div
           style={{
@@ -51,8 +49,7 @@ export const SetPasswordSheet = ({ onClose }: { onClose: () => void }) => {
             margin: "4px 0 14px",
           }}
         >
-          Next time, log in with {user?.email} and this password instead of
-          waiting for a code.
+          Log in with {user?.email} and this password next time.
         </div>
         {/* Hidden username so password managers save the pair. */}
         <input

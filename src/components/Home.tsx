@@ -27,122 +27,128 @@ export const Home = () => {
   const past = games.filter((g) => g !== myActive).slice(0, 5);
 
   return (
-    <div style={{ flex: 1, overflow: "auto", padding: "14px 16px 16px" }}>
+    <>
       <AccountMovedBanner signedIn={!!user && !user.isGuest} />
-      {myActive ? (
-        <ContinueCard gameId={myActive.id} game={myActive} />
-      ) : (
-        <EmptyActive />
-      )}
+      <div style={{ flex: 1, overflow: "auto", padding: "14px 16px 16px" }}>
+        {myActive ? (
+          <ContinueCard gameId={myActive.id} game={myActive} />
+        ) : (
+          <EmptyActive />
+        )}
 
-      <div
-        style={{
-          marginTop: 22,
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "baseline",
-          marginBottom: 10,
-        }}
-      >
         <div
           style={{
-            fontSize: 10,
-            color: t.gold,
-            letterSpacing: "0.2em",
-            textTransform: "uppercase",
-            fontWeight: 700,
+            marginTop: 22,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "baseline",
+            marginBottom: 10,
           }}
         >
-          Recent games
-        </div>
-        <Link to="/games" style={{ fontSize: 11, color: t.gold, opacity: 0.8 }}>
-          See all →
-        </Link>
-      </div>
-
-      {past.length === 0 && (
-        <div
-          style={{
-            fontSize: 12,
-            color: t.cream,
-            opacity: 0.5,
-            padding: "12px 0",
-          }}
-        >
-          No games yet.
-        </div>
-      )}
-
-      {past.map((g) => {
-        const { totals, winnerIdx, isFinished } = summarizeGame(
-          g.playersOrders,
-          g.rounds
-        );
-        const winner = isFinished && winnerIdx >= 0 ? totals[winnerIdx] : null;
-        const date = new Date(g.createdAt);
-        return (
           <div
-            key={g.id}
-            onClick={() => nav(`/games/${g.id}`)}
             style={{
-              padding: "10px 12px",
-              borderRadius: 10,
-              marginBottom: 6,
-              background: alpha(t.shade, 0.22),
-              border: `1px solid ${alpha(t.gold, 0.13)}`,
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              cursor: "pointer",
+              fontSize: 10,
+              color: t.gold,
+              letterSpacing: "0.2em",
+              textTransform: "uppercase",
+              fontWeight: 700,
             }}
           >
-            <div style={{ minWidth: 0 }}>
-              <div
-                style={{
-                  fontFamily: t.display,
-                  fontSize: 14,
-                  color: t.cream,
-                  fontWeight: 600,
-                }}
-              >
-                {winner ? (
-                  <>
-                    {winner.name}{" "}
-                    <span
-                      style={{
-                        color: t.gold,
-                        opacity: 0.7,
-                        fontWeight: 400,
-                        fontSize: 12,
-                      }}
-                    >
-                      won
-                    </span>
-                  </>
-                ) : (
-                  <span style={{ opacity: 0.7, fontWeight: 500 }}>
-                    In progress
-                  </span>
-                )}
-              </div>
-              <div
-                style={{
-                  fontSize: 10,
-                  color: t.cream,
-                  opacity: 0.5,
-                  marginTop: 2,
-                }}
-              >
-                {date.toLocaleString()}
-              </div>
-            </div>
-            <div style={{ fontFamily: t.mono, fontSize: 13, color: t.gold }}>
-              {winner ? winner.score : "…"}
-            </div>
+            Recent games
           </div>
-        );
-      })}
-    </div>
+          <Link
+            to="/games"
+            style={{ fontSize: 11, color: t.gold, opacity: 0.8 }}
+          >
+            See all →
+          </Link>
+        </div>
+
+        {past.length === 0 && (
+          <div
+            style={{
+              fontSize: 12,
+              color: t.cream,
+              opacity: 0.5,
+              padding: "12px 0",
+            }}
+          >
+            No games yet.
+          </div>
+        )}
+
+        {past.map((g) => {
+          const { totals, winnerIdx, isFinished } = summarizeGame(
+            g.playersOrders,
+            g.rounds
+          );
+          const winner =
+            isFinished && winnerIdx >= 0 ? totals[winnerIdx] : null;
+          const date = new Date(g.createdAt);
+          return (
+            <div
+              key={g.id}
+              onClick={() => nav(`/games/${g.id}`)}
+              style={{
+                padding: "10px 12px",
+                borderRadius: 10,
+                marginBottom: 6,
+                background: alpha(t.shade, 0.22),
+                border: `1px solid ${alpha(t.gold, 0.13)}`,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                cursor: "pointer",
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    fontFamily: t.display,
+                    fontSize: 14,
+                    color: t.cream,
+                    fontWeight: 600,
+                  }}
+                >
+                  {winner ? (
+                    <>
+                      {winner.name}{" "}
+                      <span
+                        style={{
+                          color: t.gold,
+                          opacity: 0.7,
+                          fontWeight: 400,
+                          fontSize: 12,
+                        }}
+                      >
+                        won
+                      </span>
+                    </>
+                  ) : (
+                    <span style={{ opacity: 0.7, fontWeight: 500 }}>
+                      In progress
+                    </span>
+                  )}
+                </div>
+                <div
+                  style={{
+                    fontSize: 10,
+                    color: t.cream,
+                    opacity: 0.5,
+                    marginTop: 2,
+                  }}
+                >
+                  {date.toLocaleString()}
+                </div>
+              </div>
+              <div style={{ fontFamily: t.mono, fontSize: 13, color: t.gold }}>
+                {winner ? winner.score : "…"}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </>
   );
 };
 
