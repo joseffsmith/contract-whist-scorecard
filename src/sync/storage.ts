@@ -110,7 +110,8 @@ function openDb(factory: IDBFactory): Promise<IDBDatabase> {
     const request = factory.open(DB_NAME, 1);
     request.onupgradeneeded = () => {
       const db = request.result;
-      for (const table of TABLES) db.createObjectStore(table, { keyPath: "id" });
+      for (const table of TABLES)
+        db.createObjectStore(table, { keyPath: "id" });
       db.createObjectStore(PENDING, { keyPath: "seq" });
       db.createObjectStore(KV);
     };
@@ -173,10 +174,15 @@ function createIdbStorage(db: IDBDatabase): SyncStorage {
         const session = await done(tx.objectStore(KV).get("session"));
         TABLES.forEach((table, i) => {
           for (const row of rows[i]) {
-            (empty.data[table] as Map<string, Tables[TableName]>).set(row.id, row);
+            (empty.data[table] as Map<string, Tables[TableName]>).set(
+              row.id,
+              row
+            );
           }
         });
-        empty.pending = (pending as PendingEntry[]).sort((a, b) => a.seq - b.seq);
+        empty.pending = (pending as PendingEntry[]).sort(
+          (a, b) => a.seq - b.seq
+        );
         empty.version = typeof version === "number" ? version : 0;
         empty.session = session ?? null;
       } catch (error) {
@@ -223,7 +229,9 @@ function createIdbStorage(db: IDBDatabase): SyncStorage {
 }
 
 // IndexedDB if we can have it, otherwise memory. Never rejects.
-export async function openStorage(factory?: IDBFactory | null): Promise<SyncStorage> {
+export async function openStorage(
+  factory?: IDBFactory | null
+): Promise<SyncStorage> {
   try {
     // Reading `indexedDB` can itself throw when site data is blocked.
     const idb = factory === undefined ? globalThis.indexedDB : factory;

@@ -19,7 +19,8 @@ export class SyncError extends Error {
 }
 
 export const isNetworkError = (error: unknown) =>
-  error instanceof SyncError && (error.code === "network" || error.code === "offline");
+  error instanceof SyncError &&
+  (error.code === "network" || error.code === "offline");
 
 export type StreamEvent = "open" | "closed";
 export type StreamHandle = { close(): void };
@@ -81,7 +82,9 @@ export function createTransport(options: TransportOptions): Transport {
     }
     if (!res.ok) {
       throw new SyncError(
-        typeof json?.error === "string" ? json.error : "Something went wrong. Try again.",
+        typeof json?.error === "string"
+          ? json.error
+          : "Something went wrong. Try again.",
         typeof json?.code === "string" ? json.code : "error",
         res.status
       );
@@ -91,9 +94,15 @@ export function createTransport(options: TransportOptions): Transport {
 
   return {
     // Reads are public, so no token: a stale session can't block syncing.
-    pull: (since) => request("GET", `/sync/pull?since=${since}`, undefined, undefined, 60_000),
+    pull: (since) =>
+      request("GET", `/sync/pull?since=${since}`, undefined, undefined, 60_000),
     push: (actions, token) =>
-      request<PushResponse>("POST", "/sync/push", { actions } satisfies PushRequest, token),
+      request<PushResponse>(
+        "POST",
+        "/sync/push",
+        { actions } satisfies PushRequest,
+        token
+      ),
     post: (path, body, token) => request("POST", path, body, token),
     openStream(since, onChangeSet, onStatus) {
       const controller = new AbortController();
@@ -123,7 +132,11 @@ export function createTransport(options: TransportOptions): Transport {
           headers: { accept: "text/event-stream" },
         });
         if (!res.ok || !res.body) {
-          throw new SyncError("Couldn't open the live connection", "stream", res.status);
+          throw new SyncError(
+            "Couldn't open the live connection",
+            "stream",
+            res.status
+          );
         }
         if (closed) return;
         watchdog();

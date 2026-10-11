@@ -19,12 +19,7 @@ import type {
 import { BASE_PATH } from "../lib/paths";
 import { openStorage } from "./storage";
 import type { PendingEntry, Session, SyncStorage } from "./storage";
-import {
-  OFFLINE_MESSAGE,
-  SyncError,
-  createTransport,
-  isNetworkError,
-} from "./transport";
+import { OFFLINE_MESSAGE, SyncError, createTransport } from "./transport";
 import type { StreamHandle } from "./transport";
 
 export type ConnectionStatus = "connected" | "connecting" | "offline";
@@ -86,11 +81,15 @@ const randomUuid = () => {
   b[6] = (b[6] & 0x0f) | 0x40;
   b[8] = (b[8] & 0x3f) | 0x80;
   const h = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(
+    16,
+    20
+  )}-${h.slice(20)}`;
 };
 
 const browserNetwork: NetworkSignal = {
-  isOnline: () => typeof navigator === "undefined" || navigator.onLine !== false,
+  isOnline: () =>
+    typeof navigator === "undefined" || navigator.onLine !== false,
   subscribe(onChange) {
     if (typeof window === "undefined") return () => {};
     const onVisible = () => {
@@ -129,7 +128,9 @@ const copyData = (data: DataState): DataState => ({
   turns: new Map(data.turns),
 });
 
-export function createSyncClient(overrides: Partial<SyncDeps> = {}): SyncClient {
+export function createSyncClient(
+  overrides: Partial<SyncDeps> = {}
+): SyncClient {
   const deps: SyncDeps = { ...defaultDeps(), ...overrides };
   const transport = createTransport({
     fetch: deps.fetch,
@@ -198,9 +199,7 @@ export function createSyncClient(overrides: Partial<SyncDeps> = {}): SyncClient 
   function notify() {
     loading = !hydrated || !(hasData() || firstPull || status === "offline");
     const user = session?.user ?? null;
-    if (auth.isLoading === !hydrated && auth.user === user) {
-      // unchanged
-    } else {
+    if (auth.isLoading === hydrated || auth.user !== user) {
       auth = { isLoading: !hydrated, user };
     }
     for (const listener of [...listeners]) listener();
@@ -267,7 +266,8 @@ export function createSyncClient(overrides: Partial<SyncDeps> = {}): SyncClient 
   // give the stream a moment, then pull.
   async function catchUp(target: number) {
     if (version >= target) return;
-    if (status === "connected") await waitForVersion(target, deps.streamGraceMs);
+    if (status === "connected")
+      await waitForVersion(target, deps.streamGraceMs);
     if (version >= target || !running) return;
     try {
       receive(await transport.pull(version));
@@ -284,7 +284,10 @@ export function createSyncClient(overrides: Partial<SyncDeps> = {}): SyncClient 
   let stream: StreamHandle | null = null;
 
   const delayFor = (failureCount: number) =>
-    Math.min(deps.backoff.maxMs, deps.backoff.minMs * 2 ** Math.max(0, failureCount - 1));
+    Math.min(
+      deps.backoff.maxMs,
+      deps.backoff.minMs * 2 ** Math.max(0, failureCount - 1)
+    );
 
   function closeStream() {
     stream?.close();
@@ -304,16 +307,20 @@ export function createSyncClient(overrides: Partial<SyncDeps> = {}): SyncClient 
         firstPull = true;
         receive(changes);
         notify();
-        stream = transport.openStream(version, (cs) => id === attempt && receive(cs), (event) => {
-          if (id !== attempt) return;
-          if (event === "open") {
-            failures = 0;
-            setStatus("connected");
-            void push();
-          } else {
-            fail();
+        stream = transport.openStream(
+          version,
+          (cs) => id === attempt && receive(cs),
+          (event) => {
+            if (id !== attempt) return;
+            if (event === "open") {
+              failures = 0;
+              setStatus("connected");
+              void push();
+            } else {
+              fail();
+            }
           }
-        });
+        );
       } catch {
         if (id === attempt) fail();
       }
@@ -351,8 +358,10 @@ export function createSyncClient(overrides: Partial<SyncDeps> = {}): SyncClient 
   let pushFailures = 0;
   let pushTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const unacked = () => pending.filter((entry) => entry.ackVersion === undefined);
-  const canPush = () => running && hydrated && !!session && deps.network.isOnline();
+  const unacked = () =>
+    pending.filter((entry) => entry.ackVersion === undefined);
+  const canPush = () =>
+    running && hydrated && !!session && deps.network.isOnline();
 
   function push(): Promise<void> {
     if (pushing) return pushDone;
@@ -412,10 +421,15 @@ export function createSyncClient(overrides: Partial<SyncDeps> = {}): SyncClient 
         acked.push(entry);
       } else {
         rejectedEntries.push(entry);
-        rejected.push({ action: entry.action, error: result.error, code: result.code });
+        rejected.push({
+          action: entry.action,
+          error: result.error,
+          code: result.code,
+        });
       }
     }
-    if (!acked.length && !rejected.length) return !batch.some((e) => pending.includes(e));
+    if (!acked.length && !rejected.length)
+      return !batch.some((e) => pending.includes(e));
 
     if (acked.length) persist(() => storage.putPending(acked));
     dropPending((entry) => rejectedEntries.includes(entry));
@@ -443,7 +457,8 @@ export function createSyncClient(overrides: Partial<SyncDeps> = {}): SyncClient 
 
   async function authRequest(path: string, body: unknown, token?: string) {
     await start();
-    if (!deps.network.isOnline()) throw new SyncError(OFFLINE_MESSAGE, "offline");
+    if (!deps.network.isOnline())
+      throw new SyncError(OFFLINE_MESSAGE, "offline");
     return transport.post<AuthResponse>(path, body, token);
   }
 
@@ -527,7 +542,9 @@ export function createSyncClient(overrides: Partial<SyncDeps> = {}): SyncClient 
     const guestToken = session?.user.isGuest ? session.token : undefined;
     // The guest's queued work goes up under the guest before we leave it.
     if (guestToken && unacked().length && canPush()) await push();
-    return adopt(await authRequest("/auth/login", { email, password, guestToken }));
+    return adopt(
+      await authRequest("/auth/login", { email, password, guestToken })
+    );
   }
 
   return {
@@ -557,7 +574,9 @@ export function createSyncClient(overrides: Partial<SyncDeps> = {}): SyncClient 
     async signUp(email, password) {
       await start();
       const guestToken = session?.user.isGuest ? session.token : undefined;
-      return adopt(await authRequest("/auth/signup", { email, password }, guestToken));
+      return adopt(
+        await authRequest("/auth/signup", { email, password }, guestToken)
+      );
     },
     logIn,
     async logOut() {
@@ -582,5 +601,3 @@ export function createSyncClient(overrides: Partial<SyncDeps> = {}): SyncClient 
 
 export const sync = createSyncClient();
 if (typeof window !== "undefined") void sync.start();
-
-export { isNetworkError };
