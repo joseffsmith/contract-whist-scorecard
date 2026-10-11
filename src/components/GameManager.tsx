@@ -14,16 +14,18 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { id } from "@instantdb/react";
 import { enqueueSnackbar } from "notistack";
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { db } from "../db";
+import { act, newId } from "../lib/dispatch";
 import { useGame } from "../lib/offline";
 import { useMyPlayer } from "../players/account";
 import { alpha, goldButton, t } from "../theme/tokens";
 import { Player, PlayersOrdersWithPlayers } from "../types";
-import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
+import {
+  addExistingPlayerToGame,
+  nextSeatOrder,
+} from "../utils/addExistingPlayerToGame";
 import { getDealerIdx } from "../utils/getDealerIdx";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
 import { Crumb } from "./chrome/Crumb";
@@ -32,7 +34,6 @@ import { InviteSheet } from "./InviteSheet";
 export const GameManager = () => {
   const { gameId } = useParams<{ gameId: string }>();
   const nav = useNavigate();
-  const { user } = db.useAuth();
   const [addingOpen, setAddingOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
 
@@ -72,11 +73,10 @@ export const GameManager = () => {
     if (oldIndex === -1 || newIndex === -1) return;
     const [moved] = items.splice(oldIndex, 1);
     items.splice(newIndex, 0, moved);
-    await db.transact(
-      items.map((po, i) =>
-        db.tx.playersOrders[po.id].update({ orderNumber: i })
-      )
-    );
+    await act("reorderSeats", {
+      gameId: gameId!,
+      seatIds: items.map((po) => po.id),
+    });
   }
 
   let initialDealerIdx: number | null = playerOrdersInGame.findIndex(
@@ -132,23 +132,20 @@ export const GameManager = () => {
           <div style={{ marginTop: 10 }}>
             <ChoosePlayerOrCreate
               createPlayer={async (name) => {
-                const playerId = id();
-                const res = await db.transact([
-                  db.tx.players[playerId].update({ name }),
-                  db.tx.playersOrders[id()]
-                    .update({ orderNumber: playerOrdersInGame.length })
-                    .link({ player: playerId, game: gameId! }),
-                ]);
-                if (res.status === "enqueued") {
-                  enqueueSnackbar("Player added", { variant: "success" });
-                }
+                const playerId = newId();
+                if (!(await act("createPlayer", { playerId, name }))) return;
+                await addExistingPlayerToGame(
+                  gameId!,
+                  playerId,
+                  nextSeatOrder(playerOrdersInGame)
+                );
                 setAddingOpen(false);
               }}
               choosePlayer={async (player) => {
                 await addExistingPlayerToGame(
                   gameId!,
-                  player,
-                  playerOrdersInGame.length
+                  player.id,
+                  nextSeatOrder(playerOrdersInGame)
                 );
                 setAddingOpen(false);
               }}
@@ -268,7 +265,7 @@ const PlayerRow = ({
   };
 
   const remove = async () => {
-    await db.transact([db.tx.playersOrders[playerOrderId].delete()]);
+    await act("removeSeat", { seatId: playerOrderId });
   };
 
   const makeDealer = async () => {
@@ -278,9 +275,7 @@ const PlayerRow = ({
       });
       return;
     }
-    await db.transact([
-      db.tx.games[gameId!].update({ initialDealerId: player.id }),
-    ]);
+    await act("setInitialDealer", { gameId: gameId!, playerId: player.id });
   };
 
   const initials = (player.name ?? "")

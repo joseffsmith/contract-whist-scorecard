@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import type { ConnectionStatus } from "../../sync";
 import { alpha, goldButton, t } from "../../theme/tokens";
 import { ThemeToggle } from "./ThemeToggle";
 
@@ -18,17 +19,12 @@ export const RootHeader = ({
 }: {
   activeTab: RootTabId;
   onDeal: () => void;
-  connection:
-    | "connected"
-    | "authenticating"
-    | "closed"
-    | "errored"
-    | "unexpected state";
+  connection: ConnectionStatus;
 }) => {
   const dotColor =
     connection === "connected"
       ? "#6fbf6a"
-      : connection === "authenticating"
+      : connection === "connecting"
       ? t.gold
       : t.red;
 

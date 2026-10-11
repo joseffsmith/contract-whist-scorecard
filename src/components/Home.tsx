@@ -1,21 +1,21 @@
 import { Link, useNavigate } from "react-router-dom";
 import { DEALS } from "../constants";
-import { db } from "../db";
-import { queryHomeGames } from "../queries";
+import { selectHomeGames, useAuth, useSyncView } from "../sync";
 import { alpha, goldButton, suitColor, t } from "../theme/tokens";
 import { summarizeGame } from "../utils/gameStatus";
+import { AccountMovedBanner } from "./chrome/AccountMovedBanner";
 
 export const Home = () => {
   const nav = useNavigate();
-  const { user } = db.useAuth();
-  const { data, isLoading } = db.useQuery(queryHomeGames);
+  const { user } = useAuth();
+  const { view, isLoading } = useSyncView();
 
   if (isLoading) {
     return <CenterMsg text="Loading…" />;
   }
 
-  const games = (data?.games ?? [])
-    .filter((g) => !g.deletedAt)
+  const games = selectHomeGames(view)
+    .games.filter((g) => !g.deletedAt)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
   // Active game: most recent unfinished game the user created.
@@ -28,6 +28,7 @@ export const Home = () => {
 
   return (
     <div style={{ flex: 1, overflow: "auto", padding: "14px 16px 16px" }}>
+      <AccountMovedBanner signedIn={!!user && !user.isGuest} />
       {myActive ? (
         <ContinueCard gameId={myActive.id} game={myActive} />
       ) : (

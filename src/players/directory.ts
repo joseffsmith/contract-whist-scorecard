@@ -1,7 +1,5 @@
-import { InstaQLParams } from "@instantdb/react";
 import { useMemo } from "react";
-import { AppSchema } from "../../instant.schema";
-import { db } from "../db";
+import { useSyncView } from "../sync";
 
 // Everything we know about a player that helps tell people with the same
 // name apart: how much they've played, when, and who with.
@@ -18,34 +16,36 @@ export type PlayerInfo = {
   coPlayers: { id: string; name: string; count: number }[];
 };
 
-export const queryPlayerDirectory = {
-  players: {
-    playersOrders: {
-      game: { playersOrders: { player: {} } },
-    },
-  },
-} satisfies InstaQLParams<AppSchema>;
-
-const one = <T>(x: T | T[] | undefined | null): T | undefined =>
-  Array.isArray(x) ? x[0] : x ?? undefined;
-
 export const normName = (s: string) =>
   s.trim().toLowerCase().replace(/\s+/g, " ");
 
 export function usePlayerDirectory() {
-  const { data, isLoading } = db.useQuery(queryPlayerDirectory);
+  const { view, isLoading } = useSyncView();
   const directory = useMemo(() => {
+    // Seats by game and by player, so each player's games and the other
+    // players in them can be found without scanning everything per player.
+    const seatsByGame = new Map<string, string[]>();
+    const gamesByPlayer = new Map<string, string[]>();
+    for (const seat of view.seats.values()) {
+      const inGame = seatsByGame.get(seat.gameId);
+      if (inGame) inGame.push(seat.playerId);
+      else seatsByGame.set(seat.gameId, [seat.playerId]);
+      const games = gamesByPlayer.get(seat.playerId);
+      if (games) games.push(seat.gameId);
+      else gamesByPlayer.set(seat.playerId, [seat.gameId]);
+    }
+
     const map = new Map<string, PlayerInfo>();
-    for (const p of data?.players ?? []) {
-      const games = (p.playersOrders ?? [])
-        .map((po) => one(po.game))
+    for (const p of view.players.values()) {
+      const games = (gamesByPlayer.get(p.id) ?? [])
+        .map((gameId) => view.games.get(gameId))
         .filter((g): g is NonNullable<typeof g> => !!g && !g.deletedAt);
       const co = new Map<string, { id: string; name: string; count: number }>();
       let lastPlayed: string | undefined;
       for (const g of games) {
         if (!lastPlayed || g.createdAt > lastPlayed) lastPlayed = g.createdAt;
-        for (const po of g.playersOrders ?? []) {
-          const other = one(po.player);
+        for (const otherId of seatsByGame.get(g.id) ?? []) {
+          const other = view.players.get(otherId);
           if (!other || other.id === p.id) continue;
           const c = co.get(other.id) ?? {
             id: other.id,
@@ -59,9 +59,9 @@ export function usePlayerDirectory() {
       map.set(p.id, {
         id: p.id,
         name: p.name,
-        claimedBy: p.claimedBy,
-        mergedInto: p.mergedInto,
-        mergedAt: p.mergedAt,
+        claimedBy: p.claimedBy ?? undefined,
+        mergedInto: p.mergedInto ?? undefined,
+        mergedAt: p.mergedAt ?? undefined,
         games: new Set(games.map((g) => g.id)).size,
         lastPlayed,
         gameIds: new Set(games.map((g) => g.id)),
@@ -69,7 +69,7 @@ export function usePlayerDirectory() {
       });
     }
     return map;
-  }, [data]);
+  }, [view]);
   return { directory, isLoading };
 }
 

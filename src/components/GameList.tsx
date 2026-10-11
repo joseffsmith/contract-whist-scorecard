@@ -1,29 +1,19 @@
-import { enqueueSnackbar } from "notistack";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { db } from "../db";
-import { queryHomeGames } from "../queries";
+import { act } from "../lib/dispatch";
+import { selectHomeGames, useAuth, useSyncView } from "../sync";
 import { alpha, goldButton, t } from "../theme/tokens";
 import { summarizeGame } from "../utils/gameStatus";
 
 export const GameList = () => {
   const nav = useNavigate();
-  const { user } = db.useAuth();
-  const { data, isLoading } = db.useQuery(queryHomeGames);
+  const { user } = useAuth();
+  const { view, isLoading } = useSyncView();
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const doDelete = async () => {
     if (!confirmDelete) return;
-    try {
-      await db.transact([
-        db.tx.games[confirmDelete].update({
-          deletedAt: new Date().toISOString(),
-        }),
-      ]);
-    } catch (err) {
-      enqueueSnackbar("Error deleting game", { variant: "error" });
-      return;
-    }
+    if (!(await act("deleteGame", { gameId: confirmDelete }))) return;
     setConfirmDelete(null);
   };
 
@@ -31,8 +21,8 @@ export const GameList = () => {
     return <div style={{ padding: 20, opacity: 0.6 }}>Loading…</div>;
   }
 
-  const games = (data?.games ?? [])
-    .filter((g) => !g.deletedAt)
+  const games = selectHomeGames(view)
+    .games.filter((g) => !g.deletedAt)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
   return (

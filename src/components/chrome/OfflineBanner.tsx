@@ -1,22 +1,13 @@
 import { useEffect, useState } from "react";
+import type { ConnectionStatus } from "../../sync";
 import { alpha, t } from "../../theme/tokens";
-
-type Connection =
-  | "connected"
-  | "authenticating"
-  | "closed"
-  | "errored"
-  | "unexpected state";
 
 // Show after the connection has been down for a moment — avoids flickering
 // during the transient "connecting" states at startup and brief blips.
 const SHOW_AFTER_MS = 1000;
 
-export const OfflineBanner = ({ connection }: { connection: Connection }) => {
-  const isOffline =
-    connection === "closed" ||
-    connection === "errored" ||
-    connection === "unexpected state";
+export const OfflineBanner = ({ connection }: { connection: ConnectionStatus }) => {
+  const isOffline = connection === "offline";
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {

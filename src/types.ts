@@ -1,5 +1,10 @@
-import { InstaQLEntity } from "@instantdb/react";
-import { AppSchema } from "../instant.schema";
+import type {
+  GameRow,
+  PlayerRow,
+  RoundRow,
+  SeatRow,
+  TurnRow,
+} from "../shared/types";
 
 export type Stage = "bid" | "score";
 
@@ -10,26 +15,18 @@ export type Deal = {
   suit: string;
 };
 
-export type Game = InstaQLEntity<AppSchema, "games">;
+export type Game = GameRow;
 
-export type Turn = InstaQLEntity<AppSchema, "turns">;
+export type Turn = TurnRow;
 
-export type Round = InstaQLEntity<AppSchema, "rounds">;
+export type Round = RoundRow;
 
-export type Player = InstaQLEntity<AppSchema, "players">;
+export type Player = PlayerRow;
 
-export type PlayersOrders = InstaQLEntity<AppSchema, "playersOrders">;
+export type PlayersOrders = SeatRow;
 
-export type User = InstaQLEntity<AppSchema, "$users">;
+export type PlayersOrdersWithPlayers = SeatRow & { player?: PlayerRow };
 
-export type PlayersOrdersWithPlayers = InstaQLEntity<
-  AppSchema,
-  "playersOrders",
-  { player: {} }
->;
-
-export type RoundData = InstaQLEntity<
-  AppSchema,
-  "rounds",
-  { turns: { player: {} } }
->;
+export type RoundData = RoundRow & {
+  turns: (TurnRow & { player?: PlayerRow })[];
+};

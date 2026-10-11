@@ -1,6 +1,5 @@
 import { Link } from "react-router-dom";
-import { db } from "../db";
-import { queryHomeGames } from "../queries";
+import { selectHomeGames, useSyncView } from "../sync";
 import { alpha, t } from "../theme/tokens";
 import { summarizeGame } from "../utils/gameStatus";
 
@@ -14,14 +13,14 @@ type Row = {
 };
 
 export const Leaderboard = () => {
-  const { data, isLoading } = db.useQuery(queryHomeGames);
+  const { view, isLoading } = useSyncView();
 
   if (isLoading) {
     return <div style={{ padding: 20, opacity: 0.6 }}>Loading…</div>;
   }
 
   const byPlayer = new Map<string, Row>();
-  for (const g of data?.games ?? []) {
+  for (const g of selectHomeGames(view).games) {
     if (g.deletedAt) continue;
     const s = summarizeGame(g.playersOrders, g.rounds);
     for (let i = 0; i < s.totals.length; i++) {

@@ -1,15 +1,14 @@
-import { id } from "@instantdb/react";
 import { enqueueSnackbar } from "notistack";
+import { useEffect } from "react";
 import { Outlet, useLocation, useNavigate, matchPath } from "react-router-dom";
 import { DEALS } from "../constants";
-import { db } from "../db";
-import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
+import { act, newId } from "../lib/dispatch";
+import { useMyPlayer } from "../players/account";
+import { sync, useAuth, useConnectionStatus } from "../sync";
+import { t } from "../theme/tokens";
 import { OfflineBanner } from "./chrome/OfflineBanner";
 import { Shell } from "./chrome/Shell";
 import { RootHeader, RootTabId } from "./chrome/RootHeader";
-import { useWarmOfflineCache } from "../lib/offline";
-import { useAccountReconcile, useMyPlayer } from "../players/account";
-import { t } from "../theme/tokens";
 
 // Map a pathname to a root-tab id, or null if this is a deep (breadcrumb) route.
 function matchRootTab(pathname: string): RootTabId | null {
@@ -23,22 +22,19 @@ function matchRootTab(pathname: string): RootTabId | null {
 export const App = () => {
   const nav = useNavigate();
   const location = useLocation();
-  useAccountReconcile();
-  useWarmOfflineCache();
-  const { isLoading, user, error } = db.useAuth();
-  const status = db.useConnectionStatus();
-  const connection =
-    status === "connecting" || status === "opened"
-      ? "authenticating"
-      : status === "authenticated"
-      ? "connected"
-      : status === "closed"
-      ? "closed"
-      : status === "errored"
-      ? "errored"
-      : "unexpected state";
+  const connection = useConnectionStatus();
 
-  const { player: myPlayer } = useMyPlayer();
+  // Changes the server turned down after we'd already shown them locally.
+  useEffect(
+    () =>
+      sync.onActionRejected(({ error }) =>
+        enqueueSnackbar(error, { variant: "error" })
+      ),
+    []
+  );
+
+  const { isLoading } = useAuth();
+  const { user, player: myPlayer } = useMyPlayer();
 
   async function createNewGame() {
     if (!user) {
@@ -49,24 +45,14 @@ export const App = () => {
       enqueueSnackbar("No user linked", { variant: "error" });
       return;
     }
-    const gameId = id();
-    const rounds = DEALS.map((deal) => ({
-      id: id(),
-      roundNumber: deal.id,
-    }));
-    await db.transact([
-      db.tx.games[gameId].update({
-        createdAt: new Date().toISOString(),
-        createdBy: user.id,
-      }),
-      ...rounds.map((round) =>
-        db.tx.rounds[round.id]
-          .update({ roundNumber: round.roundNumber })
-          .link({ game: gameId })
-      ),
-    ]);
-    await addExistingPlayerToGame(gameId, myPlayer, 0);
-    nav("/games/" + gameId + "/manage");
+    const gameId = newId();
+    const ok = await act("createGame", {
+      gameId,
+      roundIds: DEALS.map(() => newId()),
+      seatId: newId(),
+      playerId: myPlayer.id,
+    });
+    if (ok) nav("/games/" + gameId + "/manage");
   }
 
   const rootTab = matchRootTab(location.pathname);
@@ -75,15 +61,6 @@ export const App = () => {
     return (
       <Shell>
         <div style={{ padding: 20, opacity: 0.6, fontSize: 13 }}>Loading…</div>
-      </Shell>
-    );
-  }
-  if (error) {
-    return (
-      <Shell>
-        <div style={{ padding: 20, color: t.red, fontSize: 13 }}>
-          {error.message}
-        </div>
       </Shell>
     );
   }

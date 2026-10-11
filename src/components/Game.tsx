@@ -1,10 +1,10 @@
-import { id } from "@instantdb/react";
 import { Fragment, useEffect, useState } from "react";
 import Confetti from "react-confetti";
 import { useNavigate, useParams } from "react-router-dom";
 import { DEALS } from "../constants";
-import { db } from "../db";
+import { act, newId } from "../lib/dispatch";
 import { useGame } from "../lib/offline";
+import { useAuth } from "../sync";
 import {
   alpha,
   fluid,
@@ -30,7 +30,7 @@ export const GameComp = () => {
   const [isConfettiClosed, setIsClosed] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
 
-  const { isLoading: isLoadingUser, user } = db.useAuth();
+  const { isLoading: isLoadingUser, user } = useAuth();
   const { isLoading, game } = useGame(gameId);
 
   useEffect(() => {
@@ -99,11 +99,12 @@ export const GameComp = () => {
 
   const handleBid = async (opt: { number: number; disabled: boolean }) => {
     if (!opt.disabled && currentPlayerId !== null) {
-      await db.transact([
-        db.tx.turns[id()]
-          .update({ bid: opt.number })
-          .link({ player: currentPlayerId, round: currentRound!.id }),
-      ]);
+      await act("placeBid", {
+        turnId: newId(),
+        roundId: currentRound!.id,
+        playerId: currentPlayerId,
+        bid: opt.number,
+      });
     }
   };
 
@@ -113,7 +114,7 @@ export const GameComp = () => {
         (tt) => tt.player?.id === currentPlayerId
       );
       const score = turn?.bid === tricks ? tricks + 10 : tricks;
-      await db.transact([db.tx.turns[turn!.id].update({ score })]);
+      await act("setScore", { turnId: turn!.id, score });
     }
   };
 
@@ -146,14 +147,10 @@ export const GameComp = () => {
       (p) => p.player?.id === playerToUndo?.id
     );
     if (turnToUndo?.score !== undefined && turnToUndo.score !== null) {
-      await db.transact([db.tx.turns[turnToUndo.id].update({ score: null })]);
+      await act("clearScore", { turnId: turnToUndo.id });
       return;
     }
-    await db.transact([
-      db.tx.turns[
-        round_to_undo.turns.find((p) => p.player?.id === playerToUndo?.id)!.id
-      ].delete(),
-    ]);
+    if (turnToUndo) await act("deleteTurn", { turnId: turnToUndo.id });
   };
 
   const bidOptions = getBidOptions(

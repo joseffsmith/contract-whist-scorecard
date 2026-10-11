@@ -1,13 +1,13 @@
-import { id } from "@instantdb/react";
 import { enqueueSnackbar } from "notistack";
 import { useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
-import { db } from "../db";
 import { claimPlayer, useMyPlayer } from "../players/account";
 import { mergePlayers } from "../players/merge";
+import { newId } from "../lib/dispatch";
 import { useGame, useIsOffline } from "../lib/offline";
+import { sync } from "../sync";
 import { alpha, goldButton, t } from "../theme/tokens";
-import { addExistingPlayerToGame } from "../utils/addExistingPlayerToGame";
+import { nextSeatOrder } from "../utils/addExistingPlayerToGame";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
 import { Crumb } from "./chrome/Crumb";
 
@@ -33,6 +33,13 @@ export const JoinGame = () => {
   const iAmSeated = !!me && seats.some((p) => p.id === me.id);
   const openSeats = seats.filter((p) => !p.claimedBy && p.id !== me?.id);
   const goToGame = () => nav(`/games/${gameId}`, { replace: true });
+  const takeSeat = (playerId: string) =>
+    sync.dispatch("addSeat", {
+      seatId: newId(),
+      gameId: gameId!,
+      playerId,
+      orderNumber: nextSeatOrder(game?.playersOrders ?? []),
+    });
 
   useEffect(() => {
     if (iAmSeated) goToGame();
@@ -85,7 +92,7 @@ export const JoinGame = () => {
         {seatList && <Muted>At the table: {seatList}</Muted>}
         <PrimaryButton
           busy={busy}
-          onClick={() => run(async () => void (await db.auth.signInAsGuest()))}
+          onClick={() => run(async () => void (await sync.signInAsGuest()))}
         >
           Join game
         </PrimaryButton>
@@ -144,7 +151,7 @@ export const JoinGame = () => {
             busy={busy}
             onClick={() =>
               run(async () => {
-                await addExistingPlayerToGame(gameId, me, seats.length);
+                await takeSeat(me.id);
                 goToGame();
               })
             }
@@ -171,11 +178,7 @@ export const JoinGame = () => {
           <button
             onClick={() =>
               run(async () => {
-                await db.transact([
-                  db.tx.players[me.id]
-                    .unlink({ $user: user.id })
-                    .update({ claimedBy: null }),
-                ]);
+                await sync.dispatch("unclaimPlayer", { playerId: me.id });
               })
             }
             style={linkButton}
@@ -193,7 +196,7 @@ export const JoinGame = () => {
       {seatPicker(
         (seatId) =>
           run(async () => {
-            await claimPlayer(seatId, user.id);
+            await claimPlayer(seatId);
             goToGame();
           }),
         "Which one are you?"
@@ -221,21 +224,20 @@ export const JoinGame = () => {
             contextPlayerIds={seats.map((p) => p.id)}
             choosePlayer={(player) =>
               run(async () => {
-                await claimPlayer(player.id, user.id);
-                await addExistingPlayerToGame(gameId, player, seats.length);
+                await claimPlayer(player.id);
+                await takeSeat(player.id);
                 goToGame();
               })
             }
             createPlayer={(name) =>
               run(async () => {
-                const pid = id();
-                await db.transact([db.tx.players[pid].update({ name })]);
-                await claimPlayer(pid, user.id);
-                await addExistingPlayerToGame(
-                  gameId,
-                  { id: pid, name },
-                  seats.length
-                );
+                const playerId = newId();
+                await sync.dispatch("createPlayer", {
+                  playerId,
+                  name,
+                  claim: true,
+                });
+                await takeSeat(playerId);
                 goToGame();
               })
             }
