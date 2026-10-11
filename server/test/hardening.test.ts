@@ -184,6 +184,25 @@ describe("admin bootstrap", () => {
     );
   });
 
+  it("shows isAdmin in /auth/me and on login for the admin only", async () => {
+    const api = await start({ adminBootstrapToken: "s3cret" });
+    const admin = await api.signup("admin@example.com");
+    const other = await api.signup("other@example.com");
+    expect(admin.user.isAdmin).toBeUndefined();
+    await claim(api, "s3cret", admin.token);
+
+    const me = await api.get("/auth/me", admin.token);
+    expect(me.body.user).toEqual({ ...admin.user, isAdmin: true });
+    const login = await api.post("/auth/login", {
+      email: "admin@example.com",
+      password: "password123",
+    });
+    expect(login.body.user.isAdmin).toBe(true);
+    expect((await api.get("/auth/me", other.token)).body.user.isAdmin).not.toBe(
+      true
+    );
+  });
+
   it("is not granted by registering an admin's email address", async () => {
     const api = await start({ adminBootstrapToken: "s3cret" });
     const squatter = await api.signup("boss@example.com");
@@ -346,6 +365,88 @@ describe("guest handoff on login", () => {
     expect(players[pg].mergedInto).toBeUndefined();
     expect(players[pg].claimedBy).toBeUndefined(); // claimable again
     expect(players[shared.playerId].claimedBy).toBe(account.user.id);
+  });
+
+  it("moves games the guest hosted to the account, in the same version", async () => {
+    const api = await start();
+    const account = await api.signup(credentials.email);
+    const guest = await api.guest();
+    const hosted = newGame();
+    await api.push(guest.token, ...hosted.actions);
+    const bid = (turnId: string) =>
+      action("placeBid", {
+        turnId,
+        roundId: hosted.roundIds[0],
+        playerId: hosted.playerId,
+        bid: 1,
+      });
+    // Before the login the account can't edit the guest's game.
+    const before = await api.push(account.token, bid("t-before"));
+    expect(before.results[0]).toMatchObject({ ok: false, code: "forbidden" });
+
+    const stream = await openStream(`${api.url}/sync/stream?since=2`);
+    expect((await readEvent(stream.res)).version).toBe(2); // nothing new yet
+    const login = await api.post("/auth/login", {
+      ...credentials,
+      guestToken: guest.token,
+    });
+    expect(login.status).toBe(200);
+
+    // One version: the claim transfer and the games' new owner.
+    const change = await readEvent(stream.res);
+    stream.close();
+    expect(change.version).toBe(3);
+    expect(change.puts.games).toEqual([
+      expect.objectContaining({
+        id: hosted.gameId,
+        createdBy: account.user.id,
+      }),
+    ]);
+    expect(change.puts.players![0].claimedBy).toBe(account.user.id);
+
+    const after = await api.push(account.token, bid("t-after"));
+    expect(after.results[0].ok).toBe(true);
+  });
+
+  it("moves hosted games even when the guest's player merges or stays unclaimed", async () => {
+    const api = await start();
+    const account = await api.signup(credentials.email);
+    await api.push(account.token, ...newGame().actions);
+    const guest = await api.guest();
+    const hosted = newGame();
+    await api.push(guest.token, ...hosted.actions);
+    // A game the guest hosted without any player of their own.
+    const lonely = await api.guest();
+    const lonelyGame = newGame();
+    await api.push(lonely.token, ...lonelyGame.actions);
+    await api.push(
+      lonely.token,
+      action("unclaimPlayer", { playerId: lonelyGame.playerId })
+    );
+
+    await api.post("/auth/login", { ...credentials, guestToken: guest.token });
+    await api.post("/auth/login", { ...credentials, guestToken: lonely.token });
+    const { puts } = (await api.get("/sync/pull?since=0")).body;
+    const owner = Object.fromEntries(
+      puts.games.map((g: any) => [g.id, g.createdBy])
+    );
+    expect(owner[hosted.gameId]).toBe(account.user.id);
+    expect(owner[lonelyGame.gameId]).toBe(account.user.id);
+  });
+
+  it("leaves a guest's games alone when upgrading in place", async () => {
+    const api = await start();
+    const guest = await api.guest();
+    const hosted = newGame();
+    await api.push(guest.token, ...hosted.actions);
+    const signup = await api.signup(
+      "up@example.com",
+      "password123",
+      guest.token
+    );
+    const { puts } = (await api.get("/sync/pull?since=0")).body;
+    expect(puts.games[0].createdBy).toBe(signup.user.id);
+    expect(signup.user.id).toBe(guest.user.id);
   });
 
   it("retires the guest's sessions, and ignores a guest with nothing claimed", async () => {

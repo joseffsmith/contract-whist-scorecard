@@ -18,7 +18,7 @@ import type { Db } from "./db";
 import { HttpError, bearerToken, readJson } from "./http";
 import type { Limiter } from "./http";
 import { newActionId } from "./sync";
-import type { Sync } from "./sync";
+import type { Step, Sync } from "./sync";
 
 const scrypt = promisify(scryptCb) as (
   password: string,
@@ -205,35 +205,55 @@ export function createAuth(
           { action: action("unclaimPlayer", { playerId }), actor: guestActor },
         ]);
 
+      // Games the guest hosted become the account's, so it can keep editing
+      // them. Part of the same version as the player move.
+      const moveGames: Step = {
+        rows: (st) =>
+          st.where("games", "createdBy", guest.id).map((game) => ({
+            op: "put",
+            table: "games",
+            row: { ...game, createdBy: account.id },
+          })),
+      };
+
       const [theirs, ...others] = claimed(guest.id);
       const mine = claimed(account.id)[0];
-      if (theirs) {
-        const result = mine
-          ? sync.apply(newActionId(), [
-              {
-                action: action("mergePlayers", {
-                  fromId: theirs.id,
-                  intoId: mine.id,
-                }),
-                actor: accountActor,
-                internal: { allowClaimedFrom: guest.id },
-              },
-            ])
-          : sync.apply(newActionId(), [
-              {
-                action: action("unclaimPlayer", { playerId: theirs.id }),
-                actor: guestActor,
-              },
-              {
-                action: action("claimPlayer", { playerId: theirs.id }),
-                actor: accountActor,
-              },
-            ]);
-        if (!result.ok) {
-          console.error("Guest handoff rejected:", result.error);
-          release(theirs.id);
-        }
+      const move: Step[] = !theirs
+        ? []
+        : mine
+        ? [
+            {
+              action: action("mergePlayers", {
+                fromId: theirs.id,
+                intoId: mine.id,
+              }),
+              actor: accountActor,
+              internal: { allowClaimedFrom: guest.id },
+            },
+          ]
+        : [
+            {
+              action: action("unclaimPlayer", { playerId: theirs.id }),
+              actor: guestActor,
+            },
+            {
+              action: action("claimPlayer", { playerId: theirs.id }),
+              actor: accountActor,
+            },
+          ];
+      let result = sync.apply(newActionId(), [...move, moveGames]);
+      if (!result.ok && theirs) {
+        // The player can't move: release it so it can be claimed again.
+        console.error("Guest handoff rejected:", result.error);
+        result = sync.apply(newActionId(), [
+          {
+            action: action("unclaimPlayer", { playerId: theirs.id }),
+            actor: guestActor,
+          },
+          moveGames,
+        ]);
       }
+      if (!result.ok) console.error("Guest handoff failed:", result.error);
       for (const p of others) release(p.id);
     } catch (e) {
       console.error("Guest handoff failed:", e);

@@ -66,7 +66,8 @@ export default defineConfig({
     postcss: { plugins: [] },
   },
   base: "/contract-whist",
-  // Local dev/preview: forward the password API to `node server/auth.mjs`.
+  // Local dev/preview: forward the API to the Node server
+  // (`npm run build:server && DATA_DIR=/tmp/whist node server/dist/index.mjs`).
   server: { proxy: { "/contract-whist/api": apiProxy } },
   preview: { proxy: { "/contract-whist/api": apiProxy } },
 });
