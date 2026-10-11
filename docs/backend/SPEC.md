@@ -189,3 +189,20 @@ didn't carry over. Mount it at the top of Home and the You page with
 `/login?mode=signup&next=/user` — the login screen should open on the
 "Create account" tab when `mode=signup`.
 
+## Guest play syncs (no more phone-only games)
+
+- "Play as guest" = an anonymous **server** guest (`sync.signInAsGuest()`),
+  then "Which player is you?" — games are normal synced games.
+- Offline first use: with no session and no network, the client creates a
+  **provisional guest** locally (client-generated uuid user id, stored like a
+  session but without a token). Actions queue under it as usual. When online,
+  the client calls `POST /auth/guest { id }`; the server creates the guest with
+  that id if unused (uuid v4 format; otherwise 409 `id_taken` → client falls
+  back to a fresh guest and re-queues; actions whose args embed the old id,
+  e.g. importGame.createdBy, are rewritten). Then pushes as normal.
+- The old local guest mode (src/guest, localStorage) is kept only to view and
+  finish games already stored on a phone. Any signed-in phone (guest or
+  account) with local guest games sees "N game(s) saved only on this phone —
+  Save them so everyone can see them", opening GuestMigrationDialog
+  (importGame). New local-only games can no longer be started.
+
