@@ -56,7 +56,9 @@ export const GameComp = () => {
   const seated = [...game.playersOrders]
     .sort((a, b) => a.orderNumber - b.orderNumber)
     .filter((po) => po.player);
-  const dealerSeat = seated.findIndex((po) => po.player!.id === initialDealerId);
+  const dealerSeat = seated.findIndex(
+    (po) => po.player!.id === initialDealerId
+  );
   const initialDealerIdx = dealerSeat === -1 ? null : dealerSeat;
 
   const rs = game.rounds.sort((a, b) => a.roundNumber - b.roundNumber);

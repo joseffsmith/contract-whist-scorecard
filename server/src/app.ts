@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createAuth } from "./auth";
+import { createBackups } from "./backup";
 import { NotEmptyError, importSnapshot, openDb } from "./db";
 import { HttpError, clientIp, createLimiter, readJson, send } from "./http";
 import { ImportFormatError, transformInstant } from "./importInstant";
@@ -16,6 +17,9 @@ export type ServerOptions = {
   adminBootstrapToken?: string; // POST /auth/claim-admin; the first admin only
   importToken?: string; // enables POST /admin/import (one-off migration)
   trustProxyHops?: number; // proxies in front (default 1); see README
+  backupDays?: number; // copies of the database to keep (default 14, 0 = off)
+  backupIntervalMs?: number; // tests
+  now?: () => Date; // tests
   pingMs?: number; // SSE heartbeat interval (tests only)
   maxStreams?: number;
   maxStreamsPerIp?: number;
@@ -41,6 +45,13 @@ export async function startServer(opts: ServerOptions) {
   const auth = createAuth(db, sync, limiter, {
     adminBootstrapToken: opts.adminBootstrapToken || undefined,
     publicUrl: opts.publicUrl || DEFAULT_PUBLIC_URL,
+  });
+
+  const backups = createBackups(db, {
+    dataDir: opts.dataDir,
+    keep: opts.backupDays ?? 14,
+    intervalMs: opts.backupIntervalMs,
+    now: opts.now,
   });
 
   // One-off migration from InstantDB, into an empty database only.
@@ -142,6 +153,7 @@ export async function startServer(opts: ServerOptions) {
     server.listen(opts.port, host, resolve);
   });
   const { port } = server.address() as AddressInfo;
+  backups.start();
 
   let closing: Promise<void> | undefined;
   return {
@@ -151,6 +163,7 @@ export async function startServer(opts: ServerOptions) {
     // Safe to call more than once.
     close(): Promise<void> {
       closing ??= (async () => {
+        backups.stop();
         sync.close();
         limiter.stop();
         await new Promise<void>((resolve) => {

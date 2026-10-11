@@ -215,23 +215,23 @@ export const GameManager = () => {
           </button>
         ) : null}
         {canManage && (
-        <button
-          onClick={() => setInviteOpen(true)}
-          style={{
-            padding: 12,
-            borderRadius: 10,
-            marginTop: 8,
-            border: `1px solid ${alpha(t.gold, 0.33)}`,
-            color: t.gold,
-            textAlign: "center",
-            fontSize: 13,
-            fontFamily: t.display,
-            background: alpha(t.gold, 0.06),
-            width: "100%",
-          }}
-        >
-          ▦ Let players join from their phones
-        </button>
+          <button
+            onClick={() => setInviteOpen(true)}
+            style={{
+              padding: 12,
+              borderRadius: 10,
+              marginTop: 8,
+              border: `1px solid ${alpha(t.gold, 0.33)}`,
+              color: t.gold,
+              textAlign: "center",
+              fontSize: 13,
+              fontFamily: t.display,
+              background: alpha(t.gold, 0.06),
+              width: "100%",
+            }}
+          >
+            ▦ Let players join from their phones
+          </button>
         )}
       </div>
       {inviteOpen && (
@@ -329,19 +329,19 @@ const PlayerRow = ({
       }}
     >
       {!readOnly && (
-      <div
-        {...listeners}
-        {...attributes}
-        style={{
-          color: alpha(t.gold, 0.6),
-          fontSize: 16,
-          letterSpacing: "-0.1em",
-          cursor: "grab",
-          touchAction: "none",
-        }}
-      >
-        ⋮⋮
-      </div>
+        <div
+          {...listeners}
+          {...attributes}
+          style={{
+            color: alpha(t.gold, 0.6),
+            fontSize: 16,
+            letterSpacing: "-0.1em",
+            cursor: "grab",
+            touchAction: "none",
+          }}
+        >
+          ⋮⋮
+        </div>
       )}
       <div
         style={{

@@ -7,6 +7,11 @@ if (hops !== undefined && !/^\d+$/.test(hops)) {
   throw new Error("TRUST_PROXY_HOPS must be a whole number (default 1).");
 }
 
+const backupDays = process.env.BACKUP_DAYS;
+if (backupDays !== undefined && !/^\d+$/.test(backupDays)) {
+  throw new Error("BACKUP_DAYS must be a whole number (default 14, 0 = off).");
+}
+
 const server = await startServer({
   port: Number(process.env.PORT ?? 3001),
   host: process.env.HOST || "127.0.0.1",
@@ -14,6 +19,7 @@ const server = await startServer({
   publicUrl: process.env.PUBLIC_URL,
   adminBootstrapToken: process.env.ADMIN_BOOTSTRAP_TOKEN,
   importToken: process.env.IMPORT_TOKEN,
+  backupDays: backupDays === undefined ? undefined : Number(backupDays),
   trustProxyHops: hops === undefined ? undefined : Number(hops),
 });
 console.log(`whist server listening on ${server.url}`);
