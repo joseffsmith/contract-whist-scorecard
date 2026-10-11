@@ -65,8 +65,12 @@ where stated. Messages are user-facing (short, plain English).
 | clearScore | creator | sets score null. |
 | deleteTurn | creator | deletes turn. |
 | mergePlayers | user who owns `into` (`into.claimedBy === ctx.userId`) **or** any non-guest user | both exist, not merged, different. `from` must be unclaimed, unless `from.claimedBy === ctx.internal?.allowClaimedFrom`. Reject if they share a non-deleted game. Move all `from` seats and turns to `into`; games with `initialDealerId === from` → `into`; set `from.mergedInto/mergedAt/mergeLog`. |
-| undoMerge | non-guest user, or owner of the player it was merged into | `from.mergeLog` present. Move logged seats/turns back to `from` (whoever holds them now), restore dealer games, clear merge fields. |
+| undoMerge | non-guest user, or owner of the player it was merged into. If `from.claimedBy` is set (e.g. a guest→account handoff), only the owner of the merge target | `from.mergeLog` present. Only move logged rows whose current holder is on the merge chain starting at `mergeLog.into` (into, its mergedInto, …): seats, plus every turn that holder has in each restored seat's game; dealer only where the current dealer is on that chain. Clear merge fields. |
 | importGame | any user | `game.createdBy === ctx.userId`, game id unused; create `newPlayers`; all seats/rounds/turns reference this game/its rounds and existing-or-new players. |
+
+Replaying an action against the state it already produced must be a no-op
+(return `[]`), never an error — the client re-applies pending actions on
+every rebase. Ops must not depend on row iteration order (sort ids).
 
 ## Server (`server/src/`, TypeScript, bundled by esbuild to `server/dist/index.mjs`)
 
@@ -102,6 +106,15 @@ where stated. Messages are user-facing (short, plain English).
   ("Ask the app admin for a set-password link.").
 - `POST /auth/logout`, `GET /auth/me` → `{ user }`.
 - `POST /auth/password {password}` (signed-in, non-guest) → set/change.
+- `POST /auth/forgot {email}` → always `{ ok: true }` (never reveal whether
+  the email exists). If a non-guest user has that email, create a one-time
+  reset token (7 days, `reset_tokens`) and email the link
+  `${PUBLIC_URL}/reset/<token>` via Resend (`POST https://api.resend.com/emails`
+  with `Authorization: Bearer ${RESEND_API_KEY}`, from `MAIL_FROM`, plain
+  text + simple HTML). Without `RESEND_API_KEY`, log the link instead.
+  Rate limit per IP and per email (e.g. 5 / hour). This is how migrated
+  accounts (no password yet) and forgotten passwords get a password; the
+  login `no_password` message points users to "Forgot password".
 - Admin (session email in `ADMIN_EMAILS`, comma-separated env):
   `POST /auth/reset-link {email}` → `{ url }` (one-time, 7 days,
   `${PUBLIC_URL}/reset/<token>`, `PUBLIC_URL` default
