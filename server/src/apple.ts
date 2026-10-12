@@ -44,6 +44,8 @@ export function appleKeys(
             /* skip a key we can't read */
           }
         }
+        // A reply with no usable key is a fault at Apple's end: keep the old ones.
+        if (!next.size) throw new Error("Apple sent no usable keys");
         keys = next;
         fetchedAt = now();
       })

@@ -200,27 +200,33 @@ every rebase. Ops must not depend on row iteration order (sort ids).
   - `POST /auth/apple/options` (session optional) → `{challengeId, nonce}`:
     a challenge token of kind `apple`, bound to the session's user if any. The
     app puts `nonce` in its Apple request unchanged.
-  - `POST /auth/apple/verify {challengeId, identityToken, guestToken?}`. The
+  - `POST /auth/apple/verify {challengeId, identityToken}`. The
     token (RS256 JWT) must be signed by one of Apple's keys
     (`appleid.apple.com/auth/keys`, cached for a day; an unknown key id
-    refetches at most once a minute), `iss` Apple, `aud` the bundle id (or an
+    refetches at most once a minute; a failed or empty reply keeps the old
+    keys), `iss` Apple, `aud` the bundle id (or an
     `APPLE_SERVICES_IDS` entry), unexpired (60 s skew) and carry the nonce;
     else 401 `apple_failed`. Then: **Apple ID known** → signed out: a new
-    session for its account (a `guestToken` hands that guest's player over,
-    as with login); the same account: unchanged session; a guest: signs in to
+    session for its account; the same account: unchanged session; a guest
+    (sent as the bearer, unlike login's `guestToken`): signs in to
     the Apple ID's account with the guest's player handed over; another
     account: 409 `apple_taken`. **Unknown** → signed out: a new account (no
     email or password) with the Apple ID; a guest: upgraded in place (same id,
     new session, guest sessions retired); an account: linked, same session,
     unless it already has an Apple ID (409 `has_apple`).
-  - Deleting the account or an admin password reset removes its identities.
+  - Sessions made by signing in with Apple record `sessions.identity =
+    'apple:<sub>'`. `DELETE /auth/apple` unlinks the account's Apple ID and
+    deletes those sessions (404 `not_found` if none; 409 `last_sign_in` with
+    no email+password and no passkey). Deleting the account or an admin
+    password reset removes its identities too.
   - Not done yet: revoking Apple's tokens when an account is deleted (App
     Store guideline 5.1.1(v) asks for it). It needs a Sign in with Apple key
     and the authorization code exchanged at sign-in.
   - Rate limits per IP: options 300, verify 30 per 15 minutes.
 - **App association files**: `GET /.well-known/apple-app-site-association`
   (with `APPLE_TEAM_ID`: `webcredentials` and `applinks` for
-  `<TEAM>.<bundle id>`; links under `join/`, `games/` (not `games/guest/`),
+  `<TEAM>.<bundle id>`; `games` and links under `join/`, `games/` (not
+  `games/guest/`),
   `stats/`, `leaderboard` and `players` open the app) and
   `GET /.well-known/assetlinks.json` (with `ANDROID_CERT_SHA256`:
   `handle_all_urls` and `get_login_creds`). 404 when not configured.

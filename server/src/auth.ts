@@ -255,15 +255,21 @@ export function createAuth(
       .get(sha256(token)) as UserRow | undefined;
   }
 
-  // `passkeyId`: the passkey this session was made by signing in with.
-  function createSession(
-    userId: string,
-    passkeyId: string | null = null
-  ): string {
+  // What a session was made by signing in with, so removing it ends the
+  // session: a passkey's id, or an identity ("apple:<subject>").
+  type MadeWith = { passkeyId?: string; identity?: string };
+
+  function createSession(userId: string, made: MadeWith = {}): string {
     const token = newToken();
     db.stmt(
-      "INSERT INTO sessions (token_hash, user_id, created_at, passkey_id) VALUES (?, ?, ?, ?)"
-    ).run(sha256(token), userId, new Date().toISOString(), passkeyId);
+      "INSERT INTO sessions (token_hash, user_id, created_at, passkey_id, identity) VALUES (?, ?, ?, ?, ?)"
+    ).run(
+      sha256(token),
+      userId,
+      new Date().toISOString(),
+      made.passkeyId ?? null,
+      made.identity ?? null
+    );
     return token;
   }
 
@@ -423,9 +429,9 @@ export function createAuth(
   async function startSession(
     user: UserRow,
     guestToken: unknown,
-    passkeyId: string | null = null
+    made: MadeWith = {}
   ): Promise<AuthResponse> {
-    const token = createSession(user.id, passkeyId);
+    const token = createSession(user.id, made);
     if (typeof guestToken === "string") await handoff(guestToken, user);
     return respond(user, token);
   }
@@ -779,7 +785,7 @@ export function createAuth(
             "INSERT INTO users (id, is_guest, webauthn_user_id, created_at) VALUES (?, 0, ?, ?)"
           ).run(newAccount.id, newAccount.handle, new Date().toISOString());
           keep(newAccount.id);
-          return createSession(newAccount.id, credential.id);
+          return createSession(newAccount.id, { passkeyId: credential.id });
         });
         return respond(userById(newAccount.id)!, created);
       }
@@ -805,7 +811,7 @@ export function createAuth(
         // was a guest's, so give the account a new one.
         if (!current.is_guest) {
           return user!.is_guest
-            ? createSession(current.id, credential.id)
+            ? createSession(current.id, { passkeyId: credential.id })
             : bearerToken(req);
         }
         db.stmt(
@@ -813,7 +819,7 @@ export function createAuth(
         ).run(current.id);
         // Same user, new session: the guest token is retired.
         deleteSessions(current.id);
-        return createSession(current.id, credential.id);
+        return createSession(current.id, { passkeyId: credential.id });
       });
       return respond(userById(user!.id)!, token);
     },
@@ -883,7 +889,7 @@ export function createAuth(
         );
       const current = liveUserById(user.id);
       if (!used.changes || !current) throw unknownPasskey();
-      return startSession(current, body.guestToken, passkey.id);
+      return startSession(current, body.guestToken, { passkeyId: passkey.id });
     },
 
     // ── Sign in with Apple ──
@@ -897,10 +903,10 @@ export function createAuth(
       return { challengeId: minted.token, nonce: minted.challenge };
     },
 
-    // Signs in with the Apple ID if it is known. Otherwise the Apple ID is
-    // added to whoever is signed in (a guest becomes an account, keeping its
-    // id and players, as with a passkey), or makes a new account. A guest
-    // signing in to a known Apple ID hands its player over, as when logging in.
+    // Signs in with the Apple ID if it is known (a guest signed in hands its
+    // player over, as when logging in). Otherwise the Apple ID is added to
+    // whoever is signed in (a guest becomes an account, keeping its id and
+    // players, as with a passkey), or makes a new account.
     async appleVerify(req: IncomingMessage, ip: string) {
       const user = bearerToken(req) ? requireUser(req) : undefined;
       tooMany(`apple:${ip}`, 30);
@@ -930,6 +936,7 @@ export function createAuth(
       const email = claims.email ? normEmail(claims.email).slice(0, 254) : null;
       const signedOut = () =>
         new HttpError(401, "Please sign in again.", "not_signed_in");
+      const made = { identity: `apple:${claims.sub}` };
 
       const known = appleIdentity(claims.sub);
       const owner = known && liveUserById(known.user_id);
@@ -937,9 +944,9 @@ export function createAuth(
         db.stmt(
           "UPDATE identities SET last_used_at = ?, email = COALESCE(?, email) WHERE provider = 'apple' AND subject = ?"
         ).run(at, email, claims.sub);
-        if (!user) return startSession(owner, body.guestToken);
+        if (!user) return respond(owner, createSession(owner.id, made));
         if (owner.id === user.id) return respond(user, bearerToken(req));
-        if (user.is_guest) return startSession(owner, bearerToken(req));
+        if (user.is_guest) return startSession(owner, bearerToken(req), made);
         throw new HttpError(
           409,
           "That Apple ID is already used by another account.",
@@ -975,7 +982,7 @@ export function createAuth(
               "INSERT INTO users (id, is_guest, created_at) VALUES (?, 0, ?)"
             ).run(id, at);
             link(id);
-            return createSession(id);
+            return createSession(id, made);
           });
           return respond(userById(id)!, token);
         } catch (e) {
@@ -1005,12 +1012,38 @@ export function createAuth(
           ).run(current.id);
           // Same user, new session: the guest token is retired.
           deleteSessions(current.id);
-          return createSession(current.id);
+          return createSession(current.id, made);
         });
         return respond(userById(user.id)!, token);
       } catch (e) {
         throw raced(e);
       }
+    },
+
+    // Unlinks the account's Apple ID, unless it is the last way in. Whoever
+    // signed in with it is signed out.
+    async removeApple(req: IncomingMessage, ip: string) {
+      const user = requireUser(req);
+      tooMany(`apple-remove:${ip}`, 30);
+      if (!hasApple(user.id)) {
+        throw new HttpError(404, "No Apple ID to remove.", "not_found");
+      }
+      if (!canUsePassword(user) && passkeyCount(user.id) < 1) {
+        throw new HttpError(
+          409,
+          "It's your only way to sign in. Add a passkey or a password first.",
+          "last_sign_in"
+        );
+      }
+      db.transaction(() => {
+        db.stmt(
+          "DELETE FROM sessions WHERE identity IN (SELECT 'apple:' || subject FROM identities WHERE provider = 'apple' AND user_id = ?)"
+        ).run(user.id);
+        db.stmt(
+          "DELETE FROM identities WHERE provider = 'apple' AND user_id = ?"
+        ).run(user.id);
+      });
+      return { ok: true };
     },
 
     // The signed-in account's passkeys (never their keys).

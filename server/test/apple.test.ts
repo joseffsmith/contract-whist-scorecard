@@ -9,23 +9,28 @@ import type { Api } from "./helpers";
 const BUNDLE = "uk.joseffsmith.whist";
 
 // Stands in for Apple: its published keys and the identity tokens it signs.
-function fakeApple() {
+function fakeApple(now?: () => number) {
   const kid = "test-key";
   const { privateKey, publicKey } = generateKeyPairSync("rsa", {
     modulusLength: 2048,
   });
   let fetches = 0;
+  let published: object[] | null = [
+    { ...publicKey.export({ format: "jwk" }), kid, alg: "RS256" },
+  ];
   const jwks = () => {
     fetches++;
-    return Promise.resolve({
-      keys: [{ ...publicKey.export({ format: "jwk" }), kid, alg: "RS256" }],
-    });
+    return Promise.resolve({ keys: published } as never);
   };
   const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
   return {
-    keys: appleKeys(jwks),
+    keys: appleKeys(jwks, now),
     get fetches() {
       return fetches;
+    },
+    // What Apple's key URL answers from now on.
+    publish(keys: object[] | null) {
+      published = keys;
     },
     token(
       claims: Record<string, unknown>,
@@ -122,6 +127,24 @@ describe("verifyAppleToken", () => {
       ).catch(() => {});
     }
     expect(apple.fetches).toBe(1);
+  });
+
+  it("keeps the keys it has when Apple's reply has none", async () => {
+    let at = 0;
+    const apple = fakeApple(() => at);
+    const check = () =>
+      verifyAppleToken(apple.token({ sub: "1", nonce: "n" }), {
+        keys: apple.keys,
+        audiences: [BUNDLE],
+        nonce: "n",
+      });
+    await expect(check()).resolves.toMatchObject({ sub: "1" });
+    for (const broken of [[], null, [{ kty: "RSA", kid: "x", n: "!" }]]) {
+      apple.publish(broken);
+      at += 25 * 60 * 60 * 1000; // a day on: due a refetch
+      await expect(check()).resolves.toMatchObject({ sub: "1" });
+    }
+    expect(apple.fetches).toBe(4);
   });
 });
 
@@ -279,6 +302,61 @@ describe("Sign in with Apple", () => {
   });
 });
 
+describe("removing an Apple ID", () => {
+  it("is refused when it's the only way in", async () => {
+    const { api, apple } = await setup();
+    const account = (await appleSignIn(api, apple, "001")).body;
+    const res = await api.delete("/auth/apple", undefined, account.token);
+    expect([res.status, res.body.code]).toEqual([409, "last_sign_in"]);
+  });
+
+  it("unlinks it and signs out whoever signed in with it", async () => {
+    const { api, apple } = await setup();
+    const account = await api.signup("joe@example.com");
+    expect((await appleSignIn(api, apple, "001", account.token)).status).toBe(
+      200
+    );
+    // Someone else signs in with that Apple ID on another phone.
+    const viaApple = (await appleSignIn(api, apple, "001")).body;
+    expect(viaApple.user.id).toBe(account.user.id);
+
+    const res = await api.delete("/auth/apple", undefined, account.token);
+    expect(res.status).toBe(200);
+    expect((await api.get("/auth/me", viaApple.token)).status).toBe(401);
+    const me = await api.get("/auth/me", account.token);
+    expect(me.status).toBe(200);
+    expect(me.body.user.hasApple).toBeUndefined();
+    // The Apple ID is free again: it makes a new account.
+    const fresh = await appleSignIn(api, apple, "001");
+    expect(fresh.body.user.id).not.toBe(account.user.id);
+    expect(
+      (await api.delete("/auth/apple", undefined, account.token)).status
+    ).toBe(404);
+  });
+
+  it("goes with an admin password reset", async () => {
+    const { api, apple } = await setup({ adminBootstrapToken: "boot" });
+    const admin = await api.signup("admin@example.com");
+    await api.post("/auth/claim-admin", { token: "boot" }, admin.token);
+    const account = await api.signup("joe@example.com");
+    await appleSignIn(api, apple, "001", account.token);
+    const link = await api.post(
+      "/auth/reset-link",
+      { email: "joe@example.com" },
+      admin.token
+    );
+    const token = new URL(link.body.url).hash.slice(1);
+    const reset = await api.post("/auth/reset", {
+      token,
+      password: "a-new-password",
+    });
+    expect(reset.status).toBe(200);
+    expect(reset.body.user.hasApple).toBeUndefined();
+    const fresh = await appleSignIn(api, apple, "001");
+    expect(fresh.body.user.id).not.toBe(account.user.id);
+  });
+});
+
 describe("app association files", () => {
   it("aren't there until the apps are configured", async () => {
     const { api } = await setup();
@@ -301,9 +379,14 @@ describe("app association files", () => {
     expect(aasa.body.webcredentials.apps).toEqual([
       "45TRYSJM4M.uk.joseffsmith.whist",
     ]);
-    expect(aasa.body.applinks.details[0].components).toContainEqual({
-      "/": "/contract-whist/join/*",
+    const components = aasa.body.applinks.details[0].components;
+    expect(components[0]).toEqual({
+      "/": "/contract-whist/games/guest/*",
+      exclude: true,
     });
+    for (const path of ["join/*", "games", "games/*", "leaderboard"]) {
+      expect(components).toContainEqual({ "/": `/contract-whist/${path}` });
+    }
     const links = await api.get("/.well-known/assetlinks.json");
     expect(links.body[0].target).toEqual({
       namespace: "android_app",

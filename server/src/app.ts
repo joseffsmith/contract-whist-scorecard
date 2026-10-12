@@ -121,7 +121,14 @@ function wellKnownFiles({
           appIDs: [appleAppId],
           components: [
             { "/": `${basePath}/games/guest/*`, exclude: true },
-            ...["join/*", "games/*", "stats/*", "leaderboard", "players"].map(
+            ...[
+              "join/*",
+              "games",
+              "games/*",
+              "stats/*",
+              "leaderboard",
+              "players",
+            ].map(
               (p) => ({ "/": `${basePath}/${p}` })
             ),
           ],
@@ -250,6 +257,7 @@ export async function startServer(opts: ServerOptions) {
     "POST /auth/sessions/revoke-others": (c) => auth.revokeOthers(c.req, c.ip),
     "POST /auth/apple/options": (c) => auth.appleOptions(c.req, c.ip),
     "POST /auth/apple/verify": (c) => auth.appleVerify(c.req, c.ip),
+    "DELETE /auth/apple": (c) => auth.removeApple(c.req, c.ip),
     "POST /auth/passkey/register/options": (c) =>
       auth.passkeyRegisterOptions(c.req, c.ip),
     "POST /auth/passkey/register/verify": (c) =>

@@ -156,6 +156,9 @@ const MIGRATIONS = [
     PRIMARY KEY (provider, subject)
   );
   CREATE INDEX identities_user_id ON identities (user_id);
+  -- Sessions made by signing in that way ("apple:<subject>") end when it is removed.
+  ALTER TABLE sessions ADD COLUMN identity TEXT;
+  CREATE INDEX sessions_identity ON sessions (identity);
   `,
 ];
 
