@@ -87,6 +87,10 @@ export const Privacy = () => (
             face or fingerprint never leaves your device.
           </li>
           <li>
+            <b>If you sign in with Apple:</b> the code Apple uses for you with
+            this app. Apple doesn't share your name or email with us.
+          </li>
+          <li>
             <b>Sign-in sessions:</b> a scrambled copy of each device's sign-in
             token, so you stay signed in.
           </li>
@@ -117,7 +121,8 @@ export const Privacy = () => (
       <Section title="Deleting your data">
         <p style={{ margin: 0 }}>
           You can delete your account at any time from the <b>You</b> page:
-          your email, password, passkeys and sign-ins are removed straight away
+          your email, password, passkeys, Apple sign-in and sign-ins are
+          removed straight away
           (and from backups within two weeks). Games and scores stay, because
           they belong to everyone who played; to have your name taken off them,
           email us.
