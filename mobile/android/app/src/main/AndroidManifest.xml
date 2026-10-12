@@ -18,6 +18,20 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- App Links: joining and stats links open the app (verified by the
+                 site's assetlinks.json). Game pages stay on the web here,
+                 because guest games under games/guest/ live in the browser
+                 and Android can't exclude them. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="joseffsmith.uk" />
+                <data android:pathPrefix="/contract-whist/join/" />
+                <data android:pathPrefix="/contract-whist/stats/" />
+                <data android:path="/contract-whist/leaderboard" />
+                <data android:path="/contract-whist/players" />
+            </intent-filter>
         </activity>
 
         <provider

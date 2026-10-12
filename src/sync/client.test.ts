@@ -2196,3 +2196,93 @@ describe("isConfirmed", () => {
     expect(notified.at(-1)).toBe(true);
   });
 });
+
+// Apple's sheet, answering with an identity token for one Apple ID, or
+// dismissed.
+function fakeApple(sub = "apple-1") {
+  const api = {
+    dismiss: false,
+    nonces: [] as string[],
+    signIn: async (nonce: string) => {
+      api.nonces.push(nonce);
+      if (api.dismiss)
+        throw Object.assign(new Error("x"), { name: "NotAllowedError" });
+      return { identityToken: `${sub}|${nonce}` };
+    },
+  };
+  return api;
+}
+
+describe("Sign in with Apple", () => {
+  const verifies = () =>
+    server.requests.filter((r) => r.path === "/auth/apple/verify");
+
+  it("isn't there without Apple", async () => {
+    const client = await signedInClient({ deps: { apple: undefined } });
+    const error = await client.signInWithApple().catch((e) => e);
+    expect(error.code).toBe("unsupported");
+  });
+
+  it("makes a guest with work an account, pushing the work first", async () => {
+    const apple = fakeApple();
+    const client = await signedInClient({ deps: { apple } });
+    const guest = client.getAuth().user!;
+    await client.dispatch("createPlayer", {
+      playerId: "p1",
+      name: "Ann",
+      claim: true,
+    });
+
+    const user = await client.signInWithApple();
+    expect(user).toMatchObject({ id: guest.id, hasApple: true });
+    const at = (path: string) =>
+      server.requests.findIndex((r) => r.path === path);
+    expect(at("/sync/push")).toBeGreaterThan(-1);
+    expect(at("/sync/push")).toBeLessThan(at("/auth/apple/verify"));
+    expect(server.data.players.has("p1")).toBe(true);
+    // The nonce from the server went to Apple unchanged, and the guest
+    // session went along.
+    const [options] = server.requests.filter(
+      (r) => r.path === "/auth/apple/options"
+    );
+    expect(options.token).toBeDefined();
+    expect(verifies()[0].body).toEqual({
+      challengeId: "c-1",
+      identityToken: `apple-1|${apple.nonces[0]}`,
+    });
+    expect(apple.nonces).toEqual(["n-1"]);
+  });
+
+  it("signs in to the Apple ID's account from an empty guest, which is signed out", async () => {
+    const apple = fakeApple();
+    const first = await signedInClient({ deps: { apple } });
+    const account = (await first.signInWithApple())!;
+
+    const second = await signedInClient({ deps: { apple } });
+    const user = await second.signInWithApple();
+    expect(user!.id).toBe(account.id);
+    expect(verifies()[1].token).toBeUndefined();
+    await waitFor(() =>
+      server.requests.some((r) => r.path === "/auth/logout" && !!r.token)
+    );
+  });
+
+  it("does nothing when Apple's sheet is dismissed", async () => {
+    const apple = fakeApple();
+    apple.dismiss = true;
+    const client = await signedInClient({ deps: { apple } });
+    const before = client.getAuth().user;
+    expect(await client.signInWithApple()).toBeNull();
+    expect(client.getAuth().user).toEqual(before);
+    expect(verifies()).toHaveLength(0);
+  });
+
+  it("removes the Apple ID", async () => {
+    const apple = fakeApple();
+    const client = await signedInClient({ deps: { apple } });
+    await client.signInWithApple();
+    expect(client.getAuth().user!.hasApple).toBe(true);
+    await client.removeApple();
+    expect(client.getAuth().user!.hasApple).toBeUndefined();
+  });
+});

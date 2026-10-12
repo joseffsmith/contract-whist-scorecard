@@ -15,7 +15,10 @@ live updates are shared. The addresses live in `../.env.mobile`.
 package.json          Capacitor CLI + the native platforms and plugins
 capacitor.config.ts   app id uk.joseffsmith.whist, name Whist, webDir ../dist-mobile
 ios/                  Xcode project (Swift Package Manager: no CocoaPods)
+  App/WhistAuthPlugin.swift      passkeys + Sign in with Apple (our own plugin)
+  App/App.entitlements           Sign in with Apple, associated domains
 android/              Gradle project
+  app/.../WhistAuthPlugin.java   passkeys through Credential Manager
 assets/               icon and splash sources (make-sources.mjs builds them)
 ```
 
@@ -170,6 +173,45 @@ cd mobile && npx cap sync
 then run or archive again from Xcode or Android Studio. Nothing native changes
 unless you add a plugin (then `npm i` it in both `package.json` files and sync).
 CI does the same (Android debug APK, iOS simulator build) on every pull request and push to `main` that touches `src/`, `shared/` or `mobile/`.
+
+## Sign-in and links
+
+The app signs in with **Sign in with Apple** (iPhone), **passkeys** and email
+and password. A page at `capacitor://localhost` can't use the joseffsmith.uk
+passkeys, so our own plugin, `WhistAuth` (`ios/App/App/WhistAuthPlugin.swift`,
+`android/app/src/main/java/uk/joseffsmith/whist/WhistAuthPlugin.java`, JS side
+`../src/lib/nativeAuth.ts`), asks the phone itself. It isn't an npm package, so
+`cap sync` doesn't know it: `WhistBridgeViewController` (iOS) and
+`MainActivity` (Android) register it.
+
+The phone only lets the app use the site's passkeys, and open its links, when
+the site names the app at `https://joseffsmith.uk/.well-known/`:
+
+- **iOS**: the server's `APPLE_TEAM_ID` (`45TRYSJM4M`) makes
+  `apple-app-site-association`. `App.entitlements` lists
+  `webcredentials:joseffsmith.uk` and `applinks:joseffsmith.uk`, and Sign in
+  with Apple; with automatic signing Xcode turns those capabilities on for the
+  app id the first time you build for a phone. Apple's CDN caches the file, so
+  a change can take a day to reach phones. To test before that, add
+  `?mode=developer` to both entries and turn on Settings, Developer,
+  Associated Domains Development on the phone.
+- **Android**: the server's `ANDROID_CERT_SHA256` (the Play app signing key's
+  SHA-256 from Play Console, App integrity, plus the upload key's and
+  `~/.android/debug.keystore`'s for builds signed with those:
+  `keytool -list -v -keystore ... -alias ...`) makes `assetlinks.json` and lets
+  the server accept those passkeys. Then add `android` to
+  `VITE_NATIVE_PASSKEYS` in `../.env.mobile`; until then the Android app
+  offers email and password only. Links to join, stats, the leaderboard and
+  players open the app (`AndroidManifest.xml`); game pages stay on the web,
+  because Android can't leave out the guest games under `games/guest/`.
+
+Sign in with Apple isn't on the website or Android yet: that needs an Apple
+Services ID (`APPLE_SERVICES_IDS` on the server).
+
+**Before the App Store** (not needed for TestFlight): Apple asks that deleting
+an account also revokes its Sign in with Apple tokens (guideline 5.1.1(v)).
+That needs a Sign in with Apple key from the developer account; see
+`docs/backend/SPEC.md`.
 
 ## Good to know
 

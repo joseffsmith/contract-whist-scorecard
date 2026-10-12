@@ -13,9 +13,28 @@ export const API_BASE: string = (
 // A link to the website for sharing (QR codes, invites). Inside the native
 // app window.location.origin is capacitor://localhost, which nobody else can
 // open, so .env.mobile sets VITE_PUBLIC_URL to the real site.
-export const appUrl = (path: string) => {
+export const appUrl = (path: string): string => {
   const root = (
     import.meta.env.VITE_PUBLIC_URL || `${window.location.origin}${BASE_PATH}`
   ).replace(/\/+$/, "");
   return `${root}/${path.replace(/^\/+/, "")}`;
 };
+
+// The route inside the app for a link to this site (one the phone opened in
+// the app: a universal link or App Link), e.g.
+// https://joseffsmith.uk/contract-whist/join/abc → /join/abc. Undefined for
+// anything else.
+export function routeFor(link: string): string | undefined {
+  let url: URL, root: URL;
+  try {
+    url = new URL(link);
+    root = new URL(appUrl(""));
+  } catch {
+    return undefined;
+  }
+  const base = root.pathname.replace(/\/+$/, "");
+  if (url.origin !== root.origin) return undefined;
+  if (url.pathname !== base && !url.pathname.startsWith(`${base}/`))
+    return undefined;
+  return (url.pathname.slice(base.length) || "/") + url.search + url.hash;
+}

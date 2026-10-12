@@ -18,7 +18,9 @@ import type {
   TableName,
 } from "../../shared/types";
 import { API_BASE } from "../lib/paths";
-import { browserPasskeys, isCancelled, passkeyError } from "./passkeys";
+import { nativeApple } from "./apple";
+import type { AppleApi } from "./apple";
+import { defaultPasskeys, isCancelled, passkeyError } from "./passkeys";
 import type { PasskeyApi } from "./passkeys";
 import { createMemoryStorage, openStorage } from "./storage";
 import type {
@@ -69,6 +71,7 @@ export type SyncDeps = {
   secret: () => string;
   network: NetworkSignal;
   passkeys: PasskeyApi;
+  apple?: AppleApi; // where Sign in with Apple exists (the iOS app)
   apiBase: string;
   backoff: { minMs: number; maxMs: number };
   batchSize: number;
@@ -123,6 +126,13 @@ export type SyncClient = {
   // Sign in with any passkey on this device (a guest's player moves over, as
   // with logIn). Null when the person dismisses the prompt.
   logInWithPasskey(): Promise<PublicUser | null>;
+  // Sign in with Apple. Its account if the Apple ID has one (a guest's player
+  // moves over, as with logIn); otherwise the Apple ID is added to the account,
+  // or makes the guest an account (as registerPasskey does) or a new one. Null
+  // when the person dismisses Apple's sheet.
+  signInWithApple(): Promise<PublicUser | null>;
+  // Unlinks the account's Apple ID (refused if it's the only way in).
+  removeApple(): Promise<void>;
   listPasskeys(): Promise<PasskeyInfo[]>;
   deletePasskey(id: string): Promise<void>;
   // Deletes the account for good, then signs out on this device.
@@ -184,7 +194,8 @@ function defaultDeps(): SyncDeps {
     uuid: randomUuid,
     secret: randomSecret,
     network: browserNetwork,
-    passkeys: browserPasskeys,
+    passkeys: defaultPasskeys,
+    apple: nativeApple,
     apiBase: API_BASE,
     backoff: { minMs: 1000, maxMs: 30_000 },
     batchSize: 50,
@@ -1256,6 +1267,59 @@ export function createSyncClient(
     }
   }
 
+  async function signInWithApple() {
+    const apple = deps.apple;
+    if (!apple) {
+      throw new SyncError(
+        "Sign in with Apple isn't available here.",
+        "unsupported"
+      );
+    }
+    // A guest made offline, with work to keep: it has to be real first.
+    if (registerMode().waits) await ensureReal();
+    const { token } = registerMode();
+    if (!deps.network.isOnline())
+      throw new SyncError(OFFLINE_MESSAGE, "offline");
+    // A guest's work goes up first: it may be handed to the Apple ID's account.
+    if (token) await guestToHandOver();
+    const { challengeId, nonce } = await authRequest<{
+      challengeId: string;
+      nonce: string;
+    }>(
+      "/auth/apple/options",
+      {},
+      token ?? undefined,
+      (json) =>
+        typeof json.challengeId === "string" && typeof json.nonce === "string"
+    );
+    let credential;
+    try {
+      credential = await apple.signIn(nonce);
+    } catch (error) {
+      if (isCancelled(error)) return null;
+      throw new SyncError(
+        "Couldn't sign in with Apple. Try again.",
+        "apple_failed"
+      );
+    }
+    // Apple's sheet can stay open a long time.
+    if (registerMode().token !== token)
+      throw new SyncError("Your session changed. Try again.", "not_signed_in");
+    const left = session;
+    const done = adopt(
+      await authRequest(
+        "/auth/apple/verify",
+        { challengeId, identityToken: credential.identityToken },
+        token ?? undefined
+      )
+    );
+    // Signed in elsewhere or made a new account: end the empty guest's session.
+    if (!token && left?.token && left.token !== session?.token) {
+      transport.post("/auth/logout", {}, left.token).catch(() => {});
+    }
+    return done;
+  }
+
   return {
     ready,
     start,
@@ -1334,6 +1398,15 @@ export function createSyncClient(
     },
     registerPasskey,
     logInWithPasskey,
+    signInWithApple,
+    async removeApple() {
+      await begin();
+      const asked = session;
+      if (!asked?.token) throw new SyncError("Sign in first.", "not_signed_in");
+      await transport.delete("/auth/apple", asked.token);
+      // hasApple is part of the user.
+      await checkSession();
+    },
     preparePasskey,
     async addEmail(email, password) {
       await begin();

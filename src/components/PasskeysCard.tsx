@@ -88,7 +88,7 @@ const PasskeysList = () => {
   if (!user || user.isGuest) return null;
 
   // The last way to sign in can't go.
-  const onlyWayIn = !user.hasPassword && count < 2;
+  const onlyWayIn = !user.hasPassword && !user.hasApple && count < 2;
 
   const remove = async () => {
     if (!removing) return;
