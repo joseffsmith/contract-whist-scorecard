@@ -216,9 +216,9 @@ every rebase. Ops must not depend on row iteration order (sort ids).
     unless it already has an Apple ID (409 `has_apple`).
   - Sessions made by signing in with Apple record `sessions.identity =
     'apple:<sub>'`. `DELETE /auth/apple` unlinks the account's Apple ID and
-    deletes those sessions (404 `not_found` if none; 409 `last_sign_in` with
-    no email+password and no passkey). Deleting the account or an admin
-    password reset removes its identities too.
+    deletes those sessions, except the caller's own (404 `not_found` if none;
+    409 `last_sign_in` with no email+password and no passkey). Deleting the
+    account or an admin password reset removes its identities too.
   - Not done yet: revoking Apple's tokens when an account is deleted (App
     Store guideline 5.1.1(v) asks for it). It needs a Sign in with Apple key
     and the authorization code exchanged at sign-in.

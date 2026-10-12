@@ -2,7 +2,13 @@ import { enqueueSnackbar } from "notistack";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { deviceName } from "../lib/deviceName";
-import { passkeysSupported, sync, useAuth, usePreparedPasskeys } from "../sync";
+import {
+  appleSupported,
+  passkeysSupported,
+  sync,
+  useAuth,
+  usePreparedPasskeys,
+} from "../sync";
 import type { PasskeyInfo } from "../sync";
 import { alpha, goldButton, t } from "../theme/tokens";
 import { Sheet } from "./chrome/Sheet";
@@ -87,8 +93,9 @@ const PasskeysList = () => {
 
   if (!user || user.isGuest) return null;
 
-  // The last way to sign in can't go.
-  const onlyWayIn = !user.hasPassword && !user.hasApple && count < 2;
+  // The last way to sign in here can't go (Apple only counts where it exists).
+  const onlyWayIn =
+    !user.hasPassword && !(user.hasApple && appleSupported()) && count < 2;
 
   const remove = async () => {
     if (!removing) return;

@@ -124,7 +124,9 @@ public class WhistAuthPlugin: CAPPlugin, CAPBridgedPlugin {
             return call.reject("Missing nonce.", "bad_options")
         }
         let request = ASAuthorizationAppleIDProvider().createRequest()
-        request.requestedScopes = [.email, .fullName]
+        // No name or email: the app doesn't need them (a player's name is
+        // asked for as on the web), and Apple prefers asking for nothing.
+        request.requestedScopes = []
         request.nonce = nonce
         perform(request, call) { credential in
             guard
@@ -135,9 +137,6 @@ public class WhistAuthPlugin: CAPPlugin, CAPBridgedPlugin {
             if let code = apple.authorizationCode.flatMap({ String(data: $0, encoding: .utf8) }) {
                 result["authorizationCode"] = code
             }
-            // Only on the first sign-in with this app, and only if shared.
-            if let given = apple.fullName?.givenName { result["givenName"] = given }
-            if let family = apple.fullName?.familyName { result["familyName"] = family }
             return result
         }
     }
@@ -154,10 +153,16 @@ public class WhistAuthPlugin: CAPPlugin, CAPBridgedPlugin {
         answer: @escaping (ASAuthorizationCredential) -> JSObject?
     ) {
         DispatchQueue.main.async {
-            let auth = AuthRequest(
+            // One sheet at a time: a second would orphan the first's call.
+            guard self.current == nil else {
+                return call.reject("Already asking.", "busy")
+            }
+            var auth: AuthRequest?
+            auth = AuthRequest(
                 window: self.bridge?.webView?.window
-            ) { [weak self] result in
-                self?.current = nil
+            ) { result in
+                if self.current === auth { self.current = nil }
+                auth = nil  // the request held this closure, which held it
                 switch result {
                 case .success(let credential):
                     if let value = answer(credential) {
@@ -169,13 +174,19 @@ public class WhistAuthPlugin: CAPPlugin, CAPBridgedPlugin {
                     let code = (error as? ASAuthorizationError)?.code
                     if code == .canceled {
                         call.reject("Cancelled.", "cancelled", error)
+                    } else if code?.rawValue == 1006 {
+                        // matchedExcludedCredential (iOS 18): this phone
+                        // already has one; the browser's code for that.
+                        call.reject(
+                            "This device already has a passkey for you.",
+                            "ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED", error)
                     } else {
                         call.reject(error.localizedDescription, "failed", error)
                     }
                 }
             }
             self.current = auth
-            auth.start(request)
+            auth?.start(request)
         }
     }
 }

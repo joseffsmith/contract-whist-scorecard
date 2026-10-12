@@ -1021,7 +1021,7 @@ export function createAuth(
     },
 
     // Unlinks the account's Apple ID, unless it is the last way in. Whoever
-    // signed in with it is signed out.
+    // else signed in with it is signed out; this session stays.
     async removeApple(req: IncomingMessage, ip: string) {
       const user = requireUser(req);
       tooMany(`apple-remove:${ip}`, 30);
@@ -1036,9 +1036,13 @@ export function createAuth(
         );
       }
       db.transaction(() => {
+        const mine = sha256(bearerToken(req));
         db.stmt(
-          "DELETE FROM sessions WHERE identity IN (SELECT 'apple:' || subject FROM identities WHERE provider = 'apple' AND user_id = ?)"
-        ).run(user.id);
+          "DELETE FROM sessions WHERE token_hash != ? AND identity IN (SELECT 'apple:' || subject FROM identities WHERE provider = 'apple' AND user_id = ?)"
+        ).run(mine, user.id);
+        db.stmt("UPDATE sessions SET identity = NULL WHERE token_hash = ?").run(
+          mine
+        );
         db.stmt(
           "DELETE FROM identities WHERE provider = 'apple' AND user_id = ?"
         ).run(user.id);

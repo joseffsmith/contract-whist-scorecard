@@ -320,9 +320,13 @@ describe("removing an Apple ID", () => {
     const viaApple = (await appleSignIn(api, apple, "001")).body;
     expect(viaApple.user.id).toBe(account.user.id);
 
-    const res = await api.delete("/auth/apple", undefined, account.token);
+    // Removed from the phone that signed in with Apple: that phone stays
+    // signed in, the account's other Apple sessions end.
+    const other = (await appleSignIn(api, apple, "001")).body;
+    const res = await api.delete("/auth/apple", undefined, viaApple.token);
     expect(res.status).toBe(200);
-    expect((await api.get("/auth/me", viaApple.token)).status).toBe(401);
+    expect((await api.get("/auth/me", viaApple.token)).status).toBe(200);
+    expect((await api.get("/auth/me", other.token)).status).toBe(401);
     const me = await api.get("/auth/me", account.token);
     expect(me.status).toBe(200);
     expect(me.body.user.hasApple).toBeUndefined();

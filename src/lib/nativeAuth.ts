@@ -22,9 +22,6 @@ type WhistAuth = {
 export type AppleCredential = {
   identityToken: string;
   authorizationCode?: string;
-  // Only the first time someone signs in to the app, and only if they share it.
-  givenName?: string;
-  familyName?: string;
 };
 
 const WhistAuth = registerPlugin<WhistAuth>("WhistAuth");

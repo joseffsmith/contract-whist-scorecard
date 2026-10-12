@@ -30,6 +30,7 @@ export const UserManager = () => {
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [appleBusy, setAppleBusy] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
   const pending = usePendingCount();
 
@@ -230,7 +231,7 @@ export const UserManager = () => {
               onClick={() => {
                 if (
                   window.confirm(
-                    "Remove Sign in with Apple? Phones signed in with it will be signed out."
+                    "Remove Sign in with Apple? Other phones signed in with it will be signed out."
                   )
                 )
                   sync
@@ -251,6 +252,8 @@ export const UserManager = () => {
                 label="Add Sign in with Apple"
                 sub="Another way in, with your Apple ID"
                 onClick={() =>
+                  !appleBusy &&
+                  (setAppleBusy(true),
                   sync
                     .signInWithApple()
                     .then(
@@ -263,6 +266,7 @@ export const UserManager = () => {
                     .catch((e: Error) =>
                       enqueueSnackbar(e.message, { variant: "error" })
                     )
+                    .finally(() => setAppleBusy(false)))
                 }
               />
             )
