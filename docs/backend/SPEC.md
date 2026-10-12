@@ -185,13 +185,49 @@ every rebase. Ops must not depend on row iteration order (sort ids).
   - `GET /auth/passkeys` → `{ passkeys: [{ id, name, createdAt, lastUsedAt,
     deviceType, backedUp }] }` (never the key). `DELETE /auth/passkeys/:id`
     removes one of the caller's; 409 `last_sign_in` if the account would be
-    left with no way in (no email+password and no other passkey).
+    left with no way in (no email+password, no Apple ID and no other passkey).
   - Rate limits per IP: options 300 (they are cheap, and prepared ahead) and
     verify 30 per 15 minutes.
+  - The apps' passkeys: on iOS they report the site's origin, so nothing
+    changes. On Android they report `android:apk-key-hash:<base64url SHA-256
+    of the signing certificate>`; each `ANDROID_CERT_SHA256` fingerprint adds
+    one such origin.
+- **Sign in with Apple** (`server/src/apple.ts`). Table `identities(provider,
+  subject, user_id, email, created_at, last_used_at)`, primary key (provider,
+  subject); provider `apple`, subject Apple's `sub`. The email Apple gives is
+  kept for reference only: it never becomes `users.email`, so it can't sign in
+  or clash with an email account. `PublicUser.hasApple` is set when linked.
+  - `POST /auth/apple/options` (session optional) → `{challengeId, nonce}`:
+    a challenge token of kind `apple`, bound to the session's user if any. The
+    app puts `nonce` in its Apple request unchanged.
+  - `POST /auth/apple/verify {challengeId, identityToken, guestToken?}`. The
+    token (RS256 JWT) must be signed by one of Apple's keys
+    (`appleid.apple.com/auth/keys`, cached for a day; an unknown key id
+    refetches at most once a minute), `iss` Apple, `aud` the bundle id (or an
+    `APPLE_SERVICES_IDS` entry), unexpired (60 s skew) and carry the nonce;
+    else 401 `apple_failed`. Then: **Apple ID known** → signed out: a new
+    session for its account (a `guestToken` hands that guest's player over,
+    as with login); the same account: unchanged session; a guest: signs in to
+    the Apple ID's account with the guest's player handed over; another
+    account: 409 `apple_taken`. **Unknown** → signed out: a new account (no
+    email or password) with the Apple ID; a guest: upgraded in place (same id,
+    new session, guest sessions retired); an account: linked, same session,
+    unless it already has an Apple ID (409 `has_apple`).
+  - Deleting the account or an admin password reset removes its identities.
+  - Not done yet: revoking Apple's tokens when an account is deleted (App
+    Store guideline 5.1.1(v) asks for it). It needs a Sign in with Apple key
+    and the authorization code exchanged at sign-in.
+  - Rate limits per IP: options 300, verify 30 per 15 minutes.
+- **App association files**: `GET /.well-known/apple-app-site-association`
+  (with `APPLE_TEAM_ID`: `webcredentials` and `applinks` for
+  `<TEAM>.<bundle id>`; links under `join/`, `games/` (not `games/guest/`),
+  `stats/`, `leaderboard` and `players` open the app) and
+  `GET /.well-known/assetlinks.json` (with `ANDROID_CERT_SHA256`:
+  `handle_all_urls` and `get_login_creds`). 404 when not configured.
 - **Delete account**: `DELETE /auth/me {confirm: "DELETE"}` (signed in; guests
   too). In one go: the user's claimed players are released through the same
-  `unclaimPlayer` action as a guest logout (so it syncs); sessions, passkeys and
-  reset links are deleted; email, password, guest secret and
+  `unclaimPlayer` action as a guest logout (so it syncs); sessions, passkeys,
+  Apple IDs and reset links are deleted; email, password, guest secret and
   `webauthn_user_id` are cleared, `is_admin` is dropped and `deleted_at` set.
   The `users` row stays as a **tombstone**: `POST /auth/guest {id}` for it
   answers 409 `id_taken`, like any reserved id. Games, scores and players stay
