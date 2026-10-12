@@ -147,6 +147,19 @@ const MIGRATIONS = [
   CREATE TABLE used_challenges (sig TEXT NOT NULL PRIMARY KEY, expires INTEGER NOT NULL);
   CREATE INDEX used_challenges_expires ON used_challenges (expires);
   `,
+  `
+  -- Sign-ins from elsewhere (provider "apple": subject is Apple's user id).
+  -- email is what the provider said, kept for reference: it never signs in.
+  CREATE TABLE identities (
+    provider TEXT NOT NULL, subject TEXT NOT NULL, user_id TEXT NOT NULL,
+    email TEXT, created_at TEXT NOT NULL, last_used_at TEXT,
+    PRIMARY KEY (provider, subject)
+  );
+  CREATE INDEX identities_user_id ON identities (user_id);
+  -- Sessions made by signing in that way ("apple:<subject>") end when it is removed.
+  ALTER TABLE sessions ADD COLUMN identity TEXT;
+  CREATE INDEX sessions_identity ON sessions (identity);
+  `,
 ];
 
 function migrate(sql: DatabaseSync): void {

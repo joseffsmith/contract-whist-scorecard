@@ -601,7 +601,8 @@ export function createSyncClient(
           user.isGuest !== checked.user.isGuest ||
           !!user.isAdmin !== !!checked.user.isAdmin ||
           user.hasPassword !== checked.user.hasPassword ||
-          user.passkeyCount !== checked.user.passkeyCount)
+          user.passkeyCount !== checked.user.passkeyCount ||
+          !!user.hasApple !== !!checked.user.hasApple)
       ) {
         session = { token: checked.token, user };
         saveSession(session);

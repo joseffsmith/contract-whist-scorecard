@@ -81,11 +81,27 @@ serving the app under `/contract-whist/` (`/` redirects there) and proxying
      server at startup) allowed to call the API cross-origin. The iOS and
      Android apps (`mobile/`) are always allowed, as `capacitor://localhost`
      and `https://localhost`. The website needs no CORS.
+   - `APPLE_TEAM_ID` (e.g. `45TRYSJM4M`): turns on
+     `/.well-known/apple-app-site-association`, which lets the iOS app open
+     game and join links and use this site's passkeys. `APPLE_BUNDLE_ID`
+     (default `uk.joseffsmith.whist`) is also what Sign in with Apple tokens
+     must be made for; `APPLE_SERVICES_IDS` (comma list) adds the Services IDs
+     of Sign in with Apple on the web, when there is one.
+   - `ANDROID_CERT_SHA256` (comma list of `AB:CD:...` SHA-256 fingerprints:
+     Play Console, Test and release, App integrity, "App signing key
+     certificate", plus the upload or debug key's for builds signed with
+     those): turns on `/.well-known/assetlinks.json`, so the Android app can
+     open links and use passkeys, and accepts passkeys the app makes.
+     `ANDROID_PACKAGE` defaults to `uk.joseffsmith.whist`.
+
+     Both files must be served at the site's root, which the app doesn't own,
+     so the host nginx forwards them (see "App association files" below).
    - `BACKUP_DAYS` (default `14`, `0` turns backups off): see Backups below.
    - `DATA_DIR` (default `/data`), `PORT` (default 3001) and `HOST` (default
      `127.0.0.1`) rarely need changing.
 
-People sign in with a passkey (Face ID, fingerprint) or email and password.
+People sign in with a passkey (Face ID, fingerprint), with Apple (in the
+iOS app) or with email and password.
 A lost passkey is replaced by making a new one on a device that still signs
 in; there is no recovery for an account whose only passkey is gone, so the
 You page asks for a second one. Signed-in accounts can delete themselves
@@ -103,6 +119,22 @@ the day if its copy exists, and keeps the newest `BACKUP_DAYS` copies. Files
 are private (0600). A failed backup is logged and never stops the server.
 These live on the same volume, so they protect against mistakes, not against
 losing the disk: copy them elsewhere too.
+
+**App association files.** Apple and Google look for them at
+`https://joseffsmith.uk/.well-known/...`, outside `/contract-whist/`, so the
+nginx that serves `joseffsmith.uk` forwards just these two paths to the app
+(port 3018 is the Coolify app's):
+
+```nginx
+location = /.well-known/apple-app-site-association {
+  proxy_pass http://127.0.0.1:3018/contract-whist/api/.well-known/apple-app-site-association;
+}
+location = /.well-known/assetlinks.json {
+  proxy_pass http://127.0.0.1:3018/contract-whist/api/.well-known/assetlinks.json;
+}
+```
+
+Apple's CDN caches the file for a day or so, so changes reach phones slowly.
 
 ### Cutting over from joseffsmith.uk/contract-whist
 

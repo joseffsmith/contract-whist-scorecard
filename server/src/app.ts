@@ -3,6 +3,8 @@ import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { isIP } from "node:net";
 import type { AddressInfo } from "node:net";
+import { appleKeys } from "./apple";
+import type { AppleKeys } from "./apple";
 import { createAuth } from "./auth";
 import { createBackups } from "./backup";
 import { createCors } from "./cors";
@@ -20,6 +22,15 @@ export type ServerOptions = {
   adminBootstrapToken?: string; // POST /auth/claim-admin; the first admin only
   passkeyRpId?: string; // default: the host of publicUrl
   passkeyOrigins?: string[]; // default: the origin of publicUrl
+  // The native apps. Their ids go in the files that let them open links and
+  // use this site's passkeys (/.well-known/...), and an Android app's signing
+  // certificates also become passkey origins.
+  appleTeamId?: string; // e.g. 45TRYSJM4M; no team, no apple-app-site-association
+  appleBundleId?: string; // default uk.joseffsmith.whist
+  appleServicesIds?: string[]; // Sign in with Apple on the web (later)
+  appleKeys?: AppleKeys; // tests; default: fetched from Apple
+  androidPackage?: string; // default uk.joseffsmith.whist
+  androidCertSha256?: string[]; // "AB:CD:..." fingerprints; none, no assetlinks.json
   importToken?: string; // enables POST /admin/import (one-off migration)
   trustProxyHops?: number; // proxies in front (default 1); see README
   backupDays?: number; // copies of the database to keep (default 14, 0 = off)
@@ -31,6 +42,7 @@ export type ServerOptions = {
 };
 
 const DEFAULT_PUBLIC_URL = "https://joseffsmith.uk/contract-whist";
+const DEFAULT_APP_ID = "uk.joseffsmith.whist";
 const PUSH_MAX_BYTES = 256 * 1024;
 const IMPORT_MAX_BYTES = 20 * 1024 * 1024;
 const STREAMED = Symbol("streamed");
@@ -73,6 +85,76 @@ function checkPasskeyConfig({
   }
 }
 
+// "AB:CD:..." (as keytool and Play Console print it), 32 bytes.
+function certFingerprint(given: string): string {
+  const hex = given.trim().toUpperCase();
+  if (!/^[0-9A-F]{2}(:[0-9A-F]{2}){31}$/.test(hex)) {
+    throw new Error(
+      `ANDROID_CERT_SHA256 must list SHA-256 fingerprints like AB:CD:... (got "${given}").`
+    );
+  }
+  return hex;
+}
+
+const notFound = () => {
+  throw new HttpError(404, "Not found.", "not_found");
+};
+
+// What lets the apps open this site's links and use its passkeys. Links to
+// games, joining, stats and the leaderboard open the app; the rest (password
+// resets, admin, guest games that live in the browser) stay on the web.
+function wellKnownFiles({
+  appleAppId,
+  androidPackage,
+  androidCerts,
+  basePath,
+}: {
+  appleAppId?: string;
+  androidPackage: string;
+  androidCerts: string[];
+  basePath: string; // "/contract-whist"
+}) {
+  const aasa = appleAppId && {
+    applinks: {
+      details: [
+        {
+          appIDs: [appleAppId],
+          components: [
+            { "/": `${basePath}/games/guest/*`, exclude: true },
+            ...[
+              "join/*",
+              "games",
+              "games/*",
+              "stats/*",
+              "leaderboard",
+              "players",
+            ].map(
+              (p) => ({ "/": `${basePath}/${p}` })
+            ),
+          ],
+        },
+      ],
+    },
+    webcredentials: { apps: [appleAppId] },
+  };
+  const assetlinks = androidCerts.length
+    ? [
+        {
+          relation: [
+            "delegate_permission/common.handle_all_urls",
+            "delegate_permission/common.get_login_creds",
+          ],
+          target: {
+            namespace: "android_app",
+            package_name: androidPackage,
+            sha256_cert_fingerprints: androidCerts,
+          },
+        },
+      ]
+    : undefined;
+  return { aasa: aasa || undefined, assetlinks };
+}
+
 export async function startServer(opts: ServerOptions) {
   const cors = createCors(opts.corsOrigins); // throws on a bad entry
   const db = openDb(opts.dataDir);
@@ -93,11 +175,32 @@ export async function startServer(opts: ServerOptions) {
     origins: opts.passkeyOrigins?.length ? opts.passkeyOrigins : [site.origin],
   };
   checkPasskeyConfig(passkey);
+  // The iOS app's passkeys report the site's origin, so need nothing more.
+  // Android's report the app's signing certificate instead.
+  const androidCerts = (opts.androidCertSha256 ?? []).map(certFingerprint);
+  passkey.origins = [
+    ...passkey.origins,
+    ...androidCerts.map(
+      (hex) =>
+        `android:apk-key-hash:${Buffer.from(hex.replace(/:/g, ""), "hex").toString("base64url")}`
+    ),
+  ];
+  const bundleId = opts.appleBundleId || DEFAULT_APP_ID;
   const auth = createAuth(db, sync, limiter, {
     adminBootstrapToken: opts.adminBootstrapToken || undefined,
     publicUrl,
     passkey,
+    apple: {
+      audiences: [bundleId, ...(opts.appleServicesIds ?? [])],
+      keys: opts.appleKeys ?? appleKeys(),
+    },
     now: opts.now,
+  });
+  const wellKnown = wellKnownFiles({
+    appleAppId: opts.appleTeamId && `${opts.appleTeamId}.${bundleId}`,
+    androidPackage: opts.androidPackage || DEFAULT_APP_ID,
+    androidCerts,
+    basePath: site.pathname.replace(/\/+$/, ""),
   });
 
   const backups = createBackups(db, {
@@ -138,6 +241,11 @@ export async function startServer(opts: ServerOptions) {
   const routes: Record<string, (c: Ctx) => unknown> = {
     "GET /health": () => ({ ok: true, version: db.version() }),
 
+    // Served at the site's root by the host's web server (see README).
+    "GET /.well-known/apple-app-site-association": () =>
+      wellKnown.aasa ?? notFound(),
+    "GET /.well-known/assetlinks.json": () => wellKnown.assetlinks ?? notFound(),
+
     "POST /auth/guest": (c) => auth.guest(c.req, c.ip),
     "POST /auth/signup": (c) => auth.signup(c.req, c.ip),
     "POST /auth/login": (c) => auth.login(c.req, c.ip),
@@ -147,6 +255,9 @@ export async function startServer(opts: ServerOptions) {
     "POST /auth/password": (c) => auth.password(c.req, c.ip),
     "POST /auth/email": (c) => auth.addEmail(c.req, c.ip),
     "POST /auth/sessions/revoke-others": (c) => auth.revokeOthers(c.req, c.ip),
+    "POST /auth/apple/options": (c) => auth.appleOptions(c.req, c.ip),
+    "POST /auth/apple/verify": (c) => auth.appleVerify(c.req, c.ip),
+    "DELETE /auth/apple": (c) => auth.removeApple(c.req, c.ip),
     "POST /auth/passkey/register/options": (c) =>
       auth.passkeyRegisterOptions(c.req, c.ip),
     "POST /auth/passkey/register/verify": (c) =>

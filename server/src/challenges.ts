@@ -6,7 +6,8 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 const CHALLENGE_MS = 5 * 60 * 1000;
 
-export type ChallengeKind = "register" | "login";
+// "apple": the nonce for a Sign in with Apple request.
+export type ChallengeKind = "register" | "login" | "apple";
 // What a token vouches for.
 export type Challenge = {
   challenge: string; // base64url, what the authenticator signs

@@ -30,6 +30,17 @@ for (const origin of passkeyOrigins ?? []) {
   }
 }
 
+const list = (name: string) =>
+  process.env[name]
+    ?.split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const appleTeamId = process.env.APPLE_TEAM_ID || undefined;
+if (appleTeamId !== undefined && !/^[A-Z0-9]{10}$/.test(appleTeamId)) {
+  throw new Error("APPLE_TEAM_ID must be the 10-character Apple Team ID.");
+}
+
 const server = await startServer({
   port: Number(process.env.PORT ?? 3001),
   host: process.env.HOST || "127.0.0.1",
@@ -39,6 +50,11 @@ const server = await startServer({
   adminBootstrapToken: process.env.ADMIN_BOOTSTRAP_TOKEN,
   passkeyRpId: process.env.PASSKEY_RP_ID || undefined,
   passkeyOrigins,
+  appleTeamId,
+  appleBundleId: process.env.APPLE_BUNDLE_ID || undefined,
+  appleServicesIds: list("APPLE_SERVICES_IDS"),
+  androidPackage: process.env.ANDROID_PACKAGE || undefined,
+  androidCertSha256: list("ANDROID_CERT_SHA256"),
   importToken: process.env.IMPORT_TOKEN,
   backupDays: backupDays === undefined ? undefined : Number(backupDays),
   trustProxyHops: hops === undefined ? undefined : Number(hops),
