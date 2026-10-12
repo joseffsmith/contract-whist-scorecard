@@ -6,7 +6,14 @@ import { newId } from "../lib/dispatch";
 import { alpha, goldButton, t } from "../theme/tokens";
 import { useGuestGames } from "../guest/useGuestGame";
 import { claimPlayer, useMyPlayer } from "../players/account";
-import { passkeysSupported, sync, useAuth, usePreparedPasskeys } from "../sync";
+import {
+  appleSupported,
+  passkeysSupported,
+  sync,
+  useAuth,
+  usePreparedPasskeys,
+} from "../sync";
+import { AppleButton } from "./AppleButton";
 import { ChoosePlayerOrCreate } from "./ChoosePlayerOrCreate";
 import { AccountMovedBanner } from "./chrome/AccountMovedBanner";
 import { Shell } from "./chrome/Shell";
@@ -68,6 +75,9 @@ export const UserLogin = () => {
             : "Log in, or create an account in seconds."
         }
       >
+        {appleSupported() && (
+          <AppleEntry onSignedIn={() => setSettling(true)} />
+        )}
         {passkeysSupported() ? (
           <>
             <PasskeyEntry onSignedIn={() => setSettling(true)} />
@@ -101,6 +111,27 @@ export const UserLogin = () => {
 
 const showError = (e: Error) =>
   enqueueSnackbar(e.message, { variant: "error" });
+
+// Sign in with Apple (the iOS app): signs in to the Apple ID's account, or
+// makes one (a guest with games to keep becomes it). Sync decides which.
+const AppleEntry = ({ onSignedIn }: { onSignedIn: () => void }) => {
+  const [busy, setBusy] = useState(false);
+  const signIn = () => {
+    setBusy(true);
+    sync
+      .signInWithApple()
+      .then((done) => {
+        if (done) onSignedIn();
+      })
+      .catch(showError)
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <AppleButton onClick={signIn} busy={busy} />
+    </div>
+  );
+};
 
 // Sign in with a passkey, or make an account with one. Dismissing the
 // browser's prompt just leaves things as they were.

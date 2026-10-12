@@ -4,6 +4,7 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
   RegistrationResponseJSON,
 } from "@simplewebauthn/browser";
+import { osVersion, platform } from "../lib/platform";
 import { SyncError } from "./transport";
 
 // The browser's passkey prompts (Face ID, fingerprint, ...), behind a small
@@ -54,12 +55,44 @@ export const browserPasskeys: PasskeyApi = {
       : load().then((m) => m.startAuthentication({ optionsJSON })),
 };
 
-// Not in the native app yet: its WebView origin (capacitor://localhost) can't
-// use the joseffsmith.uk passkeys until the native plugin lands (phase 3).
-export const passkeysSupported = () =>
-  import.meta.env.MODE !== "mobile" &&
-  typeof window !== "undefined" &&
-  !!window.PublicKeyCredential;
+// In the native app the WebView's origin (capacitor://localhost) can't use the
+// joseffsmith.uk passkeys, so the app asks the phone itself
+// (src/lib/nativeAuth.ts). Loaded on first use, and only in the mobile build.
+const native =
+  import.meta.env.MODE === "mobile"
+    ? () => import("../lib/nativeAuth")
+    : undefined;
+
+export const nativePasskeys: PasskeyApi = {
+  preload: () => native!(),
+  create: (options) => native!().then((m) => m.createPasskey(options)),
+  get: (options) => native!().then((m) => m.getPasskey(options)),
+};
+
+// What sync uses unless a test gives it something else.
+export const defaultPasskeys = native ? nativePasskeys : browserPasskeys;
+
+// The apps can use passkeys once the site names them in its association files,
+// which needs each platform's signing details on the server: .env.mobile lists
+// the platforms that are set up (VITE_NATIVE_PASSKEYS=ios,android).
+const nativeEnabled = () =>
+  String(import.meta.env.VITE_NATIVE_PASSKEYS ?? "")
+    .split(",")
+    .map((p) => p.trim())
+    .includes(platform());
+
+export const passkeysSupported = () => {
+  if (typeof window === "undefined") return false;
+  if (import.meta.env.MODE !== "mobile") return !!window.PublicKeyCredential;
+  switch (platform()) {
+    case "ios":
+      return nativeEnabled() && osVersion() >= 16;
+    case "android":
+      return nativeEnabled() && osVersion() >= 9;
+    default:
+      return false;
+  }
+};
 
 // The person dismissed the prompt, or it timed out.
 export const isCancelled = (error: unknown) =>
@@ -68,10 +101,14 @@ export const isCancelled = (error: unknown) =>
 
 // The browser's own error messages are for developers.
 export function passkeyError(error: unknown): SyncError {
-  if (
-    (error as { code?: string } | null)?.code ===
-    "ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED"
-  ) {
+  const code = (error as { code?: string } | null)?.code;
+  if (code === "no_passkey") {
+    return new SyncError(
+      "There's no passkey for Whist on this phone.",
+      "no_passkey"
+    );
+  }
+  if (code === "ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED") {
     return new SyncError(
       "This device already has a passkey for you.",
       "passkey_exists"

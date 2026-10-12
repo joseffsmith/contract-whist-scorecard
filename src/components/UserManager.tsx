@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate } from "react-router-dom";
 import { act } from "../lib/dispatch";
 import { accountLabel, useMyPlayer } from "../players/account";
 import {
+  appleSupported,
   passkeysSupported,
   selectHomeGames,
   sync,
@@ -29,6 +30,7 @@ export const UserManager = () => {
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [appleBusy, setAppleBusy] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
   const pending = usePendingCount();
 
@@ -220,6 +222,55 @@ export const UserManager = () => {
         </div>
 
         <PasskeysCard />
+
+        {!user.isGuest &&
+          (user.hasApple ? (
+            <Row
+              label="Remove Sign in with Apple"
+              sub="Your Apple ID signs you in"
+              onClick={() => {
+                if (
+                  window.confirm(
+                    "Remove Sign in with Apple? Other phones signed in with it will be signed out."
+                  )
+                )
+                  sync
+                    .removeApple()
+                    .then(() =>
+                      enqueueSnackbar("Sign in with Apple removed", {
+                        variant: "success",
+                      })
+                    )
+                    .catch((e: Error) =>
+                      enqueueSnackbar(e.message, { variant: "error" })
+                    );
+              }}
+            />
+          ) : (
+            appleSupported() && (
+              <Row
+                label="Add Sign in with Apple"
+                sub="Another way in, with your Apple ID"
+                onClick={() =>
+                  !appleBusy &&
+                  (setAppleBusy(true),
+                  sync
+                    .signInWithApple()
+                    .then(
+                      (done) =>
+                        done &&
+                        enqueueSnackbar("Sign in with Apple added", {
+                          variant: "success",
+                        })
+                    )
+                    .catch((e: Error) =>
+                      enqueueSnackbar(e.message, { variant: "error" })
+                    )
+                    .finally(() => setAppleBusy(false)))
+                }
+              />
+            )
+          ))}
 
         {/* A password only works together with an email. */}
         {!user.isGuest && user.email && (

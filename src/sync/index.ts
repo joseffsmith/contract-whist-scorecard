@@ -25,6 +25,7 @@ export {
 } from "./selectors";
 export type { HomeGame, HomeGames } from "./selectors";
 export { passkeysSupported } from "./passkeys";
+export { appleSupported } from "./apple";
 export { openStorage } from "./storage";
 export type { SyncStorage } from "./storage";
 export { OFFLINE_MESSAGE, SyncError, isNetworkError } from "./transport";

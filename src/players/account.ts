@@ -4,7 +4,8 @@ import { selectPlayersByClaim, sync, useAuth, useSyncView } from "../sync";
 // What to call an account where its email would go. Passkey accounts have no
 // email: use their player's name if we know it.
 export const accountLabel = (user: PublicUser, playerName?: string) =>
-  user.email ?? (playerName || "Passkey account");
+  user.email ??
+  (playerName || (user.hasApple ? "Signed in with Apple" : "Passkey account"));
 
 // Mark a player as this account's own ("that's me"). Rejects with the rule's
 // message if it's already someone else's.

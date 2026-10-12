@@ -42,6 +42,8 @@ export function createFakeServer() {
   const guestSecrets = new Map<string, string>();
   // credential id -> owner, for the passkey endpoints
   const passkeys = new Map<string, { userId: string; name: string | null }>();
+  // Apple's user id -> owner. The fake Apple's identity token is "<sub>|<nonce>".
+  const appleIds = new Map<string, string>();
   let challengeCounter = 0;
 
   const server = {
@@ -228,6 +230,17 @@ export function createFakeServer() {
     const user = token ? tokens.get(token) : undefined;
     const countPasskeys = (userId: string) =>
       [...passkeys.values()].filter((p) => p.userId === userId).length;
+    if (method === "DELETE" && path === "/auth/apple") {
+      if (!user) return fail(401, "Sign in to do that.", "not_signed_in");
+      const sub = [...appleIds].find(([, owner]) => owner === user.id)?.[0];
+      if (!sub) return fail(404, "No Apple ID to remove.", "not_found");
+      appleIds.delete(sub);
+      const without = { ...user };
+      delete without.hasApple;
+      for (const [t, u] of [...tokens])
+        if (u.id === user.id) tokens.set(t, without);
+      return json(200, { ok: true });
+    }
     if (method === "DELETE" && path.startsWith("/auth/passkeys/")) {
       if (!user) return fail(401, "Sign in to do that.", "not_signed_in");
       const id = decodeURIComponent(path.slice("/auth/passkeys/".length));
@@ -453,6 +466,44 @@ export function createFakeServer() {
         tokens.set(token!, owner);
         if (!accounts.some((a) => a.id === owner.id)) accounts.push(owner);
         return json(200, { token: token!, user: owner });
+      }
+      case "/auth/apple/options":
+        if (token && !user)
+          return fail(401, "Sign in to do that.", "not_signed_in");
+        return json(200, {
+          challengeId: `c-${++challengeCounter}`,
+          nonce: `n-${challengeCounter}`,
+        });
+      case "/auth/apple/verify": {
+        if (token && !user)
+          return fail(401, "Sign in to do that.", "not_signed_in");
+        const [sub] = String(body.identityToken).split("|");
+        const ownerId = appleIds.get(sub);
+        if (ownerId) {
+          const owner = accounts.find((a) => a.id === ownerId)!;
+          if (user?.id === ownerId) return json(200, { token: token!, user });
+          if (user && !user.isGuest)
+            return fail(409, "That Apple ID is used.", "apple_taken");
+          const signedIn = { ...owner, hasApple: true };
+          delete (signedIn as Account).password;
+          return json(200, { token: server.tokenFor(signedIn), user: signedIn });
+        }
+        const linked = user
+          ? { ...user, isGuest: false, hasApple: true }
+          : {
+              id: `u-${++userCounter}`,
+              email: null,
+              isGuest: false,
+              hasPassword: false,
+              passkeyCount: 0,
+              hasApple: true,
+            };
+        appleIds.set(sub, linked.id);
+        knownIds.add(linked.id);
+        if (!accounts.some((a) => a.id === linked.id)) accounts.push(linked);
+        if (!user) return json(200, { token: server.tokenFor(linked), user: linked });
+        tokens.set(token!, linked);
+        return json(200, { token: token!, user: linked });
       }
       case "/auth/passkey/login/options":
         return json(200, {

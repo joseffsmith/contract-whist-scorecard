@@ -8,6 +8,8 @@ const plugins = vi.hoisted(() => ({
   hideSplash: vi.fn(() => Promise.resolve()),
   minimize: vi.fn(() => Promise.resolve()),
   backHandler: undefined as undefined | ((e: { canGoBack: boolean }) => void),
+  urlHandler: undefined as undefined | ((e: { url: string }) => void),
+  launchUrl: undefined as undefined | string,
   themeListener: undefined as undefined | (() => void),
   theme: "dark",
 }));
@@ -27,9 +29,12 @@ vi.mock("@capacitor/splash-screen", () => ({
 }));
 vi.mock("@capacitor/app", () => ({
   App: {
-    addListener: (_: string, fn: (e: { canGoBack: boolean }) => void) => {
-      plugins.backHandler = fn;
+    addListener: (event: string, fn: never) => {
+      if (event === "backButton") plugins.backHandler = fn;
+      if (event === "appUrlOpen") plugins.urlHandler = fn;
     },
+    getLaunchUrl: () =>
+      Promise.resolve(plugins.launchUrl ? { url: plugins.launchUrl } : undefined),
     minimizeApp: plugins.minimize,
   },
 }));
@@ -54,7 +59,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   native.on = false;
   plugins.theme = "dark";
-  plugins.backHandler = plugins.themeListener = undefined;
+  plugins.backHandler = plugins.themeListener = plugins.urlHandler = undefined;
+  plugins.launchUrl = undefined;
   classes.clear();
   vi.stubGlobal("window", { history });
   vi.stubGlobal("navigator", { storage: { persist } });
@@ -127,5 +133,25 @@ describe("in the app", () => {
     expect(history.back).toHaveBeenCalledTimes(1);
     plugins.backHandler!({ canGoBack: false });
     expect(plugins.minimize).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("links opened in the app", () => {
+  const site = "https://joseffsmith.uk/contract-whist";
+  beforeEach(() => {
+    vi.stubEnv("VITE_PUBLIC_URL", site);
+  });
+
+  it("shows the page a site link points at, once", async () => {
+    native.on = true;
+    const open = vi.fn();
+    plugins.launchUrl = `${site}/join/abc`;
+    initNative(open);
+    await new Promise((r) => setTimeout(r, 0));
+    plugins.urlHandler!({ url: `${site}/join/abc` }); // the same link again
+    plugins.urlHandler!({ url: `${site}/stats/p1?x=1` });
+    plugins.urlHandler!({ url: "https://example.com/contract-whist/join/abc" });
+    plugins.urlHandler!({ url: "https://joseffsmith.uk/golf" });
+    expect(open.mock.calls).toEqual([["/join/abc"], ["/stats/p1?x=1"]]);
   });
 });

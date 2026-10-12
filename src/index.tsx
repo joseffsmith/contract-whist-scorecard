@@ -7,7 +7,7 @@ import { SnackbarProvider } from "notistack";
 import { initNative } from "./lib/native";
 import { router } from "./Routes";
 
-initNative();
+initNative((route) => router.navigate(route));
 
 const container = document.getElementById("root");
 const root = createRoot(container!);
