@@ -108,6 +108,12 @@ export const Privacy = () => (
           see them, as on a scoreboard. Your email address, password and
           passkeys are never shown to anyone.
         </p>
+        <p style={{ margin: "8px 0 0" }}>
+          In the iPhone and Android app, while you show a game's invite, your
+          phone tells phones nearby which game it is and your player name over
+          Bluetooth, so they can join. Nothing is sent over Bluetooth at any
+          other time, and Whist never uses it to work out where you are.
+        </p>
       </Section>
 
       <Section title="Where it's kept">
