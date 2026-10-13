@@ -6,7 +6,7 @@ import { Shell } from "./chrome/Shell";
 // The privacy policy the App Store and Google Play link to
 // (https://joseffsmith.uk/contract-whist/privacy). Keep it true to what the
 // server and app actually do; see docs/backend/SPEC.md.
-export const CONTACT_EMAIL = "CONTACT_EMAIL_TODO";
+export const CONTACT_EMAIL = "joseffsmith@outlook.com";
 const UPDATED = "11 October 2026";
 
 const Section = ({ title, children }: { title: string; children: ReactNode }) => (
