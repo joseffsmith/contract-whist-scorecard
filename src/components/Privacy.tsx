@@ -7,7 +7,7 @@ import { Shell } from "./chrome/Shell";
 // (https://joseffsmith.uk/contract-whist/privacy). Keep it true to what the
 // server and app actually do; see docs/backend/SPEC.md.
 export const CONTACT_EMAIL = "joseffsmith@outlook.com";
-const UPDATED = "11 October 2026";
+const UPDATED = "13 October 2026";
 
 const Section = ({ title, children }: { title: string; children: ReactNode }) => (
   <section style={{ marginTop: 22 }}>
