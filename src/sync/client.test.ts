@@ -2281,6 +2281,23 @@ describe("Sign in with Apple", () => {
     expect(verifies()).toHaveLength(0);
   });
 
+  it("undoes only the new account it was asked about", async () => {
+    const apple = fakeApple();
+    const client = await signedInClient({ deps: { apple } });
+    const made = (await client.signInWithApple())!;
+    expect(made.isNew).toBe(true);
+    const wrong = await client
+      .undoNewAppleAccount("someone-else")
+      .catch((e) => e);
+    expect(wrong.code).toBe("not_signed_in");
+    expect(client.getAuth().user!.id).toBe(made.user.id);
+
+    await client.undoNewAppleAccount(made.user.id);
+    expect(client.getAuth().user).toBeNull();
+    const sent = server.requests.find((r) => r.path === "/auth/apple/undo")!;
+    expect(sent.body).toEqual({ userId: made.user.id });
+  });
+
   it("removes the Apple ID", async () => {
     const apple = fakeApple();
     const client = await signedInClient({ deps: { apple } });

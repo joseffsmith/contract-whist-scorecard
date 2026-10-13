@@ -134,6 +134,9 @@ export type SyncClient = {
   signInWithApple(): Promise<{ user: PublicUser; isNew: boolean } | null>;
   // Unlinks the account's Apple ID (refused if it's the only way in).
   removeApple(): Promise<void>;
+  // Undoes the empty account signInWithApple just made (`userId`, from its
+  // answer), then signs out. Refused for any other or non-empty account.
+  undoNewAppleAccount(userId: string): Promise<void>;
   listPasskeys(): Promise<PasskeyInfo[]>;
   deletePasskey(id: string): Promise<void>;
   // Deletes the account for good, then signs out on this device.
@@ -1399,6 +1402,14 @@ export function createSyncClient(
     registerPasskey,
     logInWithPasskey,
     signInWithApple,
+    async undoNewAppleAccount(userId) {
+      await begin();
+      const asked = session;
+      if (!asked?.token || asked.user.id !== userId)
+        throw new SyncError("Your session changed.", "not_signed_in");
+      await authRequest("/auth/apple/undo", { userId }, asked.token, null);
+      if (session?.token === asked.token) setSession(null);
+    },
     async removeApple() {
       await begin();
       const asked = session;

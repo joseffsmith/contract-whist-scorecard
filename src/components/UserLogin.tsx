@@ -37,9 +37,9 @@ export const UserLogin = () => {
   // Set once "Play as guest" has been tapped: the guest then picks who they
   // are and goes on, instead of seeing the "add an email" form.
   const [playingAsGuest, setPlayingAsGuest] = useState(false);
-  // Sign in with Apple made a brand-new account: ask whether they meant an
-  // older one before going on.
-  const [askIfNew, setAskIfNew] = useState(false);
+  // Sign in with Apple made a brand-new account (its id): ask whether they
+  // meant an older one before going on. Only ever for that account.
+  const [askIfNew, setAskIfNew] = useState<string | null>(null);
   // They had played before: once they sign in to that account, add Apple to it.
   const [linkApple, setLinkApple] = useState(false);
 
@@ -47,18 +47,26 @@ export const UserLogin = () => {
     setSettling(true);
     if (!linkApple) return;
     setLinkApple(false);
+    const later = () =>
+      enqueueSnackbar("You can add Sign in with Apple on the You page", {
+        variant: "info",
+      });
     sync
       .signInWithApple()
       .then((done) =>
-        enqueueSnackbar(
-          done
-            ? "Sign in with Apple added to your account"
-            : "You can add Sign in with Apple on the You page",
-          { variant: done ? "success" : "info" }
-        )
+        done
+          ? enqueueSnackbar("Sign in with Apple added to your account", {
+              variant: "success",
+            })
+          : later()
       )
-      .catch(showError);
+      .catch(later);
   };
+
+  // Signed out, or into another account: the question no longer applies.
+  useEffect(() => {
+    if (askIfNew && user?.id !== askIfNew) setAskIfNew(null);
+  }, [askIfNew, user?.id]);
 
   const { player: myPlayer, isLoading } = useMyPlayer();
 
@@ -68,13 +76,14 @@ export const UserLogin = () => {
     return () => clearTimeout(tmr);
   }, [settling]);
 
-  if (askIfNew && user && !user.isGuest) {
+  if (askIfNew && user?.id === askIfNew) {
     return (
       <Shell scroll>
         <FirstTimeHere
-          onNew={() => setAskIfNew(false)}
+          userId={askIfNew}
+          onNew={() => setAskIfNew(null)}
           onReturning={() => {
-            setAskIfNew(false);
+            setAskIfNew(null);
             setLinkApple(true);
           }}
         />
@@ -119,8 +128,8 @@ export const UserLogin = () => {
         ) : (
           appleSupported() && (
             <AppleEntry
-              onSignedIn={(isNew) => {
-                if (isNew) setAskIfNew(true);
+              onSignedIn={(done) => {
+                if (done.isNew) setAskIfNew(done.user.id);
                 setSettling(true);
               }}
             />
@@ -165,7 +174,7 @@ const showError = (e: Error) =>
 const AppleEntry = ({
   onSignedIn,
 }: {
-  onSignedIn: (isNew: boolean) => void;
+  onSignedIn: (done: { user: { id: string }; isNew: boolean }) => void;
 }) => {
   const [busy, setBusy] = useState(false);
   const signIn = () => {
@@ -173,7 +182,7 @@ const AppleEntry = ({
     sync
       .signInWithApple()
       .then((done) => {
-        if (done) onSignedIn(done.isNew);
+        if (done) onSignedIn(done);
       })
       .catch(showError)
       .finally(() => setBusy(false));
@@ -204,11 +213,14 @@ const Notice = ({ children }: { children: React.ReactNode }) => (
 
 // Sign in with Apple made a brand-new account. Someone who already plays
 // (with a passkey or email) most likely meant that account: the empty new
-// one is deleted and they sign in as before, and Apple is added to it then.
+// one is undone (the server refuses unless it is still empty) and they sign
+// in as before, and Apple is added to it then.
 const FirstTimeHere = ({
+  userId,
   onNew,
   onReturning,
 }: {
+  userId: string;
   onNew: () => void;
   onReturning: () => void;
 }) => {
@@ -216,7 +228,7 @@ const FirstTimeHere = ({
   const returning = () => {
     setBusy(true);
     sync
-      .deleteAccount()
+      .undoNewAppleAccount(userId)
       .then(onReturning)
       .catch((e: Error) => {
         setBusy(false);
