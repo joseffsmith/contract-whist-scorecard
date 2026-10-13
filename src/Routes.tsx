@@ -12,6 +12,7 @@ import { Leaderboard } from "./components/Leaderboard";
 import { JoinGame } from "./components/JoinGame";
 import { PlayerStats } from "./components/PlayerStats";
 import { Players } from "./components/Players";
+import { Privacy } from "./components/Privacy";
 import { ResetPassword } from "./components/ResetPassword";
 import { UserLogin } from "./components/UserLogin";
 import { UserManager } from "./components/UserManager";
@@ -21,6 +22,7 @@ export const router = createBrowserRouter(
   [
     { path: "/login", element: <UserLogin /> },
     { path: "/admin", element: <AdminSetup /> },
+    { path: "/privacy", element: <Privacy /> },
     { path: "/reset", element: <ResetPassword /> },
     { path: "/reset/:token", element: <ResetPassword /> },
     {

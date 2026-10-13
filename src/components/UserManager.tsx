@@ -439,6 +439,19 @@ export const UserManager = () => {
         {deleteOpen && (
           <DeleteAccountSheet onClose={() => setDeleteOpen(false)} />
         )}
+        <Link
+          to="/privacy"
+          style={{
+            display: "block",
+            textAlign: "center",
+            padding: "16px 0 4px",
+            fontSize: 12,
+            color: t.gold,
+            opacity: 0.85,
+          }}
+        >
+          Privacy
+        </Link>
       </div>
     </>
   );
