@@ -1407,7 +1407,12 @@ export function createSyncClient(
       const asked = session;
       if (!asked?.token || asked.user.id !== userId)
         throw new SyncError("Your session changed.", "not_signed_in");
-      await authRequest("/auth/apple/undo", { userId }, asked.token, null);
+      try {
+        await authRequest("/auth/apple/undo", { userId }, asked.token, null);
+      } catch (error) {
+        // Already gone (a retry after a lost reply): that's what was asked.
+        if (!(error instanceof SyncError && error.status === 401)) throw error;
+      }
       if (session?.token === asked.token) setSession(null);
     },
     async removeApple() {

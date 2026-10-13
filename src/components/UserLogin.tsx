@@ -10,6 +10,7 @@ import {
   appleSupported,
   passkeysSupported,
   sync,
+  SyncError,
   useAuth,
   usePreparedPasskeys,
 } from "../sync";
@@ -60,7 +61,10 @@ export const UserLogin = () => {
             })
           : later()
       )
-      .catch(later);
+      // A refusal (e.g. that account already has another Apple ID) says why.
+      .catch((e: Error) =>
+        e instanceof SyncError && e.status === 409 ? showError(e) : later()
+      );
   };
 
   // Signed out, or into another account: the question no longer applies.

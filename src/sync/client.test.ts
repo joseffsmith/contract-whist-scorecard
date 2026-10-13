@@ -2294,6 +2294,12 @@ describe("Sign in with Apple", () => {
 
     await client.undoNewAppleAccount(made.user.id);
     expect(client.getAuth().user).toBeNull();
+    // A retry after a lost reply finds it gone: fine.
+    const again = await signedInClient({ deps: { apple } });
+    const second = (await again.signInWithApple())!;
+    server.forgetTokens();
+    await again.undoNewAppleAccount(second.user.id);
+    expect(again.getAuth().user).toBeNull();
     const sent = server.requests.find((r) => r.path === "/auth/apple/undo")!;
     expect(sent.body).toEqual({ userId: made.user.id });
   });
