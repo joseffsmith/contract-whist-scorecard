@@ -52,11 +52,16 @@ public class TableNearbyPlugin extends Plugin {
     static final UUID SERVICE = UUID.fromString("e62c7db0-f38e-4db6-8651-aa677b9ea2c8");
     static final UUID TABLE = UUID.fromString("3ccf0d62-8326-4755-9836-e4f29387516d");
 
+    // Touched from the plugin thread and the main looper (Bluetooth callbacks).
     private BluetoothGattServer server;
     private BluetoothLeAdvertiser advertiser;
-    private byte[] payload;
+    private volatile byte[] payload;
     // The callback advertising was started with: stopping needs the same one.
     private AdvertiseCallback advertising;
+    // Which start is current: callbacks from an older one do nothing.
+    private int generation;
+    // The startHosting call not yet settled.
+    private PluginCall waiting;
 
     @PluginMethod
     public void startHosting(PluginCall call) {
@@ -68,7 +73,8 @@ public class TableNearbyPlugin extends Plugin {
         String name = call.getString("name", "");
         if (name.length() > 40) name = name.substring(0, 40);
         try {
-            payload = new JSONObject().put("g", gameId).put("n", name).toString().getBytes(StandardCharsets.UTF_8);
+            // Kept on the call until hosting starts (host() clears the old one).
+            call.getData().put("bytes", new JSONObject().put("g", gameId).put("n", name).toString());
         } catch (JSONException e) {
             call.reject("Bad options.", "bad_options");
             return;
@@ -92,31 +98,38 @@ public class TableNearbyPlugin extends Plugin {
 
     @PluginMethod
     public void stopHosting(PluginCall call) {
-        stop();
+        synchronized (this) {
+            stop();
+        }
         call.resolve();
     }
 
     @Override
     protected void handleOnDestroy() {
-        stop();
+        synchronized (this) {
+            stop();
+        }
     }
 
     @SuppressLint("MissingPermission") // checked in startHosting
-    private void host(PluginCall call) {
+    private synchronized void host(PluginCall call) {
         stop();
+        final int mine = ++generation;
+        waiting = call;
+        payload = call.getString("bytes", "").getBytes(StandardCharsets.UTF_8);
         BluetoothManager manager = (BluetoothManager) getContext().getSystemService(Context.BLUETOOTH_SERVICE);
         BluetoothAdapter adapter = manager == null ? null : manager.getAdapter();
         if (adapter == null) {
-            call.reject("This phone can't do Bluetooth LE.", "unsupported");
+            fail("This phone can't do Bluetooth LE.", "unsupported");
             return;
         }
         if (!adapter.isEnabled()) {
-            call.reject("Bluetooth is off.", "off");
+            fail("Bluetooth is off.", "off");
             return;
         }
         advertiser = adapter.getBluetoothLeAdvertiser();
         if (advertiser == null) {
-            call.reject("This phone can't advertise over Bluetooth LE.", "unsupported");
+            fail("This phone can't advertise over Bluetooth LE.", "unsupported");
             return;
         }
         server = manager.openGattServer(
@@ -146,10 +159,23 @@ public class TableNearbyPlugin extends Plugin {
                         );
                     }
                 }
+
+                // Advertise only once the table can be read.
+                @Override
+                public void onServiceAdded(int status, BluetoothGattService service) {
+                    synchronized (TableNearbyPlugin.this) {
+                        if (mine != generation) return;
+                        if (status != BluetoothGatt.GATT_SUCCESS) {
+                            fail("Couldn't start Bluetooth.", "failed");
+                            return;
+                        }
+                        advertise(mine);
+                    }
+                }
             }
         );
         if (server == null) {
-            call.reject("Couldn't start Bluetooth.", "failed");
+            fail("Couldn't start Bluetooth.", "failed");
             return;
         }
         BluetoothGattService service = new BluetoothGattService(SERVICE, BluetoothGattService.SERVICE_TYPE_PRIMARY);
@@ -160,8 +186,11 @@ public class TableNearbyPlugin extends Plugin {
                 BluetoothGattCharacteristic.PERMISSION_READ
             )
         );
-        server.addService(service);
+        server.addService(service); // advertising starts in onServiceAdded
+    }
 
+    @SuppressLint("MissingPermission")
+    private void advertise(int mine) {
         AdvertiseSettings settings = new AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
             .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
@@ -175,20 +204,40 @@ public class TableNearbyPlugin extends Plugin {
         advertising = new AdvertiseCallback() {
                 @Override
                 public void onStartSuccess(AdvertiseSettings settingsInEffect) {
-                    call.resolve();
+                    synchronized (TableNearbyPlugin.this) {
+                        if (mine != generation || waiting == null) return;
+                        waiting.resolve();
+                        waiting = null;
+                    }
                 }
 
                 @Override
                 public void onStartFailure(int errorCode) {
-                    stop();
-                    call.reject("Couldn't advertise over Bluetooth (" + errorCode + ").", "failed");
+                    synchronized (TableNearbyPlugin.this) {
+                        if (mine != generation) return;
+                        fail("Couldn't advertise over Bluetooth (" + errorCode + ").", "failed");
+                    }
                 }
             };
         advertiser.startAdvertising(settings, data, advertising);
     }
 
+    // Settles the waiting call with an error and stops. Callers hold the lock.
+    private void fail(String message, String code) {
+        PluginCall call = waiting;
+        waiting = null;
+        stop();
+        if (call != null) call.reject(message, code);
+    }
+
+    // Callers hold the lock (or are host(), which does).
     @SuppressLint("MissingPermission")
     private void stop() {
+        generation++;
+        if (waiting != null) {
+            waiting.reject("Stopped.", "stopped");
+            waiting = null;
+        }
         payload = null;
         try {
             if (advertiser != null && advertising != null) advertiser.stopAdvertising(advertising);

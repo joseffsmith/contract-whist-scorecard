@@ -136,13 +136,18 @@ const NearbyTablesSheet = ({ onClose }: { onClose: () => void }) => {
 
 // While the invite is open, the host's phone tells phones nearby about the
 // game. Shows how that's going under the QR code (the app only).
+// Only while the invite is on screen: hosting pauses when the app is in the
+// background (iOS stops advertising then anyway; Android wouldn't).
 export const HostNearby = ({ gameId }: { gameId: string }) => {
-  const { player } = useMyPlayer();
+  const { player, isLoading } = useMyPlayer();
   const name = player?.name ?? "";
   const [state, setState] = useState<"starting" | "on" | string>("starting");
+  const [attempt, setAttempt] = useState(0);
+  const visible = useVisible();
 
   useEffect(() => {
-    if (!nearbySupported()) return;
+    // Wait for the name, so hosting doesn't restart when it arrives.
+    if (!nearbySupported() || isLoading || !visible) return;
     let stop: (() => void) | undefined;
     let gone = false;
     setState("starting");
@@ -157,7 +162,7 @@ export const HostNearby = ({ gameId }: { gameId: string }) => {
       gone = true;
       stop?.();
     };
-  }, [gameId, name]);
+  }, [gameId, name, isLoading, visible, attempt]);
 
   if (!nearbySupported()) return null;
   return (
@@ -170,11 +175,40 @@ export const HostNearby = ({ gameId }: { gameId: string }) => {
         lineHeight: 1.4,
       }}
     >
-      {state === "on"
-        ? "Phones nearby can find this table too: Home, Join a table nearby."
-        : state === "starting"
-        ? "Letting phones nearby find this table…"
-        : state}
+      {state === "on" ? (
+        "Phones nearby can find this table too: Home, Join a table nearby."
+      ) : state === "starting" ? (
+        "Letting phones nearby find this table…"
+      ) : (
+        <>
+          {state}{" "}
+          <button
+            onClick={() => setAttempt((n) => n + 1)}
+            style={{
+              background: "none",
+              border: "none",
+              color: t.gold,
+              fontWeight: 600,
+              fontSize: 12,
+              padding: 0,
+            }}
+          >
+            Try again
+          </button>
+        </>
+      )}
     </div>
   );
+};
+
+const useVisible = () => {
+  const [visible, setVisible] = useState(
+    () => document.visibilityState !== "hidden"
+  );
+  useEffect(() => {
+    const update = () => setVisible(document.visibilityState !== "hidden");
+    document.addEventListener("visibilitychange", update);
+    return () => document.removeEventListener("visibilitychange", update);
+  }, []);
+  return visible;
 };

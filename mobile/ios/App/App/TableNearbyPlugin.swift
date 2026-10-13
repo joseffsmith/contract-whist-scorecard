@@ -25,6 +25,9 @@ public class TableNearbyPlugin: CAPPlugin, CAPBridgedPlugin, CBPeripheralManager
     // The startHosting call waiting for Bluetooth to be ready, or for
     // advertising to start.
     private var pending: CAPPluginCall?
+    // The service being set up; nil once stopped, so a didAdd that arrives
+    // after a stop doesn't start advertising again.
+    private var added: CBService?
 
     @objc func startHosting(_ call: CAPPluginCall) {
         guard
@@ -60,21 +63,21 @@ public class TableNearbyPlugin: CAPPlugin, CAPBridgedPlugin, CBPeripheralManager
         pending?.reject("Stopped.", "stopped")
         pending = nil
         payload = nil
+        added = nil
         manager?.stopAdvertising()
         manager?.removeAllServices()
     }
 
     public func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
+        // Bluetooth back on while hosting (iOS drops services when it goes
+        // off): set the table up again.
+        if pending == nil, payload != nil, peripheral.state == .poweredOn {
+            return addService(peripheral)
+        }
         guard let call = pending else { return }
         switch peripheral.state {
         case .poweredOn:
-            peripheral.stopAdvertising()
-            peripheral.removeAllServices()
-            let characteristic = CBMutableCharacteristic(
-                type: Self.table, properties: [.read], value: nil, permissions: [.readable])
-            let service = CBMutableService(type: Self.service, primary: true)
-            service.characteristics = [characteristic]
-            peripheral.add(service)  // advertising starts in didAdd
+            addService(peripheral)  // advertising starts in didAdd
         case .unauthorized:
             pending = nil
             call.reject("Bluetooth isn't allowed for Whist.", "unauthorized")
@@ -89,9 +92,21 @@ public class TableNearbyPlugin: CAPPlugin, CAPBridgedPlugin, CBPeripheralManager
         }
     }
 
+    private func addService(_ peripheral: CBPeripheralManager) {
+        peripheral.stopAdvertising()
+        peripheral.removeAllServices()
+        let characteristic = CBMutableCharacteristic(
+            type: Self.table, properties: [.read], value: nil, permissions: [.readable])
+        let service = CBMutableService(type: Self.service, primary: true)
+        service.characteristics = [characteristic]
+        added = service
+        peripheral.add(service)
+    }
+
     public func peripheralManager(
         _ peripheral: CBPeripheralManager, didAdd service: CBService, error: Error?
     ) {
+        guard added != nil, payload != nil else { return }  // stopped since
         if let error {
             pending?.reject(error.localizedDescription, "failed")
             pending = nil

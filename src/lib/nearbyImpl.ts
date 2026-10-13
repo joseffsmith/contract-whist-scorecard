@@ -1,6 +1,7 @@
 import { BleClient } from "@capacitor-community/bluetooth-le";
 import type { ScanResult } from "@capacitor-community/bluetooth-le";
 import { registerPlugin } from "@capacitor/core";
+import { osVersion, platform } from "./platform";
 
 // Tables nearby, over Bluetooth LE: the host's phone advertises the Whist
 // table service (our TableNearby plugin: ios/App/App/TableNearbyPlugin.swift,
@@ -26,6 +27,8 @@ export class NearbyError extends Error {
 
 const MESSAGES: Record<string, string> = {
   off: "Turn on Bluetooth to use tables nearby.",
+  location:
+    "Turn on Location to find tables nearby (Android 11 and older need it).",
   unauthorized: "Allow Bluetooth for Whist in Settings to use tables nearby.",
   unsupported: "This phone can't use tables nearby.",
   failed: "Couldn't use Bluetooth. Try again.",
@@ -92,6 +95,13 @@ export async function scan(onTable: (table: Table) => void) {
     await initialized;
     if (!(await BleClient.isEnabled()))
       throw new NearbyError(MESSAGES.off, "off");
+    // Before Android 12, scans find nothing while Location is off.
+    if (
+      platform() === "android" &&
+      osVersion() < 12 &&
+      !(await BleClient.isLocationEnabled())
+    )
+      throw new NearbyError(MESSAGES.location, "location");
   } catch (error) {
     initialized = undefined;
     throw error instanceof NearbyError ? error : explain(error);
