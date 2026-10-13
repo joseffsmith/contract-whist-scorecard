@@ -10,6 +10,7 @@ import {
   appleSupported,
   passkeysSupported,
   sync,
+  SyncError,
   useAuth,
   usePreparedPasskeys,
 } from "../sync";
@@ -37,6 +38,39 @@ export const UserLogin = () => {
   // Set once "Play as guest" has been tapped: the guest then picks who they
   // are and goes on, instead of seeing the "add an email" form.
   const [playingAsGuest, setPlayingAsGuest] = useState(false);
+  // Sign in with Apple made a brand-new account (its id): ask whether they
+  // meant an older one before going on. Only ever for that account.
+  const [askIfNew, setAskIfNew] = useState<string | null>(null);
+  // They had played before: once they sign in to that account, add Apple to it.
+  const [linkApple, setLinkApple] = useState(false);
+
+  const signedIn = () => {
+    setSettling(true);
+    if (!linkApple) return;
+    setLinkApple(false);
+    const later = () =>
+      enqueueSnackbar("You can add Sign in with Apple on the You page", {
+        variant: "info",
+      });
+    sync
+      .signInWithApple()
+      .then((done) =>
+        done
+          ? enqueueSnackbar("Sign in with Apple added to your account", {
+              variant: "success",
+            })
+          : later()
+      )
+      // A refusal (e.g. that account already has another Apple ID) says why.
+      .catch((e: Error) =>
+        e instanceof SyncError && e.status === 409 ? showError(e) : later()
+      );
+  };
+
+  // Signed out, or into another account: the question no longer applies.
+  useEffect(() => {
+    if (askIfNew && user?.id !== askIfNew) setAskIfNew(null);
+  }, [askIfNew, user?.id]);
 
   const { player: myPlayer, isLoading } = useMyPlayer();
 
@@ -45,6 +79,21 @@ export const UserLogin = () => {
     const tmr = setTimeout(() => setSettling(false), HANDOFF_GRACE_MS);
     return () => clearTimeout(tmr);
   }, [settling]);
+
+  if (askIfNew && user?.id === askIfNew) {
+    return (
+      <Shell scroll>
+        <FirstTimeHere
+          userId={askIfNew}
+          onNew={() => setAskIfNew(null)}
+          onReturning={() => {
+            setAskIfNew(null);
+            setLinkApple(true);
+          }}
+        />
+      </Shell>
+    );
+  }
 
   // Guests (joined by QR) see the email form so they can add an account.
   if (user && (!user.isGuest || playingAsGuest)) {
@@ -75,16 +124,28 @@ export const UserLogin = () => {
             : "Log in, or create an account in seconds."
         }
       >
-        {appleSupported() && (
-          <AppleEntry onSignedIn={() => setSettling(true)} />
+        {linkApple ? (
+          <Notice>
+            Sign in the way you did before, and your Apple ID will be added to
+            that account.
+          </Notice>
+        ) : (
+          appleSupported() && (
+            <AppleEntry
+              onSignedIn={(done) => {
+                if (done.isNew) setAskIfNew(done.user.id);
+                setSettling(true);
+              }}
+            />
+          )
         )}
         {passkeysSupported() ? (
           <>
-            <PasskeyEntry onSignedIn={() => setSettling(true)} />
-            <EmailEntry onSignedIn={() => setSettling(true)} />
+            <PasskeyEntry onSignedIn={signedIn} />
+            <EmailEntry onSignedIn={signedIn} />
           </>
         ) : (
-          <PasswordStep onSignedIn={() => setSettling(true)} />
+          <PasswordStep onSignedIn={signedIn} />
         )}
         {!user && <GuestEntry onStart={() => setPlayingAsGuest(true)} />}
         {!user && localGames.length > 0 && (
@@ -114,14 +175,18 @@ const showError = (e: Error) =>
 
 // Sign in with Apple (the iOS app): signs in to the Apple ID's account, or
 // makes one (a guest with games to keep becomes it). Sync decides which.
-const AppleEntry = ({ onSignedIn }: { onSignedIn: () => void }) => {
+const AppleEntry = ({
+  onSignedIn,
+}: {
+  onSignedIn: (done: { user: { id: string }; isNew: boolean }) => void;
+}) => {
   const [busy, setBusy] = useState(false);
   const signIn = () => {
     setBusy(true);
     sync
       .signInWithApple()
       .then((done) => {
-        if (done) onSignedIn();
+        if (done) onSignedIn(done);
       })
       .catch(showError)
       .finally(() => setBusy(false));
@@ -130,6 +195,101 @@ const AppleEntry = ({ onSignedIn }: { onSignedIn: () => void }) => {
     <div style={{ marginBottom: 12 }}>
       <AppleButton onClick={signIn} busy={busy} />
     </div>
+  );
+};
+
+const Notice = ({ children }: { children: React.ReactNode }) => (
+  <div
+    style={{
+      padding: 14,
+      marginBottom: 14,
+      borderRadius: 12,
+      border: `1px solid ${alpha(t.gold, 0.4)}`,
+      fontSize: 13,
+      color: t.cream,
+      lineHeight: 1.45,
+      textAlign: "center",
+    }}
+  >
+    {children}
+  </div>
+);
+
+// Sign in with Apple made a brand-new account. Someone who already plays
+// (with a passkey or email) most likely meant that account: the empty new
+// one is undone (the server refuses unless it is still empty) and they sign
+// in as before, and Apple is added to it then.
+const FirstTimeHere = ({
+  userId,
+  onNew,
+  onReturning,
+}: {
+  userId: string;
+  onNew: () => void;
+  onReturning: () => void;
+}) => {
+  const [busy, setBusy] = useState(false);
+  const returning = () => {
+    setBusy(true);
+    sync
+      .undoNewAppleAccount(userId)
+      .then(onReturning)
+      .catch((e: Error) => {
+        setBusy(false);
+        showError(e);
+      });
+  };
+  return (
+    <LoginFrame
+      title="First time here?"
+      subtitle="Your Apple ID is new to Whist."
+    >
+      <button
+        onClick={onNew}
+        disabled={busy}
+        style={{
+          ...goldButton,
+          width: "100%",
+          padding: "16px 0",
+          borderRadius: 12,
+          fontSize: 16,
+        }}
+      >
+        Yes, I'm new
+      </button>
+      <button
+        onClick={returning}
+        disabled={busy}
+        style={{
+          width: "100%",
+          marginTop: 8,
+          padding: "13px 0",
+          borderRadius: 12,
+          border: `1px solid ${alpha(t.gold, 0.4)}`,
+          background: "transparent",
+          color: t.cream,
+          fontFamily: t.display,
+          fontSize: 15,
+          fontWeight: 600,
+          opacity: busy ? 0.6 : 1,
+        }}
+      >
+        {busy ? "…" : "I've played before"}
+      </button>
+      <div
+        style={{
+          fontSize: 12,
+          color: t.cream,
+          opacity: 0.55,
+          marginTop: 10,
+          textAlign: "center",
+          lineHeight: 1.4,
+        }}
+      >
+        Played before with a passkey or email? Sign in that way and your Apple
+        ID will be added to that account, so your games stay together.
+      </div>
+    </LoginFrame>
   );
 };
 

@@ -258,6 +258,7 @@ export async function startServer(opts: ServerOptions) {
     "POST /auth/apple/options": (c) => auth.appleOptions(c.req, c.ip),
     "POST /auth/apple/verify": (c) => auth.appleVerify(c.req, c.ip),
     "DELETE /auth/apple": (c) => auth.removeApple(c.req, c.ip),
+    "POST /auth/apple/undo": (c) => auth.undoNewApple(c.req, c.ip),
     "POST /auth/passkey/register/options": (c) =>
       auth.passkeyRegisterOptions(c.req, c.ip),
     "POST /auth/passkey/register/verify": (c) =>

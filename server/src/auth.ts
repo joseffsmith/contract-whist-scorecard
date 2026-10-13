@@ -49,6 +49,7 @@ const RESET_LINK_MS = 7 * 24 * 60 * 60 * 1000;
 const TOO_MANY = "Too many attempts. Try again in a few minutes.";
 const RP_NAME = "Whist";
 const MAX_PASSKEYS = 20; // per account
+const UNDO_APPLE_MS = 30 * 60 * 1000; // a new Apple account can be undone
 
 type UserRow = {
   id: string;
@@ -60,6 +61,7 @@ type UserRow = {
   guest_secret_hash: string | null;
   webauthn_user_id: string | null;
   deleted_at: string | null;
+  created_at: string;
 };
 type PasskeyRow = {
   id: string; // credential id, base64url
@@ -984,7 +986,7 @@ export function createAuth(
             link(id);
             return createSession(id, made);
           });
-          return respond(userById(id)!, token);
+          return { ...respond(userById(id)!, token), isNew: true };
         } catch (e) {
           throw raced(e);
         }
@@ -1018,6 +1020,49 @@ export function createAuth(
       } catch (e) {
         throw raced(e);
       }
+    },
+
+    // "I've played before": undoes the account Sign in with Apple has just
+    // made, so the Apple ID can go to the person's real account instead.
+    // Only for an account that is still empty: made with an Apple ID in the
+    // last 30 minutes, with no email, password or passkey, and nothing done
+    // with it (no players, games or synced changes). `userId` must be the
+    // account the app asked about, so it can't hit any other.
+    async undoNewApple(req: IncomingMessage, ip: string) {
+      const user = requireUser(req);
+      tooMany(`apple-undo:${ip}`, 10);
+      if ((await readJson(req)).userId !== user.id) {
+        throw new HttpError(409, "Your session changed.", "account_changed");
+      }
+      const state = db.readState();
+      const fresh =
+        (opts.now?.() ?? new Date()).getTime() - Date.parse(user.created_at) <
+          UNDO_APPLE_MS &&
+        !user.is_guest &&
+        !user.email &&
+        !user.password_hash &&
+        hasApple(user.id) &&
+        passkeyCount(user.id) === 0 &&
+        !state.where("players", "claimedBy", user.id).length &&
+        !state.where("games", "createdBy", user.id).length &&
+        !db
+          .stmt("SELECT 1 FROM applied_actions WHERE user_id = ?")
+          .get(user.id);
+      if (!fresh) {
+        throw new HttpError(
+          409,
+          "This account is already in use, so it can't be undone.",
+          "not_empty"
+        );
+      }
+      db.transaction(() => {
+        deleteSessions(user.id);
+        db.stmt("DELETE FROM identities WHERE user_id = ?").run(user.id);
+        db.stmt(
+          "UPDATE users SET webauthn_user_id = NULL, deleted_at = ? WHERE id = ?"
+        ).run(new Date().toISOString(), user.id);
+      });
+      return { ok: true };
     },
 
     // Unlinks the account's Apple ID, unless it is the last way in. Whoever

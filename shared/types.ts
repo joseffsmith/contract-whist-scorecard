@@ -182,7 +182,12 @@ export type PublicUser = {
 
 // ── HTTP API payloads (prefix /contract-whist/api) ──────────────────────
 
-export type AuthResponse = { token: string; user: PublicUser };
+export type AuthResponse = {
+  token: string;
+  user: PublicUser;
+  // Sign in with Apple only: a brand-new, empty account was made for it.
+  isNew?: boolean;
+};
 
 export type ChangeSet = {
   version: number; // server version after these changes

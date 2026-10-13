@@ -474,6 +474,16 @@ export function createFakeServer() {
           challengeId: `c-${++challengeCounter}`,
           nonce: `n-${challengeCounter}`,
         });
+      case "/auth/apple/undo": {
+        if (!user) return fail(401, "Sign in to do that.", "not_signed_in");
+        if (body.userId !== user.id)
+          return fail(409, "Your session changed.", "account_changed");
+        for (const [sub, owner] of [...appleIds])
+          if (owner === user.id) appleIds.delete(sub);
+        for (const [t, u] of [...tokens])
+          if (u.id === user.id) tokens.delete(t);
+        return json(200, { ok: true });
+      }
       case "/auth/apple/verify": {
         if (token && !user)
           return fail(401, "Sign in to do that.", "not_signed_in");
@@ -486,7 +496,10 @@ export function createFakeServer() {
             return fail(409, "That Apple ID is used.", "apple_taken");
           const signedIn = { ...owner, hasApple: true };
           delete (signedIn as Account).password;
-          return json(200, { token: server.tokenFor(signedIn), user: signedIn });
+          return json(200, {
+            token: server.tokenFor(signedIn),
+            user: signedIn,
+          });
         }
         const linked = user
           ? { ...user, isGuest: false, hasApple: true }
@@ -501,7 +514,12 @@ export function createFakeServer() {
         appleIds.set(sub, linked.id);
         knownIds.add(linked.id);
         if (!accounts.some((a) => a.id === linked.id)) accounts.push(linked);
-        if (!user) return json(200, { token: server.tokenFor(linked), user: linked });
+        if (!user)
+          return json(200, {
+            token: server.tokenFor(linked),
+            user: linked,
+            isNew: true,
+          });
         tokens.set(token!, linked);
         return json(200, { token: token!, user: linked });
       }

@@ -22,7 +22,8 @@ function fakeApple(now?: () => number) {
     fetches++;
     return Promise.resolve({ keys: published } as never);
   };
-  const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  const b64 = (o: object) =>
+    Buffer.from(JSON.stringify(o)).toString("base64url");
   return {
     keys: appleKeys(jwks, now),
     get fetches() {
@@ -34,7 +35,10 @@ function fakeApple(now?: () => number) {
     },
     token(
       claims: Record<string, unknown>,
-      { key = privateKey, header = {} }: { key?: KeyObject; header?: object } = {}
+      {
+        key = privateKey,
+        header = {},
+      }: { key?: KeyObject; header?: object } = {}
     ) {
       const now = Math.floor(Date.now() / 1000);
       const head = b64({ alg: "RS256", kid, ...header });
@@ -164,6 +168,9 @@ describe("Sign in with Apple", () => {
     const again = await appleSignIn(api, apple, "001");
     expect(again.status).toBe(200);
     expect(again.body.user.id).toBe(first.body.user.id);
+    // Only the first one made an account.
+    expect(first.body.isNew).toBe(true);
+    expect(again.body.isNew).toBeUndefined();
     expect(again.body.token).not.toBe(first.body.token);
     const me = await api.get("/auth/me", again.body.token);
     expect(me.body.user.hasApple).toBe(true);
@@ -179,6 +186,7 @@ describe("Sign in with Apple", () => {
       isGuest: false,
       hasApple: true,
     });
+    expect(res.body.isNew).toBeUndefined(); // the guest's own account
     expect((await api.get("/auth/me", guest.token)).status).toBe(401);
     expect((await api.get("/auth/me", res.body.token)).status).toBe(200);
   });
@@ -253,9 +261,9 @@ describe("Sign in with Apple", () => {
       "challenge_expired"
     );
     const forged = (await api.post("/auth/apple/options", {})).body;
-    expect(
-      (await send(forged.challengeId + "x", forged.nonce)).body.code
-    ).toBe("challenge_expired");
+    expect((await send(forged.challengeId + "x", forged.nonce)).body.code).toBe(
+      "challenge_expired"
+    );
   });
 
   it("lets a passkey go when Apple is another way in", async () => {
@@ -299,6 +307,79 @@ describe("Sign in with Apple", () => {
     const fresh = await appleSignIn(api, apple, "001");
     expect(fresh.status).toBe(200);
     expect(fresh.body.user.id).not.toBe(account.user.id);
+  });
+});
+
+describe("undoing a new Apple account", () => {
+  it("undoes an empty one, so the Apple ID can go to an older account", async () => {
+    const { api, apple } = await setup();
+    const made = (await appleSignIn(api, apple, "001")).body;
+    expect(made.isNew).toBe(true);
+    const undo = await api.post(
+      "/auth/apple/undo",
+      { userId: made.user.id },
+      made.token
+    );
+    expect(undo.status).toBe(200);
+    expect((await api.get("/auth/me", made.token)).status).toBe(401);
+    // Their real account takes the Apple ID.
+    const older = await api.signup("joe@example.com");
+    const linked = await appleSignIn(api, apple, "001", older.token);
+    expect(linked.body.user).toMatchObject({
+      id: older.user.id,
+      hasApple: true,
+    });
+  });
+
+  it("refuses any other account, or one already in use", async () => {
+    const { api, apple } = await setup();
+    const undo = (token: string, userId: string) =>
+      api.post("/auth/apple/undo", { userId }, token);
+
+    // Not the account the app asked about.
+    const made = (await appleSignIn(api, apple, "001")).body;
+    expect((await undo(made.token, "someone-else")).body.code).toBe(
+      "account_changed"
+    );
+    // Once it has a player, it's in use.
+    await api.push(
+      made.token,
+      action("createPlayer", {
+        playerId: randomUUID(),
+        name: "Jo",
+        claim: true,
+      })
+    );
+    expect((await undo(made.token, made.user.id)).body.code).toBe("not_empty");
+
+    // An account with a password (Apple added to it) is never undone.
+    const older = await api.signup("joe@example.com");
+    await appleSignIn(api, apple, "002", older.token);
+    expect((await undo(older.token, older.user.id)).body.code).toBe(
+      "not_empty"
+    );
+    // Nor a guest.
+    const guest = await api.guest();
+    expect((await undo(guest.token, guest.user.id)).body.code).toBe(
+      "not_empty"
+    );
+  });
+
+  it("only within half an hour", async () => {
+    let now = Date.now();
+    const apple = fakeApple();
+    const api = await start({
+      appleKeys: apple.keys,
+      now: () => new Date(now),
+    });
+    const made = (await appleSignIn(api, apple, "001")).body;
+    now += 31 * 60 * 1000;
+    const res = await api.post(
+      "/auth/apple/undo",
+      { userId: made.user.id },
+      made.token
+    );
+    expect(res.body.code).toBe("not_empty");
   });
 });
 
