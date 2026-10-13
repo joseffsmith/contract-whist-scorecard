@@ -2,10 +2,12 @@
 
 Status: phases 1 (passkeys and account deletion on the web) and 2 (the
 Capacitor shell, CI builds, CORS, safe areas, haptics) are built and deployed.
-Phase 3 (Sign in with Apple, passkeys in the app, universal links) is built;
-it needs a build signed with the team to try on a phone, and for Android the
-signing key's fingerprint on the server. See `README.md` for how to build and
-ship the app. Phases 4 to 6 are still to do. The app lives in this `mobile/`
+Phase 3 (Sign in with Apple, passkeys in the app, universal links) is built
+and tried on an iPhone; Android needs the signing key's fingerprint on the
+server. Phase 4 (Bluetooth "join a table nearby") is built and tried between
+an iPhone and a Mac standing in for a second phone; Android is untested on a
+device. See `README.md` for how to build and ship the app. Phases 5 and 6 are
+still to do. The app lives in this `mobile/`
 folder.
 
 ## What we want

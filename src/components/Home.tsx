@@ -5,6 +5,7 @@ import { alpha, goldButton, suitColor, t } from "../theme/tokens";
 import { summarizeGame } from "../utils/gameStatus";
 import { AccountMovedBanner } from "./chrome/AccountMovedBanner";
 import { LocalGamesBanner } from "./chrome/LocalGamesBanner";
+import { NearbyTablesButton } from "./NearbyTables";
 
 export const Home = () => {
   const nav = useNavigate();
@@ -37,6 +38,7 @@ export const Home = () => {
         ) : (
           <EmptyActive />
         )}
+        <NearbyTablesButton />
 
         <div
           style={{

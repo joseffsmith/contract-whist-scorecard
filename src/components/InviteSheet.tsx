@@ -4,6 +4,7 @@ import { appUrl } from "../lib/paths";
 import { alpha, t } from "../theme/tokens";
 import { QrCode } from "./chrome/QrCode";
 import { Sheet } from "./chrome/Sheet";
+import { HostNearby } from "./NearbyTables";
 
 export const joinUrl = (gameId: string) => appUrl(`join/${gameId}`);
 
@@ -76,6 +77,7 @@ export const InviteSheet = ({
         <div style={{ display: "flex", justifyContent: "center" }}>
           <QrCode value={url} size={Math.min(260, window.innerWidth - 80)} />
         </div>
+        <HostNearby gameId={gameId} />
         <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
           <button
             onClick={share}
