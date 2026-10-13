@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { hostTable, nearbySupported, scanTables } from "../lib/nearby";
+import {
+  hostTable,
+  nearbySupported,
+  scanTables,
+  stopHostingNow,
+} from "../lib/nearby";
 import type { Table } from "../lib/nearby";
 import { useMyPlayer } from "../players/account";
 import { alpha, goldButton, t } from "../theme/tokens";
@@ -160,7 +165,9 @@ export const HostNearby = ({ gameId }: { gameId: string }) => {
       .catch((e: Error) => !gone && setState(e.message));
     return () => {
       gone = true;
-      stop?.();
+      // Even if the start hasn't finished or failed: the phone must not be
+      // left hosting (or set to host once Bluetooth comes on).
+      (stop ?? stopHostingNow)();
     };
   }, [gameId, name, isLoading, visible, attempt]);
 

@@ -25,9 +25,9 @@ public class TableNearbyPlugin: CAPPlugin, CAPBridgedPlugin, CBPeripheralManager
     // The startHosting call waiting for Bluetooth to be ready, or for
     // advertising to start.
     private var pending: CAPPluginCall?
-    // The service being set up; nil once stopped, so a didAdd that arrives
-    // after a stop doesn't start advertising again.
-    private var added: CBService?
+    // Services added and not yet confirmed (didAdd comes in order): only the
+    // latest one's confirmation starts advertising, and none once stopped.
+    private var adding = 0
 
     @objc func startHosting(_ call: CAPPluginCall) {
         guard
@@ -63,7 +63,6 @@ public class TableNearbyPlugin: CAPPlugin, CAPBridgedPlugin, CBPeripheralManager
         pending?.reject("Stopped.", "stopped")
         pending = nil
         payload = nil
-        added = nil
         manager?.stopAdvertising()
         manager?.removeAllServices()
     }
@@ -74,19 +73,16 @@ public class TableNearbyPlugin: CAPPlugin, CAPBridgedPlugin, CBPeripheralManager
         if pending == nil, payload != nil, peripheral.state == .poweredOn {
             return addService(peripheral)
         }
-        guard let call = pending else { return }
+        guard pending != nil else { return }
         switch peripheral.state {
         case .poweredOn:
             addService(peripheral)  // advertising starts in didAdd
         case .unauthorized:
-            pending = nil
-            call.reject("Bluetooth isn't allowed for Whist.", "unauthorized")
+            fail("Bluetooth isn't allowed for Whist.", "unauthorized")
         case .poweredOff:
-            pending = nil
-            call.reject("Bluetooth is off.", "off")
+            fail("Bluetooth is off.", "off")
         case .unsupported:
-            pending = nil
-            call.reject("This phone can't do Bluetooth LE.", "unsupported")
+            fail("This phone can't do Bluetooth LE.", "unsupported")
         default:
             break  // resetting or unknown: wait for the next update
         }
@@ -99,18 +95,17 @@ public class TableNearbyPlugin: CAPPlugin, CAPBridgedPlugin, CBPeripheralManager
             type: Self.table, properties: [.read], value: nil, permissions: [.readable])
         let service = CBMutableService(type: Self.service, primary: true)
         service.characteristics = [characteristic]
-        added = service
+        adding += 1
         peripheral.add(service)
     }
 
     public func peripheralManager(
         _ peripheral: CBPeripheralManager, didAdd service: CBService, error: Error?
     ) {
-        guard added != nil, payload != nil else { return }  // stopped since
+        adding = max(0, adding - 1)
+        guard adding == 0, payload != nil else { return }  // superseded, or stopped
         if let error {
-            pending?.reject(error.localizedDescription, "failed")
-            pending = nil
-            return
+            return fail(error.localizedDescription, "failed")
         }
         peripheral.startAdvertising([
             CBAdvertisementDataServiceUUIDsKey: [Self.service],
@@ -122,11 +117,22 @@ public class TableNearbyPlugin: CAPPlugin, CAPBridgedPlugin, CBPeripheralManager
         _ peripheral: CBPeripheralManager, error: Error?
     ) {
         if let error {
-            pending?.reject(error.localizedDescription, "failed")
+            fail(error.localizedDescription, "failed")
         } else {
             pending?.resolve()
+            pending = nil
         }
+    }
+
+    // A start that failed is over: nothing to set up again when Bluetooth
+    // comes back on.
+    private func fail(_ message: String, _ code: String) {
+        let call = pending
         pending = nil
+        payload = nil
+        manager?.stopAdvertising()
+        manager?.removeAllServices()
+        call?.reject(message, code)
     }
 
     // Answers in pieces when the reader's MTU is smaller than the payload.

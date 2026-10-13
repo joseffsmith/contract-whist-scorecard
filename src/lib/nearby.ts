@@ -18,6 +18,11 @@ export const hostTable = (gameId: string, name: string) =>
     ? impl().then((m) => m.host(gameId, name))
     : Promise.reject(new Error("Not available here."));
 
+// Stops hosting whatever state it's in (a start still in progress, or failed).
+export const stopHostingNow = () => {
+  impl?.().then((m) => m.stopHosting());
+};
+
 // Reports the tables nearby as they're found; resolves to a function that stops.
 export const scanTables = (onTable: (table: Table) => void) =>
   impl

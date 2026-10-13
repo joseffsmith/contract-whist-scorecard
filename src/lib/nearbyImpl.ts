@@ -63,6 +63,10 @@ export async function host(gameId: string, name: string) {
   };
 }
 
+export const stopHosting = () => {
+  TableNearby.stopHosting().catch(() => {});
+};
+
 let initialized: Promise<void> | undefined;
 
 const decoder = new TextDecoder();

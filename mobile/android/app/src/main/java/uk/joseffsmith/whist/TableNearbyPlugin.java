@@ -79,7 +79,11 @@ public class TableNearbyPlugin extends Plugin {
             call.reject("Bad options.", "bad_options");
             return;
         }
-        // Android 12+ asks for "Nearby devices" first.
+        // Android 12+ asks for "Nearby devices" first. A stop while it asks
+        // means don't start (see afterPermission).
+        synchronized (this) {
+            call.getData().put("generation", generation);
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && getPermissionState("bluetooth") != PermissionState.GRANTED) {
             requestPermissionForAlias("bluetooth", call, "afterPermission");
             return;
@@ -89,6 +93,12 @@ public class TableNearbyPlugin extends Plugin {
 
     @PermissionCallback
     private void afterPermission(PluginCall call) {
+        synchronized (this) {
+            if (call.getInt("generation", -1) != generation) {
+                call.reject("Stopped.", "stopped");
+                return;
+            }
+        }
         if (getPermissionState("bluetooth") == PermissionState.GRANTED) {
             host(call);
         } else {
