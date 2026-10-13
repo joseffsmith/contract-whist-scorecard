@@ -95,9 +95,9 @@ export const Privacy = () => (
             token, so you stay signed in.
           </li>
           <li>
-            <b>Server logs:</b> the web server records IP addresses and the
-            pages asked for, kept for up to two weeks to keep the service
-            working and safe.
+            <b>Server logs:</b> the web servers record IP addresses and the
+            pages asked for, to keep the service working and safe. Old
+            entries are deleted automatically as new ones come in.
           </li>
         </ul>
       </Section>
