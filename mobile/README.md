@@ -213,6 +213,27 @@ an account also revokes its Sign in with Apple tokens (guideline 5.1.1(v)).
 That needs a Sign in with Apple key from the developer account; see
 `docs/backend/SPEC.md`.
 
+## Tables nearby (Bluetooth)
+
+While a host has a game's invite open, their phone advertises the Whist table
+service over Bluetooth LE and serves `{"g": gameId, "n": host's name}` from one
+readable characteristic (`TableNearbyPlugin`, Swift and Java, registered like
+`WhistAuth`). On another phone, Home, **Join a table nearby** scans for it with
+`@capacitor-community/bluetooth-le`, reads each table and offers to join; that
+opens the same `/join/<game>` page as the QR code. The JS side is
+`../src/lib/nearby.ts`. The service and characteristic UUIDs appear in all
+three places; keep them in step.
+
+- iOS only advertises while the app is open, which is when the invite is on
+  screen anyway. `NSBluetoothAlwaysUsageDescription` is in `Info.plist`.
+- Android 12+ asks for "Nearby devices" (`BLUETOOTH_SCAN` with
+  `neverForLocation`, `BLUETOOTH_ADVERTISE`, `BLUETOOTH_CONNECT`); Android 11
+  and older need location to scan, so that permission is capped at SDK 30.
+- To test with one phone, a Mac can play the other: a small CoreBluetooth
+  program (scan for the service and read it, or advertise it) works, packaged
+  as an `.app` with its own `NSBluetoothAlwaysUsageDescription`, since macOS
+  kills a bare command-line tool that touches Bluetooth.
+
 ## Good to know
 
 - **Origins.** The WebView's origin is `capacitor://localhost` on iOS and

@@ -6,5 +6,6 @@ import UIKit
 class WhistBridgeViewController: CAPBridgeViewController {
     override open func capacitorDidLoad() {
         bridge?.registerPluginInstance(WhistAuthPlugin())
+        bridge?.registerPluginInstance(TableNearbyPlugin())
     }
 }
