@@ -214,6 +214,9 @@ every rebase. Ops must not depend on row iteration order (sort ids).
     email or password) with the Apple ID; a guest: upgraded in place (same id,
     new session, guest sessions retired); an account: linked, same session,
     unless it already has an Apple ID (409 `has_apple`).
+    Only the signed-out, unknown case adds `isNew: true` to the response: the
+    app then asks "First time here?" and, for someone who has played before,
+    deletes the empty account so they can sign in as before and add Apple.
   - Sessions made by signing in with Apple record `sessions.identity =
     'apple:<sub>'`. `DELETE /auth/apple` unlinks the account's Apple ID and
     deletes those sessions, except the caller's own (404 `not_found` if none;

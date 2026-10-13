@@ -501,7 +501,12 @@ export function createFakeServer() {
         appleIds.set(sub, linked.id);
         knownIds.add(linked.id);
         if (!accounts.some((a) => a.id === linked.id)) accounts.push(linked);
-        if (!user) return json(200, { token: server.tokenFor(linked), user: linked });
+        if (!user)
+          return json(200, {
+            token: server.tokenFor(linked),
+            user: linked,
+            isNew: true,
+          });
         tokens.set(token!, linked);
         return json(200, { token: token!, user: linked });
       }

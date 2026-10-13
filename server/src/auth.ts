@@ -984,7 +984,7 @@ export function createAuth(
             link(id);
             return createSession(id, made);
           });
-          return respond(userById(id)!, token);
+          return { ...respond(userById(id)!, token), isNew: true };
         } catch (e) {
           throw raced(e);
         }

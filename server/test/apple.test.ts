@@ -164,6 +164,9 @@ describe("Sign in with Apple", () => {
     const again = await appleSignIn(api, apple, "001");
     expect(again.status).toBe(200);
     expect(again.body.user.id).toBe(first.body.user.id);
+    // Only the first one made an account.
+    expect(first.body.isNew).toBe(true);
+    expect(again.body.isNew).toBeUndefined();
     expect(again.body.token).not.toBe(first.body.token);
     const me = await api.get("/auth/me", again.body.token);
     expect(me.body.user.hasApple).toBe(true);
@@ -179,6 +182,7 @@ describe("Sign in with Apple", () => {
       isGuest: false,
       hasApple: true,
     });
+    expect(res.body.isNew).toBeUndefined(); // the guest's own account
     expect((await api.get("/auth/me", guest.token)).status).toBe(401);
     expect((await api.get("/auth/me", res.body.token)).status).toBe(200);
   });

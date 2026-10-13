@@ -129,8 +129,9 @@ export type SyncClient = {
   // Sign in with Apple. Its account if the Apple ID has one (a guest's player
   // moves over, as with logIn); otherwise the Apple ID is added to the account,
   // or makes the guest an account (as registerPasskey does) or a new one. Null
-  // when the person dismisses Apple's sheet.
-  signInWithApple(): Promise<PublicUser | null>;
+  // when the person dismisses Apple's sheet. `isNew`: a brand-new, empty
+  // account was made, so the person may really have meant an older one.
+  signInWithApple(): Promise<{ user: PublicUser; isNew: boolean } | null>;
   // Unlinks the account's Apple ID (refused if it's the only way in).
   removeApple(): Promise<void>;
   listPasskeys(): Promise<PasskeyInfo[]>;
@@ -1306,18 +1307,17 @@ export function createSyncClient(
     if (registerMode().token !== token)
       throw new SyncError("Your session changed. Try again.", "not_signed_in");
     const left = session;
-    const done = adopt(
-      await authRequest(
-        "/auth/apple/verify",
-        { challengeId, identityToken: credential.identityToken },
-        token ?? undefined
-      )
+    const response = await authRequest(
+      "/auth/apple/verify",
+      { challengeId, identityToken: credential.identityToken },
+      token ?? undefined
     );
+    const user = adopt(response);
     // Signed in elsewhere or made a new account: end the empty guest's session.
     if (!token && left?.token && left.token !== session?.token) {
       transport.post("/auth/logout", {}, left.token).catch(() => {});
     }
-    return done;
+    return { user, isNew: response.isNew === true };
   }
 
   return {

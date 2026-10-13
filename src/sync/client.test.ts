@@ -2233,8 +2233,11 @@ describe("Sign in with Apple", () => {
       claim: true,
     });
 
-    const user = await client.signInWithApple();
-    expect(user).toMatchObject({ id: guest.id, hasApple: true });
+    const done = await client.signInWithApple();
+    expect(done).toMatchObject({
+      user: { id: guest.id, hasApple: true },
+      isNew: false,
+    });
     const at = (path: string) =>
       server.requests.findIndex((r) => r.path === path);
     expect(at("/sync/push")).toBeGreaterThan(-1);
@@ -2256,11 +2259,12 @@ describe("Sign in with Apple", () => {
   it("signs in to the Apple ID's account from an empty guest, which is signed out", async () => {
     const apple = fakeApple();
     const first = await signedInClient({ deps: { apple } });
-    const account = (await first.signInWithApple())!;
+    const made = (await first.signInWithApple())!;
+    expect(made.isNew).toBe(true); // an empty guest: a brand-new account
 
     const second = await signedInClient({ deps: { apple } });
-    const user = await second.signInWithApple();
-    expect(user!.id).toBe(account.id);
+    const again = await second.signInWithApple();
+    expect(again).toEqual({ user: made.user, isNew: false });
     expect(verifies()[1].token).toBeUndefined();
     await waitFor(() =>
       server.requests.some((r) => r.path === "/auth/logout" && !!r.token)
